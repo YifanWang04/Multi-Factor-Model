@@ -42,7 +42,6 @@ try:
     from openpyxl.chart import LineChart, Reference
     from openpyxl.chart.axis import Scaling
     from openpyxl.formatting.rule import ColorScaleRule
-    from openpyxl.utils.dataframe import dataframe_to_rows
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
@@ -357,57 +356,102 @@ def write_excel_with_format(out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df
             sheet4_df.to_excel(writer, sheet_name=SHEET4_NAME)
         return
 
+    def _cell_val(v):
+        """统一处理 NaN / None，写入 Excel 单元格前转成 None。"""
+        if v is None:
+            return None
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return v
+
+    def _write_timeseries_ws(ws, df):
+        """
+        将时序 DataFrame 写入 worksheet，保证：
+          行 1 = 表头（"date" + 因子名列）
+          行 2+ = 数据（日期字符串 + 数值）
+        完全不依赖 dataframe_to_rows，避免版本差异产生空行。
+        """
+        ws.column_dimensions["A"].width = 14
+        ws.cell(row=1, column=1, value="date")
+        for c_idx, col_name in enumerate(df.columns, 2):
+            ws.cell(row=1, column=c_idx, value=col_name)
+        for r_idx, (idx_val, row_vals) in enumerate(zip(df.index, df.values), 2):
+            if isinstance(idx_val, (pd.Timestamp, datetime)):
+                date_str = idx_val.strftime("%Y-%m-%d")
+            else:
+                date_str = str(idx_val) if idx_val is not None else None
+            ws.cell(row=r_idx, column=1, value=date_str)
+            for c_idx, val in enumerate(row_vals, 2):
+                ws.cell(row=r_idx, column=c_idx, value=_cell_val(val))
+
     wb = openpyxl.Workbook()
     ws1 = wb.active
     ws1.title = SHEET1_NAME
 
-    # Sheet1: 表头 + 数据
-    for r_idx, row in enumerate(dataframe_to_rows(sheet1_df, index=True, header=True), 1):
-        for c_idx, value in enumerate(row, 1):
-            ws1.cell(row=r_idx, column=c_idx, value=value)
+    # Sheet1: 行1 = 表头（index列名 + 各指标列名），行2+ = 数据
+    ws1.cell(row=1, column=1, value=sheet1_df.index.name or "factor_name")
+    for c_idx, col_name in enumerate(sheet1_df.columns, 2):
+        ws1.cell(row=1, column=c_idx, value=col_name)
+    for r_idx, (idx_val, row_vals) in enumerate(zip(sheet1_df.index, sheet1_df.values), 2):
+        ws1.cell(row=r_idx, column=1, value=idx_val)
+        for c_idx, val in enumerate(row_vals, 2):
+            ws1.cell(row=r_idx, column=c_idx, value=_cell_val(val))
 
-    # Sheet1: 色阶按列竖向应用（每一列独立色阶；p 值越小越绿，其余越大越红）
+    # Sheet1: 色阶按列竖向应用，3-color Green-Yellow-Red
+    #   p 值：低 = 好 → min=绿, mid=黄, max=红
+    #   其余指标：高 = 好 → min=红, mid=黄, max=绿
+    # 颜色沿用 Excel 内置 Green-Yellow-Red 色板
+    _GREEN  = "63BE7B"
+    _YELLOW = "FFEB84"
+    _RED    = "F8696B"
+
     p_value_cols = ["ic_p_value", "rank_ic_p_value", "group_rank_ic_p_value"]
     col_names = list(sheet1_df.columns)
     data_rows = len(sheet1_df) + 1
     for c_idx, col_name in enumerate(col_names, 2):
-        cell_range = f"{openpyxl.utils.get_column_letter(c_idx)}2:{openpyxl.utils.get_column_letter(c_idx)}{data_rows}"
+        cell_range = (
+            f"{openpyxl.utils.get_column_letter(c_idx)}2:"
+            f"{openpyxl.utils.get_column_letter(c_idx)}{data_rows}"
+        )
         if col_name in p_value_cols:
+            # p 值：越小越好 → min 绿, max 红
             ws1.conditional_formatting.add(
                 cell_range,
                 ColorScaleRule(
-                    start_type="min", start_color="00FF00",
-                    end_type="max", end_color="FF0000",
+                    start_type="min",        start_color=_GREEN,
+                    mid_type="percentile",   mid_value=50,  mid_color=_YELLOW,
+                    end_type="max",          end_color=_RED,
                 ),
             )
         else:
+            # 一般指标：越大越好 → min 红, max 绿
             ws1.conditional_formatting.add(
                 cell_range,
                 ColorScaleRule(
-                    start_type="min", start_color="FFFFFF",
-                    end_type="max", end_color="FF0000",
+                    start_type="min",        start_color=_RED,
+                    mid_type="percentile",   mid_value=50,  mid_color=_YELLOW,
+                    end_type="max",          end_color=_GREEN,
                 ),
             )
 
     # Sheet2: 行=调仓日，列=因子名，值=累计 IC
     ws2 = wb.create_sheet(SHEET2_NAME)
-    ws2.column_dimensions["A"].width = 14
-    for r_idx, row in enumerate(dataframe_to_rows(sheet2_df, index=True, header=True), 1):
-        for c_idx, value in enumerate(row, 1):
-            if value is not None and pd.isna(value) and c_idx > 1:
-                val = None
-            elif isinstance(value, (pd.Timestamp, datetime)):
-                val = value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else value
-            else:
-                val = value
-            ws2.cell(row=r_idx, column=c_idx, value=val)
+    _write_timeseries_ws(ws2, sheet2_df)
 
     n_rows = len(sheet2_df) + 1
     n_cols = len(sheet2_df.columns) + 1
     chart2 = LineChart()
     chart2.title = "Cumulative IC"
-    chart2.x_axis.title = "时间"
+    chart2.x_axis.title = "日期"
     chart2.y_axis.title = "累计IC"
+    chart2.width = 28
+    chart2.height = 16
+    _lbl_skip2 = max(1, len(sheet2_df) // 12)
+    chart2.x_axis.tickLblSkip = _lbl_skip2
+    chart2.x_axis.tickMarkSkip = _lbl_skip2
     if Scaling is not None:
         vals = sheet2_df.values
         valid = vals[np.isfinite(vals)] if vals.size else []
@@ -429,23 +473,19 @@ def write_excel_with_format(out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df
 
     # Sheet3: 行=调仓日，列=因子名，值=多头累计超额收益率（多头 - 市场基准）
     ws3 = wb.create_sheet(SHEET3_NAME)
-    ws3.column_dimensions["A"].width = 14
-    for r_idx, row in enumerate(dataframe_to_rows(sheet3_df, index=True, header=True), 1):
-        for c_idx, value in enumerate(row, 1):
-            if value is not None and pd.isna(value) and c_idx > 1:
-                val = None
-            elif isinstance(value, (pd.Timestamp, datetime)):
-                val = value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else value
-            else:
-                val = value
-            ws3.cell(row=r_idx, column=c_idx, value=val)
+    _write_timeseries_ws(ws3, sheet3_df)
 
     n_rows3 = len(sheet3_df) + 1
     n_cols3 = len(sheet3_df.columns) + 1
     chart3 = LineChart()
     chart3.title = "Long Cumulative Excess Return (vs Market)"
-    chart3.x_axis.title = "时间"
+    chart3.x_axis.title = "日期"
     chart3.y_axis.title = "累计超额收益率"
+    chart3.width = 28
+    chart3.height = 16
+    _lbl_skip3 = max(1, len(sheet3_df) // 12)
+    chart3.x_axis.tickLblSkip = _lbl_skip3
+    chart3.x_axis.tickMarkSkip = _lbl_skip3
     if Scaling is not None:
         vals3 = sheet3_df.values
         valid3 = vals3[np.isfinite(vals3)] if vals3.size else []
@@ -467,23 +507,19 @@ def write_excel_with_format(out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df
 
     # Sheet4: 行=调仓日，列=因子名，值=多头累计收益率
     ws4 = wb.create_sheet(SHEET4_NAME)
-    ws4.column_dimensions["A"].width = 14
-    for r_idx, row in enumerate(dataframe_to_rows(sheet4_df, index=True, header=True), 1):
-        for c_idx, value in enumerate(row, 1):
-            if value is not None and pd.isna(value) and c_idx > 1:
-                val = None
-            elif isinstance(value, (pd.Timestamp, datetime)):
-                val = value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else value
-            else:
-                val = value
-            ws4.cell(row=r_idx, column=c_idx, value=val)
+    _write_timeseries_ws(ws4, sheet4_df)
 
     n_rows4 = len(sheet4_df) + 1
     n_cols4 = len(sheet4_df.columns) + 1
     chart4 = LineChart()
     chart4.title = "Long Cumulative Return"
-    chart4.x_axis.title = "时间"
+    chart4.x_axis.title = "日期"
     chart4.y_axis.title = "累计收益率"
+    chart4.width = 28
+    chart4.height = 16
+    _lbl_skip4 = max(1, len(sheet4_df) // 12)
+    chart4.x_axis.tickLblSkip = _lbl_skip4
+    chart4.x_axis.tickMarkSkip = _lbl_skip4
     if Scaling is not None:
         vals4 = sheet4_df.values
         valid4 = vals4[np.isfinite(vals4)] if vals4.size else []
