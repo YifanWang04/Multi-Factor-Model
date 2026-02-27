@@ -536,6 +536,7 @@ def run_collinearity_analysis(
         PRICE_FILE,
         RETURN_COLUMN,
         OUTPUT_DIR,
+        COLLINEARITY_FACTOR_INDICES,
         get_factor_display_name,
         get_all_factor_files,
     )
@@ -559,12 +560,19 @@ def run_collinearity_analysis(
     print("加载收益率数据...")
     ret = load_return_data(price_file, RETURN_COLUMN)
 
-    factor_dict = {}
     factor_list = list(iter_factors_from_files(factor_files, get_factor_display_name))
     if not factor_list:
         raise ValueError("未找到任何有效因子数据，请检查因子 Excel 文件。")
-    for name, factor in factor_list:
-        factor_dict[name] = factor
+    # 若配置了共线性分析因子下标（1-based），只保留这些因子
+    n_total = len(factor_list)
+    if COLLINEARITY_FACTOR_INDICES:
+        indices_0based = [i - 1 for i in COLLINEARITY_FACTOR_INDICES if 1 <= i <= n_total]
+        factor_list = [factor_list[j] for j in indices_0based]
+        if not factor_list:
+            raise ValueError(
+                f"COLLINEARITY_FACTOR_INDICES={COLLINEARITY_FACTOR_INDICES} 在总因子数 {n_total} 下无有效下标（1-based）。"
+            )
+    factor_dict = {name: factor for name, factor in factor_list}
 
     print(f"因子数量  : {len(factor_dict)}")
     print(f"调仓周期  : {rebalance_period} 天")

@@ -6,7 +6,7 @@
 import os
 
 # 项目根目录
-PROJECT_ROOT = r"D:\新建文件夹\qqq"
+PROJECT_ROOT = r"D:\qqq"
 
 # 因子数据目录：多因子测试默认扫描该目录下所有因子 Excel
 FACTOR_PROCESSED_DIR = os.path.join(PROJECT_ROOT, "factor_processed")
@@ -26,6 +26,10 @@ OUTPUT_EXCEL_NAME = "multi_factor_test_report.xlsx"  # 可改为 factor_test_rep
 
 # 调仓周期列表（天）：每个周期生成一份独立报表，在此处统一配置
 REBALANCE_PERIODS = [1, 5, 10]
+
+# 共线性分析：仅对指定因子运行（与多因子 report 中的行号一致，1-based）
+# 例如 [2, 10, 9, 8, 6] 表示第 2、10、9、8、6 个因子。留空 [] 表示使用全部因子
+COLLINEARITY_FACTOR_INDICES = [2, 10, 1, 8, 6]
 
 # 共线性分析输出文件名前缀（调仓周期后缀由代码自动追加，如 _P5.xlsx）
 OUTPUT_COLLINEARITY_NAME = "factor_collinearity_report"
