@@ -62,13 +62,12 @@ def process_factor_df(df):
     
     return df_numeric
 
-# 处理单因子Excel文件
 def process_factor_excel(input_excel, output_excel, reference_excel=None):
     """
     处理因子文件，可选使用参考文件修复日期
     """
     sheets = pd.read_excel(input_excel, sheet_name=None, index_col=0)
-    
+
     # 如果提供了参考文件，读取正确的日期
     if reference_excel:
         print(f"使用参考文件修复日期: {reference_excel}")
@@ -76,26 +75,36 @@ def process_factor_excel(input_excel, output_excel, reference_excel=None):
         ref_dates = pd.to_datetime(ref_data['Date'])
     else:
         ref_dates = None
-    
+
     writer = pd.ExcelWriter(output_excel, engine='xlsxwriter')
-    
+
     for sheet_name, df in sheets.items():
         print(f"  处理 sheet: {sheet_name}")
         print(f"    原始 shape: {df.shape}")
-        
-        # 如果有参考日期且行数匹配，使用参考日期
+
+        # 如果有参考日期，使用 reindex 对齐（更安全的方式）
         if ref_dates is not None:
-            if len(df) == len(ref_dates):
-                print(f"    修复日期索引 (完全匹配)")
-                df.index = ref_dates.values
-            elif len(df) < len(ref_dates):
-                print(f"    修复日期索引 (因子行数较少: {len(df)} < {len(ref_dates)})")
-                df.index = ref_dates[:len(df)].values
-            else:
-                print(f"    ⚠️ 警告: 因子行数多于参考日期 ({len(df)} > {len(ref_dates)})")
-                # 截断因子数据
-                df = df.iloc[:len(ref_dates)]
-                df.index = ref_dates.values
+            # 先尝试解析现有索引为日期
+            try:
+                df.index = pd.to_datetime(df.index)
+                print(f"    原始日期范围: {df.index.min()} 到 {df.index.max()}")
+            except:
+                print(f"    ⚠️ 警告: 无法解析原始索引为日期")
+
+            # 使用 reindex 对齐到参考日期（缺失日期填充 NaN）
+            df_aligned = df.reindex(ref_dates)
+
+            # 统计对齐结果
+            n_matched = df_aligned.notna().any(axis=1).sum()
+            n_missing = len(ref_dates) - n_matched
+            print(f"    对齐结果: {n_matched} 个日期有数据, {n_missing} 个日期缺失")
+
+            # 如果匹配率太低，发出警告
+            if n_matched < len(df) * 0.8:
+                print(f"    ⚠️ 警告: 匹配率较低 ({n_matched}/{len(df)} = {n_matched/len(df)*100:.1f}%)")
+                print(f"    可能原因: 因子日期与参考日期不匹配")
+
+            df = df_aligned
         else:
             # 尝试解析现有索引为日期
             try:
@@ -103,17 +112,18 @@ def process_factor_excel(input_excel, output_excel, reference_excel=None):
                 print(f"    日期索引已解析")
             except:
                 print(f"    ⚠️ 警告: 无法解析日期，使用原始索引")
-        
+
         df.index.name = 'Date'
-        
+
         # 处理因子
         df_processed = process_factor_df(df)
-        
+
         # 保存，确保日期索引被保留
         df_processed.to_excel(writer, sheet_name=sheet_name)
-        
+
         print(f"    处理后 shape: {df_processed.shape}")
-        print(f"    日期范围: {df_processed.index.min()} 到 {df_processed.index.max()}")
+        if not df_processed.empty:
+            print(f"    日期范围: {df_processed.index.min()} 到 {df_processed.index.max()}")
 
     writer.close()
     print(f"✓ 处理完成，保存到: {output_excel}")

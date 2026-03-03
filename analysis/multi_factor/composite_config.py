@@ -15,6 +15,9 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
 SELECTED_FACTOR_INDICES = [20, 16, 43, 17, 34]
 
 # 调仓周期（天）
+# ⚠️ 重要：此周期决定复合因子的生成频率
+# 如果后续策略回测使用不同周期，需要重新生成复合因子或接受因子更新频率不匹配
+# 建议：策略回测的 REBALANCE_PERIODS 应包含此值，或为此值的整数倍
 REBALANCE_PERIOD = 10
 
 # 一元/IC加权滚动窗口列表 N

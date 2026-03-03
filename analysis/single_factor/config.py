@@ -20,7 +20,7 @@ class SingleFactorConfig:
     
     # ==================== 路径配置 ====================
     # 项目根目录（手动指定）
-    PROJECT_ROOT = r"D:\新建文件夹\qqq"
+    PROJECT_ROOT = r"D:\qqq"
     
     # 数据路径
     # 指定单因子测试时使用的因子文件（运行 run_single_factor_test.py 时生效）

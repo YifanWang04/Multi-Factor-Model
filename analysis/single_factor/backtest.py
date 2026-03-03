@@ -168,7 +168,7 @@ class ShortOnlyBacktest:
                 _d = self.group_returns.index[0]
                 r_long = float(self.group_returns.loc[_d, group_num])
                 r_short = float(returns.loc[_d])
-                with open(r"d:\新建文件夹\qqq\.cursor\debug.log", "a", encoding="utf-8") as _f:
+                with open(r"d:\qqq\.cursor\debug.log", "a", encoding="utf-8") as _f:
                     _f.write('{"id":"short_formula","location":"ShortOnlyBacktest.run","message":"Short return = -long","data":{"group":1,"R_long":r_long,"R_short":r_short,"neg_ok":abs(r_short+r_long)<1e-6},"hypothesisId":"H3"}\n')
             except Exception:
                 pass

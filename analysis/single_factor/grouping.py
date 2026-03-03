@@ -79,7 +79,7 @@ class GrouperEnhanced:
                 g1_vals = f.loc[groups[1]]
                 g10_vals = f.loc[groups[10]]
                 try:
-                    with open(r"d:\新建文件夹\qqq\.cursor\debug.log", "a", encoding="utf-8") as _f:
+                    with open(r"d:\qqq\.cursor\debug.log", "a", encoding="utf-8") as _f:
                         _f.write('{"id":"grp_check","timestamp":0,"location":"grouping.split","message":"Group1 vs Group10 factor","data":{"date":str(date),"g1_min":float(g1_vals.min()),"g1_max":float(g1_vals.max()),"g10_min":float(g10_vals.min()),"g10_max":float(g10_vals.max()),"g1_lt_g10":bool(g1_vals.max() < g10_vals.min())},"hypothesisId":"H1"}\n')
                 except Exception:
                     pass

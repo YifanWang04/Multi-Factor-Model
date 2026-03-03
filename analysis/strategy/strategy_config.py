@@ -23,7 +23,7 @@ COMPOSITE_FACTOR_FILE = os.path.join(
 )
 
 # 选定的复合因子方法（Excel sheet 名），对应用户选择的 ols_m3_M5
-COMPOSITE_FACTOR_SHEET = "rank_mul"
+COMPOSITE_FACTOR_SHEET = "beta_m3_N10"
 
 # 日频收益率数据（与单因子/复合因子流程一致）
 PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
@@ -42,7 +42,9 @@ GROUP_NUMS = [5, 10]
 # 调仓周期（日历天数）
 # 注意：系统从复合因子已有的调仓日期序列中取样，实际最小精度 = 因子原生周期
 # 典型因子原生周期为 10 交易日 ≈ 14 日历天，故 <14 的值等效于"每期必换"
-REBALANCE_PERIODS = [5, 10, 30, 60]
+# ⚠️ 建议：使用与 composite_config.REBALANCE_PERIOD 一致的值（10），或其整数倍（20, 30）
+# 当前 composite_config.REBALANCE_PERIOD = 10 天
+REBALANCE_PERIODS = [10, 20, 30, 60]
 
 # 目标组排名（从高到低）：1=买最高分组，2=买第二高分组，3=买第三高分组
 TARGET_GROUP_RANKS = [1, 2, 3]

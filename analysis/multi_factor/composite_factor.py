@@ -142,10 +142,17 @@ def _composite_from_weight_df(factor_dict, weight_df, dates):
 def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=None):
     """
     通用：用 stats_dict[name][key] 序列按 method(1/2/3) 计算权重，合成复合因子。
+
+    时序说明：
+      - IC/beta 序列的索引是调仓日 d_k
+      - IC(d_k) 使用 d_k 的因子值和 (d_k, d_{k+1}] 的收益计算
+      - 在 d_{k+1} 调仓时，IC(d_k) 已知（因为 (d_k, d_{k+1}] 的收益已实现）
+      - 因此在 d_{k+1} 调仓时，可用的最新 IC 是 IC(d_k)，即 s[s.index < d_{k+1}] 的最后一个
+
     method=1: 全期均值（固定权重）⚠️ 存在前瞻偏误，使用了全期（含未来期）的 IC/beta
               均值作为权重，属于"全知基准（oracle baseline）"，仅供研究对比，
               不可用于真实策略回测。
-    method=2: 截至当期累计均值（无前瞻，用 index < d 的历史数据）
+    method=2: 截至当期累计均值（无前瞻，用 index < d 的历史数据，包含最近一期）
     method=3: 滚动 window 期均值（无前瞻，用 index < d 的最近 N 期数据）
     """
     names = list(factor_dict.keys())
@@ -153,24 +160,26 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
     series_map = {n: stats_dict[n][key] for n in names}
 
     if method == 1:
-        # 截至当期累计均值；排除最近一期（其 IC/beta 含当日收益，有前瞻）
+        # 全期均值（含前瞻，仅供研究对比）
         rows = []
         for d in dates:
             row = {}
             for n in names:
                 s = series_map[n]
-                past = s[s.index < d].iloc[:-1]  # 排除 IC(d_{k-1})，因其含 d_k 当日收益
+                # 使用全部历史数据（含当前调仓日之前的所有 IC）
+                past = s[s.index < d]
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
     elif method == 2:
-        # 截至当期累计均值；排除最近一期，避免前瞻偏误
+        # 截至当期累计均值（无前瞻）
         rows = []
         for d in dates:
             row = {}
             for n in names:
                 s = series_map[n]
-                past = s[s.index < d].iloc[:-1]  # 排除 IC(d_{k-1})，因其含 d_k 当日收益
+                # 使用 d 之前的所有 IC（不排除最近一期，因为它已经实现）
+                past = s[s.index < d]
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
@@ -181,7 +190,8 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
             row = {}
             for n in names:
                 s = series_map[n]
-                past = s[s.index < d].iloc[:-1].iloc[-window:]  # 先排除最近一期，再取 rolling
+                # 使用 d 之前的最近 window 期 IC
+                past = s[s.index < d].iloc[-window:]
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
@@ -312,7 +322,8 @@ def multivariate_weighted(factor_dict, ret_periods, M_windows):
     def _build_weight_df(method, window=None):
         rows = []
         for d in dates:
-            past = beta_df[beta_df.index < d].iloc[:-1]  # 排除最近一期（含当日收益）
+            # 使用 d 之前的所有 beta（不排除最近一期，因为它已经实现）
+            past = beta_df[beta_df.index < d]
             if method == 3:
                 past = past.iloc[-window:]
             rows.append(past.mean().to_dict() if len(past) > 0 else {n: np.nan for n in names})

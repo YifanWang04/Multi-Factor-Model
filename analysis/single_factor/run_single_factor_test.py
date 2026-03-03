@@ -178,7 +178,7 @@ class SingleFactorTesterOptimized:
         #     lsr = float(ls_returns.loc[_d]) if _d in ls_returns.index else None
         #     cost = 2 * self.config.TRANSACTION_COST
         #     formula_ok = abs((lcr - scr - cost) - lsr) < 1e-6 if lcr is not None and scr is not None and lsr is not None else None
-        #     with open(r"d:\新建文件夹\qqq\.cursor\debug.log", "a", encoding="utf-8") as _f:
+        #     with open(r"d:\qqq\.cursor\debug.log", "a", encoding="utf-8") as _f:
         #         _f.write('{"id":"ls_check","location":"run_single_period","message":"Long-short composition","data":{"R1":r1,"R2":r2,"R9":r9,"R10":r10,"long_combined":lcr,"short_combined":scr,"ls_return":lsr,"cost":cost,"formula_ok":formula_ok},"hypothesisId":"H2"}\n')
         # except Exception:
         #     pass

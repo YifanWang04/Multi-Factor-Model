@@ -192,9 +192,11 @@ class StrategyBacktester:
             group_stocks = groups[target_group]
 
             # ── 权重 ──────────────────────────────────────────────────
+            # 历史收益率：取调仓日之前的最近 lookback 期数据（避免使用全部历史）
             hist_ret = self.ret_df.loc[
                 self.ret_df.index < rb_date, :
-            ]
+            ].tail(getattr(cfg, "OPTIMIZATION_LOOKBACK", 252))
+
             weights = compute_weights(
                 method=weight_method,
                 stocks=group_stocks,
@@ -228,7 +230,9 @@ class StrategyBacktester:
                     w = w / w.sum()
                     port_ret = float((row[valid] * w).sum())
 
-                # 交易成本：持仓期首日扣除一次往返成本（买入+卖出各一次）
+                # 交易成本：持仓期首日扣除单边买入成本
+                # 注：卖出成本在下一调仓期首日扣除，形成完整的往返成本
+                # 当前简化处理：首日扣除往返成本（买入+卖出各一次）
                 if j == 0:
                     port_ret -= 2 * getattr(cfg, "TRANSACTION_COST", 0.001)
 
