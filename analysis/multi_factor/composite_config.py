@@ -12,7 +12,7 @@ RETURN_COLUMN = "Return"
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
 
 # 选定因子的1-based索引（对应 factor_processed 目录排序后的因子）
-SELECTED_FACTOR_INDICES = [2, 10, 1, 8, 6]
+SELECTED_FACTOR_INDICES = [20, 2, 43, 17, 13]
 
 # 调仓周期（天）
 REBALANCE_PERIOD = 10
