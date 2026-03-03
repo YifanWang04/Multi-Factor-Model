@@ -156,13 +156,13 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
             {n: weights[n] for n in names}, index=dates
         )
     elif method == 2:
-        # 截至当期累计均值
+        # 截至当期累计均值（严格 < d，排除当期 IC/beta，避免前瞻偏误）
         rows = []
         for d in dates:
             row = {}
             for n in names:
                 s = series_map[n]
-                past = s[s.index <= d]
+                past = s[s.index < d]
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
@@ -173,7 +173,7 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
             row = {}
             for n in names:
                 s = series_map[n]
-                past = s[s.index <= d].iloc[-window:]
+                past = s[s.index < d].iloc[-window:]
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
@@ -304,9 +304,9 @@ def multivariate_weighted(factor_dict, ret_periods, M_windows):
     def _build_weight_df(method, window=None):
         rows = []
         for d in dates:
-            past = beta_df[beta_df.index <= d]
+            past = beta_df[beta_df.index < d]
             if method == 1:
-                past = beta_df  # 全期均值
+                past = beta_df  # 全期均值（设计如此，与 beta_m1/ic_m1 一致）
             elif method == 3:
                 past = past.iloc[-window:]
             rows.append(past.mean().to_dict() if len(past) > 0 else {n: np.nan for n in names})
