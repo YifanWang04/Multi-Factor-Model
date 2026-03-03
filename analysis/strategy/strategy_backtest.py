@@ -228,9 +228,9 @@ class StrategyBacktester:
                     w = w / w.sum()
                     port_ret = float((row[valid] * w).sum())
 
-                # 交易成本：持仓期首日扣除一次单边成本
+                # 交易成本：持仓期首日扣除一次往返成本（买入+卖出各一次）
                 if j == 0:
-                    port_ret -= getattr(cfg, "TRANSACTION_COST", 0.001)
+                    port_ret -= 2 * getattr(cfg, "TRANSACTION_COST", 0.001)
 
                 period_daily.append(port_ret)
                 all_daily_rets.append(port_ret)

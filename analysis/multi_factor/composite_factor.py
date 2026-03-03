@@ -36,8 +36,8 @@ def _align_dates(factor_dict):
 
 
 def _factor_matrix(factor_dict, dates):
-    """返回 {name: df.loc[dates]} 的对齐字典。"""
-    return {n: df.loc[dates] for n, df in factor_dict.items()}
+    """返回 {name: df.reindex(dates)} 的对齐字典（缺失日期为 NaN）。"""
+    return {n: df.reindex(dates) for n, df in factor_dict.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +86,7 @@ def _weighted_composite(factor_dict, weights_series_dict, dates):
     按权重合成复合因子。
     weights_series_dict: {factor_name: scalar weight}（每期固定）或 {factor_name: Series(date)}
     返回 DataFrame(date×stock)。
+    注意：本函数当前未被调用，实际路径均走 _composite_from_weight_df。
     """
     names = list(factor_dict.keys())
     all_dates = dates
@@ -103,7 +104,7 @@ def _weighted_composite(factor_dict, weights_series_dict, dates):
             frow = factor_dict[name].loc[d] if d in factor_dict[name].index else pd.Series(dtype=float)
             row = row.add(frow * w, fill_value=0)
             total_w += abs(w)
-        result.loc[d] = row if total_w == 0 else row
+        result.loc[d] = row / total_w if total_w != 0 else row
     return result.apply(pd.to_numeric, errors="coerce")
 
 
@@ -141,28 +142,35 @@ def _composite_from_weight_df(factor_dict, weight_df, dates):
 def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=None):
     """
     通用：用 stats_dict[name][key] 序列按 method(1/2/3) 计算权重，合成复合因子。
-    method=1: 全期均值（固定权重）
-    method=2: 截至当期累计均值
-    method=3: 滚动 window 期均值
+    method=1: 全期均值（固定权重）⚠️ 存在前瞻偏误，使用了全期（含未来期）的 IC/beta
+              均值作为权重，属于"全知基准（oracle baseline）"，仅供研究对比，
+              不可用于真实策略回测。
+    method=2: 截至当期累计均值（无前瞻，用 index < d 的历史数据）
+    method=3: 滚动 window 期均值（无前瞻，用 index < d 的最近 N 期数据）
     """
     names = list(factor_dict.keys())
     # 收集各因子的 key 序列
     series_map = {n: stats_dict[n][key] for n in names}
 
     if method == 1:
-        # 固定权重 = 全期均值
-        weights = {n: series_map[n].mean() for n in names}
-        weight_df = pd.DataFrame(
-            {n: weights[n] for n in names}, index=dates
-        )
-    elif method == 2:
-        # 截至当期累计均值（严格 < d，排除当期 IC/beta，避免前瞻偏误）
+        # 截至当期累计均值；排除最近一期（其 IC/beta 含当日收益，有前瞻）
         rows = []
         for d in dates:
             row = {}
             for n in names:
                 s = series_map[n]
-                past = s[s.index < d]
+                past = s[s.index < d].iloc[:-1]  # 排除 IC(d_{k-1})，因其含 d_k 当日收益
+                row[n] = past.mean() if len(past) > 0 else np.nan
+            rows.append(row)
+        weight_df = pd.DataFrame(rows, index=dates)
+    elif method == 2:
+        # 截至当期累计均值；排除最近一期，避免前瞻偏误
+        rows = []
+        for d in dates:
+            row = {}
+            for n in names:
+                s = series_map[n]
+                past = s[s.index < d].iloc[:-1]  # 排除 IC(d_{k-1})，因其含 d_k 当日收益
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
@@ -173,7 +181,7 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
             row = {}
             for n in names:
                 s = series_map[n]
-                past = s[s.index < d].iloc[-window:]
+                past = s[s.index < d].iloc[:-1].iloc[-window:]  # 先排除最近一期，再取 rolling
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
@@ -304,10 +312,8 @@ def multivariate_weighted(factor_dict, ret_periods, M_windows):
     def _build_weight_df(method, window=None):
         rows = []
         for d in dates:
-            past = beta_df[beta_df.index < d]
-            if method == 1:
-                past = beta_df  # 全期均值（设计如此，与 beta_m1/ic_m1 一致）
-            elif method == 3:
+            past = beta_df[beta_df.index < d].iloc[:-1]  # 排除最近一期（含当日收益）
+            if method == 3:
                 past = past.iloc[-window:]
             rows.append(past.mean().to_dict() if len(past) > 0 else {n: np.nan for n in names})
         return pd.DataFrame(rows, index=dates)

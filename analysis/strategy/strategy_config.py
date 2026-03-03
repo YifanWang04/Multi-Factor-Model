@@ -23,7 +23,7 @@ COMPOSITE_FACTOR_FILE = os.path.join(
 )
 
 # 选定的复合因子方法（Excel sheet 名），对应用户选择的 ols_m3_M5
-COMPOSITE_FACTOR_SHEET = "ols_m3_M5"
+COMPOSITE_FACTOR_SHEET = "rank_mul"
 
 # 日频收益率数据（与单因子/复合因子流程一致）
 PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")

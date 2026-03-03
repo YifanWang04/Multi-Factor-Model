@@ -62,11 +62,14 @@ def align_to_rebalance_periods(factor_dict, ret, rebalance_period):
     first_factor = next(iter(factor_dict.values()))
     manager = RebalancePeriodManager(first_factor, ret, rebalance_period)
     _, ret_periods = manager.align_factor_return_by_period()
+    common_dates = ret_periods.index
 
     factor_periods_dict = {}
     for name, fdf in factor_dict.items():
         mgr = RebalancePeriodManager(fdf, ret, rebalance_period)
         fp, _ = mgr.align_factor_return_by_period()
+        # 统一对齐到 ret_periods 的日期，缺失日期以 NaN 填充
+        fp = fp.reindex(common_dates)
         factor_periods_dict[name] = fp
 
     return factor_periods_dict, ret_periods
