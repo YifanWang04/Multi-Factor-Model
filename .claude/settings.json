@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''d:/qqq/factor_raw/factor_alpha001.xlsx'', sheet_name=None\\); print\\(''Sheets:'', list\\(df.keys\\(\\)\\)\\); print\\(''\\\\nFirst sheet shape:'', df[list\\(df.keys\\(\\)\\)[0]].shape\\); print\\(''\\\\nFirst 5 rows:''\\); print\\(df[list\\(df.keys\\(\\)\\)[0]].head\\(\\)\\); print\\(''\\\\nLast 5 rows:''\\); print\\(df[list\\(df.keys\\(\\)\\)[0]].tail\\(\\)\\)\")",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''d:/qqq/data/us_top100_daily_2023_present.xlsx'', sheet_name=list\\(pd.ExcelFile\\(''d:/qqq/data/us_top100_daily_2023_present.xlsx''\\).sheet_names\\)[0], nrows=5\\); print\\(''Date range sample:''\\); print\\(df[[''Date'']].head\\(\\)\\); print\\(''\\\\nDate range:''\\); full = pd.read_excel\\(''d:/qqq/data/us_top100_daily_2023_present.xlsx'', sheet_name=list\\(pd.ExcelFile\\(''d:/qqq/data/us_top100_daily_2023_present.xlsx''\\).sheet_names\\)[0]\\); print\\(f''Start: {full[\"\"Date\"\"].min\\(\\)}''\\); print\\(f''End: {full[\"\"Date\"\"].max\\(\\)}''\\); print\\(f''Total rows: {len\\(full\\)}''\\)\")",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''d:/qqq/factor_processed/factor_alpha001_processed.xlsx'', sheet_name=None\\); print\\(''Sheets:'', list\\(df.keys\\(\\)\\)\\); print\\(''\\\\nFirst sheet shape:'', df[list\\(df.keys\\(\\)\\)[0]].shape\\); print\\(''\\\\nFirst 5 rows:''\\); print\\(df[list\\(df.keys\\(\\)\\)[0]].head\\(\\)\\); print\\(''\\\\nLast 5 rows:''\\); print\\(df[list\\(df.keys\\(\\)\\)[0]].tail\\(\\)\\)\")",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''d:/qqq/data/us_top100_daily_2023_present.xlsx'', sheet_name=0\\); print\\(''Shape:'', df.shape\\); print\\(''\\\\nColumns:'', df.columns.tolist\\(\\)\\); print\\(''\\\\nFirst 5 rows:''\\); print\\(df.head\\(\\)\\); print\\(''\\\\nLast 5 rows:''\\); print\\(df.tail\\(\\)\\); print\\(''\\\\nDate range:''\\); print\\(''Min:'', df[''Date''].min\\(\\)\\); print\\(''Max:'', df[''Date''].max\\(\\)\\)\")",
+      "Bash(python -c \"import pandas as pd; import numpy as np; raw = pd.read_excel\\(''d:/qqq/factor_raw/factor_alpha001.xlsx'', sheet_name=0, index_col=0\\); proc = pd.read_excel\\(''d:/qqq/factor_processed/factor_alpha001_processed.xlsx'', sheet_name=0, index_col=0\\); print\\(''RAW FACTOR:''\\); print\\(''Shape:'', raw.shape\\); print\\(''Date range:'', raw.index.min\\(\\), ''to'', raw.index.max\\(\\)\\); print\\(''Sample values \\(first stock, last 5 dates\\):''\\); print\\(raw.iloc[-5:, 0]\\); print\\(''\\\\nPROCESSED FACTOR:''\\); print\\(''Shape:'', proc.shape\\); print\\(''Date range:'', proc.index.min\\(\\), ''to'', proc.index.max\\(\\)\\); print\\(''Sample values \\(first stock, last 5 dates\\):''\\); print\\(proc.iloc[-5:, 0]\\); print\\(''\\\\nStatistics comparison:''\\); print\\(''Raw - mean:'', raw.iloc[-100:].mean\\(\\).mean\\(\\), ''std:'', raw.iloc[-100:].std\\(\\).mean\\(\\)\\); print\\(''Processed - mean:'', proc.iloc[-100:].mean\\(\\).mean\\(\\), ''std:'', proc.iloc[-100:].std\\(\\).mean\\(\\)\\)\")",
+      "Bash(python analysis/walk_forward/walk_forward_config.py)",
+      "Bash(python analysis/walk_forward/rolling_data_processor.py)",
+      "Bash(python analysis/walk_forward/test_engine.py)",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''data/us_top100_daily_2023_present.xlsx'', sheet_name=0\\); print\\(df.columns.tolist\\(\\)[:20]\\); print\\(df.head\\(\\)\\)\")",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''data/us_top100_daily_2023_present.xlsx'', sheet_name=0\\); print\\(''Unique tickers:'', df[''Ticker''].nunique\\(\\)\\); print\\(''Sample tickers:'', df[''Ticker''].unique\\(\\)[:10]\\)\")",
+      "Bash(python analysis/walk_forward/run_walk_forward.py)",
+      "Bash(grep -n \"✓\\\\|✗\" *.py)",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''parameter_stability.xlsx''\\); print\\(df.head\\(10\\).to_string\\(\\)\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(ls -lh \"d:/qqq/data/\"*.xlsx)"
+    ]
+  }
+}
