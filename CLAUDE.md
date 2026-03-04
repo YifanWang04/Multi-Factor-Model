@@ -33,6 +33,14 @@ qqq/
 │   ├── single_factor/      # 单因子测试
 │   ├── multi_factor/       # 多因子与复合因子
 │   ├── strategy/           # 策略构建与网格回测
+│   │   ├── run_strategy.py              # 策略回测主入口
+│   │   ├── run_detailed_backtest_report.py  # 单策略明细报表
+│   │   ├── run_rebalance_day.py         # 调仓日全流程（pull→因子→复合→回测→报表）
+│   │   ├── strategy_config.py           # 策略配置
+│   │   ├── strategy_backtest.py         # 回测引擎
+│   │   ├── strategy_report.py           # 报表生成
+│   │   ├── strategy_metrics.py          # 指标计算
+│   │   └── portfolio_optimizer.py       # 组合优化
 │   └── walk_forward/       # Walk-Forward 验证（防过拟合）
 │       ├── walk_forward_config.py   # 时间窗口、策略网格、复合因子配置
 │       ├── rolling_data_processor.py # 防泄露数据处理（训练期/测试期分离）
@@ -48,7 +56,8 @@ qqq/
 │   ├── multi_factor_reports/
 │   ├── composite_factor_reports/
 │   ├── strategy_reports/
-│   └── walk_forward_reports/
+│   ├── walk_forward_reports/
+│   └── rebalance_day_YYYY-MM-DD_HHMMSS/  # run_rebalance_day 输出（含 data、factor_raw、factor_processed、composite_factor_reports、rebalance_day_report.xlsx）
 ├── docs/                   # 文档（notes 对照清单等）
 └── claude.md               # 本文件
 ```
@@ -70,12 +79,16 @@ qqq/
 | OLS 权重查看 | `analysis/multi_factor/inspect_ols_weights.py` | composite_config | ols_m3_M5_weights.xlsx |
 | 策略回测 | `analysis/strategy/run_strategy.py` | strategy_config | strategy_backtest_report.xlsx |
 | 单策略明细报表 | `analysis/strategy/run_detailed_backtest_report.py` | 复合因子+策略参数（脚本内配置） | strategy_detailed_backtest_report.xlsx |
+| 调仓日全流程 | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + 固定策略参数 | output/rebalance_day_YYYY-MM-DD_HHMMSS/（含 data、factor_raw、factor_processed、composite_factor_reports、rebalance_day_report.xlsx） |
 | Walk-Forward 验证 | `analysis/walk_forward/run_walk_forward.py` | walk_forward_config | walk_forward_report.xlsx + 可视化 |
 
 **运行约定：** 从项目根目录执行，例如：
 ```bash
 python analysis/strategy/run_strategy.py
 python analysis/strategy/run_detailed_backtest_report.py
+python analysis/strategy/run_rebalance_day.py                    # 完整 pipeline，输出至带日期时间的新目录
+python analysis/strategy/run_rebalance_day.py --skip-pipeline    # 使用默认路径数据，生成报表至新目录
+python analysis/strategy/run_rebalance_day.py --skip-pull        # pipeline 跳过拉数，复制已有 data 后执行
 python analysis/walk_forward/run_walk_forward.py
 python pipeline/build_factors.py
 ```
@@ -95,6 +108,7 @@ python pipeline/build_factors.py
 - **因子值：** 调仓日 T 当日截面（EOD，无前瞻）
 - **收益：** (T, T_next] 区间，即 T+1 到下一调仓日（含）
 - **交易：** T 日收盘执行，T 日收益不计入当期持仓
+- **买卖价格：** 均使用 **Adj Close（收盘价）**，T 日收盘执行即按 T 日收盘价成交
 - `RebalancePeriodManager` 与 `strategy_backtest._select_rebalance_dates` 均按**日历天数**间隔选取调仓日
 
 ---

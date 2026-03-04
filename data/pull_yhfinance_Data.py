@@ -10,6 +10,7 @@ Yahoo Finance 行情数据下载脚本 (data/pull_yhfinance_Data.py)
 - 输出：us_top100_daily_2023_present.xlsx，每个 sheet 名为 ticker（Excel 限制 31 字符），含 Date 与 Ticker 列。保存路径为运行时的当前目录，通常应放在项目 data 目录下并供 config/pipeline 引用。
 """
 
+import os
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
@@ -59,7 +60,13 @@ for i, code in enumerate(codes, 1):
 
 # 3. write into Excel (multiple sheets)
 
-writer = pd.ExcelWriter("data/us_top100_daily_2023_present.xlsx", engine="xlsxwriter")
+_run_dir = os.environ.get("REBALANCE_RUN_DIR")
+if _run_dir:
+    _out_path = os.path.join(_run_dir, "data", "us_top100_daily_2023_present.xlsx")
+    os.makedirs(os.path.dirname(_out_path), exist_ok=True)
+else:
+    _out_path = "data/us_top100_daily_2023_present.xlsx"
+writer = pd.ExcelWriter(_out_path, engine="xlsxwriter")
 
 for sheet_name, df in data_dict.items():
     df.to_excel(writer, sheet_name=sheet_name[:31], index=False)

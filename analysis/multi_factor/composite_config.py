@@ -5,11 +5,16 @@ import os
 import sys
 
 PROJECT_ROOT = r"D:\qqq"
-FACTOR_PROCESSED_DIR = os.path.join(PROJECT_ROOT, "factor_processed")
-PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
+_RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
+if _RUN_DIR:
+    FACTOR_PROCESSED_DIR = os.path.join(_RUN_DIR, "factor_processed")
+    PRICE_FILE = os.path.join(_RUN_DIR, "data", "us_top100_daily_2023_present.xlsx")
+    OUTPUT_DIR = os.path.join(_RUN_DIR, "composite_factor_reports")
+else:
+    FACTOR_PROCESSED_DIR = os.path.join(PROJECT_ROOT, "factor_processed")
+    PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
+    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
 RETURN_COLUMN = "Return"
-
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
 
 # 选定因子的1-based索引（对应 factor_processed 目录排序后的因子）
 SELECTED_FACTOR_INDICES = [20, 16, 43, 17, 34]
@@ -53,6 +58,10 @@ def get_all_factor_files(factor_dir=None):
 
 def get_selected_factor_files():
     all_files = get_all_factor_files()
+    if _RUN_DIR:
+        # 调仓日流程已通过 REBALANCE_SELECTED_FACTORS 只构建了选定因子
+        # factor_processed 中即为全部选定因子，直接返回
+        return all_files
     selected = []
     for idx in SELECTED_FACTOR_INDICES:
         if 1 <= idx <= len(all_files):

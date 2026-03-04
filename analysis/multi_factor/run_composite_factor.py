@@ -21,7 +21,7 @@ from composite_config import (
     N_WINDOWS, M_WINDOWS, GROUP_NUM, WEIGHT_METHOD, RISK_FREE_RATE,
     TRANSACTION_COST, get_selected_factor_files, get_factor_display_name,
 )
-from composite_factor import compute_all_composites
+from composite_factor import compute_all_composites, compute_selected_composites
 from rebalance_manager import RebalancePeriodManager
 from run_multi_factor_test import (
     load_return_data, load_factor,
@@ -112,9 +112,19 @@ def main():
     )
     print(f"调仓期数量: {len(ret_periods)}")
 
-    # 3. 计算所有复合因子（在调仓期截面上）
-    print("计算复合因子...")
-    composite_dict = compute_all_composites(factor_periods_dict, ret_periods, N_WINDOWS, M_WINDOWS)
+    # 3. 计算复合因子（在调仓期截面上）
+    selected_composite = os.environ.get("REBALANCE_SELECTED_COMPOSITE")
+    if selected_composite:
+        names = [n.strip() for n in selected_composite.split(",") if n.strip()]
+        print(f"计算选定复合因子: {names}")
+        composite_dict = compute_selected_composites(
+            factor_periods_dict, ret_periods, names, N_WINDOWS, M_WINDOWS
+        )
+    else:
+        print("计算复合因子...")
+        composite_dict = compute_all_composites(
+            factor_periods_dict, ret_periods, N_WINDOWS, M_WINDOWS
+        )
     print(f"复合因子数量: {len(composite_dict)}")
 
     # 4. 输出1：复合因子 Excel

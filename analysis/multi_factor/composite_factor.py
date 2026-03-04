@@ -396,3 +396,31 @@ def compute_all_composites(factor_dict, ret_periods, N_windows, M_windows):
     out.update(multivariate_weighted(factor_dict, ret_periods, M_windows))
     out.update(pca_composite(factor_dict, ret_periods))
     return out
+
+
+def compute_selected_composites(factor_dict, ret_periods, selected_names, N_windows, M_windows):
+    """
+    仅计算指定的复合因子，返回 {composite_name: DataFrame(date×stock)}。
+    selected_names: 需要的复合因子名列表，如 ["beta_m3_N10"]
+    """
+    want = set(selected_names)
+    out = {}
+    if any(n.startswith("beta_") for n in want):
+        d = beta_weighted(factor_dict, ret_periods, N_windows)
+        out.update({k: v for k, v in d.items() if k in want})
+    if any(n.startswith("ic_m") for n in want):
+        d = ic_weighted(factor_dict, ret_periods, N_windows)
+        out.update({k: v for k, v in d.items() if k in want})
+    if any(n.startswith("rank_ic_") for n in want):
+        d = rank_ic_weighted(factor_dict, ret_periods, N_windows)
+        out.update({k: v for k, v in d.items() if k in want})
+    if any(n in ("rank_add", "rank_mul") for n in want):
+        d = rank_weighted(factor_dict, ret_periods)
+        out.update({k: v for k, v in d.items() if k in want})
+    if any(n.startswith("ols_") for n in want):
+        d = multivariate_weighted(factor_dict, ret_periods, M_windows)
+        out.update({k: v for k, v in d.items() if k in want})
+    if any(n.startswith("pca_pc") for n in want):
+        d = pca_composite(factor_dict, ret_periods)
+        out.update({k: v for k, v in d.items() if k in want})
+    return out

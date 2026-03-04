@@ -89,7 +89,7 @@ def process_factor_excel(input_excel, output_excel, reference_excel=None):
                 df.index = pd.to_datetime(df.index)
                 print(f"    原始日期范围: {df.index.min()} 到 {df.index.max()}")
             except:
-                print(f"    ⚠️ 警告: 无法解析原始索引为日期")
+                print(f"    [警告] 无法解析原始索引为日期")
 
             # 使用 reindex 对齐到参考日期（缺失日期填充 NaN）
             df_aligned = df.reindex(ref_dates)
@@ -101,7 +101,7 @@ def process_factor_excel(input_excel, output_excel, reference_excel=None):
 
             # 如果匹配率太低，发出警告
             if n_matched < len(df) * 0.8:
-                print(f"    ⚠️ 警告: 匹配率较低 ({n_matched}/{len(df)} = {n_matched/len(df)*100:.1f}%)")
+                print(f"    [警告] 匹配率较低 ({n_matched}/{len(df)} = {n_matched/len(df)*100:.1f}%)")
                 print(f"    可能原因: 因子日期与参考日期不匹配")
 
             df = df_aligned
@@ -111,7 +111,7 @@ def process_factor_excel(input_excel, output_excel, reference_excel=None):
                 df.index = pd.to_datetime(df.index)
                 print(f"    日期索引已解析")
             except:
-                print(f"    ⚠️ 警告: 无法解析日期，使用原始索引")
+                print(f"    [警告] 无法解析日期，使用原始索引")
 
         df.index.name = 'Date'
 
@@ -126,15 +126,28 @@ def process_factor_excel(input_excel, output_excel, reference_excel=None):
             print(f"    日期范围: {df_processed.index.min()} 到 {df_processed.index.max()}")
 
     writer.close()
-    print(f"✓ 处理完成，保存到: {output_excel}")
+    print(f"  处理完成，保存到: {output_excel}")
 
 if __name__ == "__main__":
 
-    input_dir = "factor_raw"
-    output_dir = "factor_processed"
-    reference_file = "data/us_top100_daily_2023_present.xlsx"
+    _run_dir = os.environ.get("REBALANCE_RUN_DIR")
+    if _run_dir:
+        input_dir = os.path.join(_run_dir, "factor_raw")
+        output_dir = os.path.join(_run_dir, "factor_processed")
+        reference_file = os.path.join(_run_dir, "data", "us_top100_daily_2023_present.xlsx")
+    else:
+        input_dir = "factor_raw"
+        output_dir = "factor_processed"
+        reference_file = "data/us_top100_daily_2023_present.xlsx"
 
     os.makedirs(output_dir, exist_ok=True)
+
+    selected = os.environ.get("REBALANCE_SELECTED_FACTORS")
+    if selected:
+        factor_names = [n.strip() for n in selected.split(",") if n.strip()]
+        files_to_process = [f"factor_{n}.xlsx" for n in factor_names]
+    else:
+        files_to_process = None
     
     print("=" * 60)
     print("因子数据处理（去极值 + 标准化）")
@@ -142,6 +155,8 @@ if __name__ == "__main__":
 
     for file in os.listdir(input_dir):
         if file.startswith("factor_") and file.endswith(".xlsx"):
+            if files_to_process is not None and file not in files_to_process:
+                continue
             input_path = os.path.join(input_dir, file)
             output_path = os.path.join(
                 output_dir,
@@ -157,7 +172,7 @@ if __name__ == "__main__":
                     reference_excel=reference_file
                 )
             except Exception as e:
-                print(f"❌ 处理失败: {e}")
+                print(f"  处理失败: {e}")
                 import traceback
                 traceback.print_exc()
                 continue

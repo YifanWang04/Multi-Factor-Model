@@ -25,8 +25,13 @@ import pandas as pd
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 
-EXCEL_PATH = os.path.join(_PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
-FACTOR_RAW_DIR = os.path.join(_PROJECT_ROOT, "factor_raw")
+_RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
+if _RUN_DIR:
+    EXCEL_PATH = os.path.join(_RUN_DIR, "data", "us_top100_daily_2023_present.xlsx")
+    FACTOR_RAW_DIR = os.path.join(_RUN_DIR, "factor_raw")
+else:
+    EXCEL_PATH = os.path.join(_PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
+    FACTOR_RAW_DIR = os.path.join(_PROJECT_ROOT, "factor_raw")
 
 
 def load_ohlcv_data(excel_path):
@@ -96,13 +101,22 @@ def build_and_save_all_factors(data_dict):
     """
     根据 factor_library 的 FACTOR_CONFIGS 构建因子并保存到 factor_raw。
     每个因子输出一个单 sheet（"factor"）的 Excel 文件。
+    若设置了 REBALANCE_SELECTED_FACTORS（逗号分隔因子名），仅构建指定因子。
     """
     from factors.factor_library import FACTOR_CONFIGS
 
     os.makedirs(FACTOR_RAW_DIR, exist_ok=True)
     built = []
 
+    selected = os.environ.get("REBALANCE_SELECTED_FACTORS")
+    if selected:
+        factor_names = [n.strip() for n in selected.split(",") if n.strip()]
+    else:
+        factor_names = None
+
     for name, cfg in FACTOR_CONFIGS.items():
+        if factor_names is not None and name not in factor_names:
+            continue
         func = cfg['func']
         data_keys = cfg.get('data_keys', ['close'])
         raw_path = os.path.join(FACTOR_RAW_DIR, f"factor_{name}.xlsx")
