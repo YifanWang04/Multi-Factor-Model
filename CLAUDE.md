@@ -24,7 +24,7 @@
 ```
 qqq/
 ├── data/                    # 原始数据
-│   ├── us_top100_daily_2023_present.xlsx   # 日频量价主数据
+│   ├── us_top100_daily_2023_present.xlsx   # 日频量价主数据，每个sheet对应一个股票一共有88个sheet
 │   └── pull_yhfinance_Data.py             # 从 yfinance 拉取数据
 ├── pipeline/                # 数据与因子构建流水线
 │   ├── build_factors.py     # 从量价构建原始因子 → factor_raw/*.xlsx

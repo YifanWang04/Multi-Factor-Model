@@ -493,9 +493,17 @@ class WalkForwardEngine:
                 except:
                     continue
 
-                # IC (Pearson) - 使用手动计算
+                # IC (Pearson) - 使用手动计算（避免numpy 2.x的bug）
                 try:
-                    ic = np.corrcoef(fv, rv)[0, 1]
+                    # 手动计算Pearson相关系数
+                    fv_mean = np.mean(fv)
+                    rv_mean = np.mean(rv)
+                    numerator = np.sum((fv - fv_mean) * (rv - rv_mean))
+                    denominator = np.sqrt(np.sum((fv - fv_mean)**2) * np.sum((rv - rv_mean)**2))
+                    if denominator > 0:
+                        ic = numerator / denominator
+                    else:
+                        continue
                     if not np.isfinite(ic):
                         continue
                 except:
@@ -621,10 +629,15 @@ class WalkForwardEngine:
         names = list(factor_dict.keys())
 
         for d in dates:
+            # 如果日期不在权重索引中，使用最近的历史权重（向前填充）
             if d not in weight_df.index:
-                continue
-
-            ws = weight_df.loc[d]
+                # 找到最近的历史权重
+                past_weights = weight_df[weight_df.index <= d]
+                if len(past_weights) == 0:
+                    continue
+                ws = past_weights.iloc[-1]
+            else:
+                ws = weight_df.loc[d]
             row = pd.Series(0.0, index=stocks)
             total_w = 0.0
 
