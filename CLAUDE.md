@@ -32,14 +32,23 @@ qqq/
 ├── analysis/
 │   ├── single_factor/      # 单因子测试
 │   ├── multi_factor/       # 多因子与复合因子
-│   └── strategy/           # 策略构建与网格回测
+│   ├── strategy/           # 策略构建与网格回测
+│   └── walk_forward/       # Walk-Forward 验证（防过拟合）
+│       ├── walk_forward_config.py   # 时间窗口、策略网格、复合因子配置
+│       ├── rolling_data_processor.py # 防泄露数据处理（训练期/测试期分离）
+│       ├── walk_forward_engine.py   # 核心验证引擎（多 walk 回测）
+│       ├── walk_forward_analyzer.py # 结果分析（参数稳定性、敏感性）
+│       ├── run_walk_forward.py      # 主入口
+│       ├── test_engine.py           # 快速测试
+│       └── README.md
 ├── factor_raw/             # 构建后的原始因子 Excel
 ├── factor_processed/       # 处理后的因子 Excel（去极值、标准化）
 ├── output/                 # 输出目录
 │   ├── single_factor_reports/
 │   ├── multi_factor_reports/
 │   ├── composite_factor_reports/
-│   └── strategy_reports/
+│   ├── strategy_reports/
+│   └── walk_forward_reports/
 ├── docs/                   # 文档（notes 对照清单等）
 └── claude.md               # 本文件
 ```
@@ -56,12 +65,18 @@ qqq/
 | 单因子测试 | `analysis/single_factor/run_single_factor_test.py` | config 指定因子+价格 | PDF 报告 |
 | 批量单因子 | `analysis/single_factor/run_all_factors_backtest.py` | factor_processed 全量 | 多份 PDF |
 | 多因子测试 | `analysis/single_factor/run_multi_factor_test.py` | multi_factor_config | Excel 报表 |
+| 因子共线性分析 | `analysis/single_factor/run_collinearity_analysis.py` | config + 多因子 Excel | 共线性分析报表 Excel |
 | 因子复合 | `analysis/multi_factor/run_composite_factor.py` | composite_config | composite_factors.xlsx + 回测报表 |
+| OLS 权重查看 | `analysis/multi_factor/inspect_ols_weights.py` | composite_config | ols_m3_M5_weights.xlsx |
 | 策略回测 | `analysis/strategy/run_strategy.py` | strategy_config | strategy_backtest_report.xlsx |
+| 单策略明细报表 | `analysis/strategy/run_detailed_backtest_report.py` | 复合因子+策略参数（脚本内配置） | strategy_detailed_backtest_report.xlsx |
+| Walk-Forward 验证 | `analysis/walk_forward/run_walk_forward.py` | walk_forward_config | walk_forward_report.xlsx + 可视化 |
 
 **运行约定：** 从项目根目录执行，例如：
 ```bash
 python analysis/strategy/run_strategy.py
+python analysis/strategy/run_detailed_backtest_report.py
+python analysis/walk_forward/run_walk_forward.py
 python pipeline/build_factors.py
 ```
 
@@ -69,7 +84,7 @@ python pipeline/build_factors.py
 
 ## 配置约定
 
-- 各模块有独立 config：`config.py`（单因子）、`multi_factor_config.py`、`composite_config.py`、`strategy_config.py`
+- 各模块有独立 config：`config.py`（单因子）、`multi_factor_config.py`、`composite_config.py`、`strategy_config.py`、`walk_forward_config.py`
 - 关键变量 `PROJECT_ROOT`：**务必统一**，项目根路径为 `D:\qqq`，所有 config 与 debug 路径均已统一
 - 常用路径变量：`PRICE_FILE`、`RETURN_COLUMN`、`FACTOR_FILE`、`OUTPUT_DIR`
 
@@ -102,12 +117,15 @@ python pipeline/build_factors.py
 4. **单因子多 sheet：** 默认读第一个 sheet，可配置 `FACTOR_SHEET` 指定 sheet
 5. **收益率列：** 若 Excel 有 `Return` 列则直接使用，否则用 `pct_change()` 计算
 6. **依赖：** 需 `.venv` 或相应虚拟环境，包含 pandas、numpy、scipy、sklearn、matplotlib、openpyxl、yfinance 等
+7. **run_detailed_backtest_report：** 需先运行 `run_composite_factor.py` 确保 `composite_factors.xlsx` 存在且含目标 sheet（如 `beta_m3_N10`）
+8. **Walk-Forward：** 训练/测试严格分离，因子处理与复合权重仅用训练期数据；`walk_forward_config.py` 控制时间窗口（训练 400d、测试 60d、步长 30d）、策略网格（120 组合）及输出
 
 ---
 
 ## 参考文档
 
 - `docs/NOTES_VS_CODE_CHECKLIST.md`：与设计 notes 的对照检查清单，标注实现符合/部分符合/不符合项
+- `analysis/walk_forward/README.md`：Walk-Forward 验证系统说明（时间对齐、防泄露、结果解读）
 
 ---
 
