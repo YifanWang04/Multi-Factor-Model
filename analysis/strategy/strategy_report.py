@@ -13,6 +13,9 @@ Sheet1 (strategy_statistics)
 Sheet2 (strategy_daily_returns)
   - index = 日期，columns = 策略名称，values = 日收益率
   - 附折线图（各策略净值走势，从 Sheet2 导出）
+
+Sheet3 (strategy_cumulative_returns)
+  - index = 日期，columns = 策略名称，values = 累计收益率
 """
 
 import os
@@ -111,13 +114,16 @@ class StrategyReporter:
 
         sheet1_df = self._build_sheet1_df()
         sheet2_df = self._build_sheet2_df()
+        sheet3_df = self._build_sheet3_df(sheet2_df)
 
         if OPENPYXL_OK:
-            self._write_with_format(output_path, sheet1_df, sheet2_df)
+            self._write_with_format(output_path, sheet1_df, sheet2_df, sheet3_df)
         else:
             with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
                 sheet1_df.to_excel(writer, sheet_name="strategy_statistics", index=False)
                 sheet2_df.to_excel(writer, sheet_name="strategy_daily_returns")
+                if len(sheet3_df) > 0:
+                    sheet3_df.to_excel(writer, sheet_name="strategy_cumulative_returns")
         print(f"策略回测报表已写入: {output_path}")
 
     # ------------------------------------------------------------------
@@ -166,12 +172,21 @@ class StrategyReporter:
         df.sort_index(inplace=True)
         return df
 
+    def _build_sheet3_df(self, sheet2_df: pd.DataFrame) -> pd.DataFrame:
+        """由日收益率构建累计收益率（(1+r).cumprod()-1）。"""
+        if len(sheet2_df) == 0:
+            return pd.DataFrame()
+        cum_ret = (1.0 + sheet2_df).cumprod() - 1.0
+        cum_ret.index.name = "Date"
+        return cum_ret
+
     # ------------------------------------------------------------------
     # Excel 写入与格式化
     # ------------------------------------------------------------------
 
     def _write_with_format(
-        self, output_path: str, sheet1_df: pd.DataFrame, sheet2_df: pd.DataFrame
+        self, output_path: str, sheet1_df: pd.DataFrame, sheet2_df: pd.DataFrame,
+        sheet3_df: pd.DataFrame
     ) -> None:
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
             # ── Sheet1 ────────────────────────────────────────────────
@@ -199,6 +214,14 @@ class StrategyReporter:
                 ws2 = writer.sheets["strategy_daily_returns"]
                 self._format_sheet2(ws2, sheet2_df)
                 self._add_nav_chart(ws2, sheet2_df)
+
+            # ── Sheet3（累计收益率）────────────────────────────────────
+            if len(sheet3_df) > 0:
+                sheet3_df.to_excel(
+                    writer, sheet_name="strategy_cumulative_returns"
+                )
+                ws3 = writer.sheets["strategy_cumulative_returns"]
+                self._format_sheet3(ws3, sheet3_df)
 
     # ------------------------------------------------------------------
     # Sheet1 格式
@@ -388,6 +411,21 @@ class StrategyReporter:
             ws.column_dimensions[get_column_letter(col_idx)].width = 14
 
         # 百分比格式
+        pct_fmt = "0.00%"
+        for row in ws.iter_rows(
+            min_row=2, max_row=ws.max_row, min_col=2, max_col=ws.max_column
+        ):
+            for cell in row:
+                cell.number_format = pct_fmt
+                cell.alignment = Alignment(horizontal="right")
+
+    def _format_sheet3(self, ws, df: pd.DataFrame) -> None:
+        """Sheet3（累计收益率）格式：冻结首行首列，百分比格式。"""
+        ws.freeze_panes = "B2"
+        ws.column_dimensions["A"].width = 14
+        for col_idx in range(2, len(df.columns) + 2):
+            ws.column_dimensions[get_column_letter(col_idx)].width = 14
+
         pct_fmt = "0.00%"
         for row in ws.iter_rows(
             min_row=2, max_row=ws.max_row, min_col=2, max_col=ws.max_column

@@ -32,6 +32,7 @@ from analysis.walk_forward.rolling_data_processor import (
     get_common_dates
 )
 from analysis.strategy.strategy_backtest import StrategyBacktester
+from analysis.strategy.strategy_metrics import StrategyMetrics
 
 
 class WalkForwardEngine:
@@ -368,6 +369,7 @@ class WalkForwardEngine:
                 'target_rank': result['params']['target_rank'],
                 'rebalance_period': result['params']['rebalance_period'],
                 'weight_method': result['params']['weight_method'],
+                'daily_returns': result.get('daily_returns', pd.Series(dtype=float)),
                 **metrics
             })
 
@@ -660,58 +662,33 @@ class WalkForwardEngine:
 
     def _compute_metrics(self, result: Dict) -> Dict:
         """
-        计算策略性能指标
+        计算策略性能指标（与 strategy_backtest_report 指标一致）
 
         Args:
-            result: StrategyBacktester返回的结果
+            result: StrategyBacktester返回的结果（含 daily_returns, rebalance_returns）
 
         Returns:
-            Dict: 性能指标
+            Dict: 完整绩效指标（含 ret_1d, ret_1w, annual_return, sharpe, max_drawdown 等）
         """
-        daily_returns = result.get('daily_returns', pd.Series())
+        daily_returns = result.get('daily_returns', pd.Series(dtype=float))
+        rebalance_returns = result.get('rebalance_returns', pd.Series(dtype=float))
 
-        if len(daily_returns) == 0:
-            return {
-                'sharpe': np.nan,
-                'annual_return': np.nan,
-                'annual_vol': np.nan,
-                'max_drawdown': np.nan,
-                'calmar': np.nan,
-                'total_return': np.nan,
-                'num_periods': 0
-            }
+        calc = StrategyMetrics(
+            daily_returns=daily_returns,
+            rebalance_returns=rebalance_returns,
+            rf=config.RISK_FREE_RATE,
+        )
+        metrics = calc.compute_all()
 
-        # 年化收益率
-        total_return = (1 + daily_returns).prod() - 1
-        num_days = len(daily_returns)
-        annual_return = (1 + total_return) ** (252 / num_days) - 1
+        # 补充 num_periods, total_return（walk-forward 分析常用）
+        num_periods = len(result.get('rebalance_dates', []))
+        total_return = np.nan
+        if len(daily_returns) > 0:
+            total_return = float((1 + daily_returns).prod() - 1)
+        metrics['num_periods'] = num_periods
+        metrics['total_return'] = total_return
 
-        # 年化波动率
-        annual_vol = daily_returns.std() * np.sqrt(252)
-
-        # Sharpe比率
-        rf_daily = config.RISK_FREE_RATE / 252
-        excess_return = daily_returns - rf_daily
-        sharpe = excess_return.mean() / excess_return.std() * np.sqrt(252) if excess_return.std() > 0 else 0
-
-        # 最大回撤
-        cumulative = (1 + daily_returns).cumprod()
-        running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max
-        max_drawdown = drawdown.min()
-
-        # Calmar比率
-        calmar = annual_return / abs(max_drawdown) if max_drawdown != 0 else np.nan
-
-        return {
-            'sharpe': sharpe,
-            'annual_return': annual_return,
-            'annual_vol': annual_vol,
-            'max_drawdown': max_drawdown,
-            'calmar': calmar,
-            'total_return': total_return,
-            'num_periods': len(result.get('rebalance_dates', []))
-        }
+        return metrics
 
 
 if __name__ == "__main__":

@@ -7,10 +7,8 @@ Walk-Forward Validation Main Entry Point
     python analysis/walk_forward/run_walk_forward.py
 
 输出：
-    - output/walk_forward_reports/parameter_stability.xlsx
-    - output/walk_forward_reports/robust_strategies.xlsx
-    - output/walk_forward_reports/parameter_sensitivity.xlsx
-    - output/walk_forward_reports/walk_comparison.xlsx
+    - output/walk_forward_reports/walk_forward_report.xlsx（单一 consolidated 报表）
+        Sheet: Summary, Parameter_Stability, Parameter_Sensitivity, Walk_Comparison
     - output/walk_forward_reports/visualizations/*.png
 """
 
@@ -92,7 +90,7 @@ def print_summary(analyzer: WalkForwardAnalyzer, elapsed_time: float):
         print(f"  ⚠ Could not determine most robust strategy: {e}")
 
     print()
-    print(f"Reports saved to: {config.OUTPUT_DIR}")
+    print(f"Report saved to: {os.path.join(config.OUTPUT_DIR, 'walk_forward_report.xlsx')}")
     print("=" * 80 + "\n")
 
 
