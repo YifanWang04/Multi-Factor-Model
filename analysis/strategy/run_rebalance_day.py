@@ -17,15 +17,23 @@
 
 用法（项目根目录）：
   python analysis/strategy/run_rebalance_day.py
+  python analysis/strategy/run_rebalance_day.py --no-discord  # 不发送 Discord 通知
 """
 
 import os
 import sys
+import io
 import subprocess
 from datetime import datetime, timedelta
+import json
 
 import numpy as np
 import pandas as pd
+import requests
+
+# 设置 UTF-8 输出（Windows 兼容）
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 # ── 路径注册 ─────────────────────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -69,6 +77,9 @@ STRATEGY_PARAMS = {
     "target_rank": TARGET_RANK,
     "rebalance_period": TARGET_REBALANCE_DAYS,
 }
+
+# Discord Webhook URL
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1478641216659652709/TRe7zHYv0x5AbYJMngnJbi1TbjUwXiOhIct-rze0wHFFYgi-Yqt320iGOCY4J1NUbq68"
 
 
 def _get_run_dir(skip_pipeline: bool, run_dir_arg: str | None) -> str:
@@ -425,6 +436,133 @@ def write_rebalance_day_report(
 
 
 # ---------------------------------------------------------------------------
+# Discord 推送
+# ---------------------------------------------------------------------------
+
+def send_discord_notification(
+    status: dict,
+    current_ops: pd.DataFrame,
+    result: dict,
+    webhook_url: str = DISCORD_WEBHOOK_URL,
+) -> None:
+    """发送 Discord 通知。"""
+    if not webhook_url:
+        print("未配置 Discord Webhook URL，跳过推送")
+        return
+
+    try:
+        as_of = pd.Timestamp(datetime.now().date())
+        is_rebalance = status["is_rebalance_today"]
+        current_rb = status["current_rebalance_date"]
+        next_rb = status["next_rebalance_date"]
+
+        # 构建消息
+        if is_rebalance:
+            title = "🔔 调仓日提醒 - 今日需要操作"
+            color = 0x00FF00  # 绿色
+
+            # 性能指标
+            dr = result["daily_returns"]
+            nv = result["nav"]
+            total_ret = float(nv.iloc[-1]) - 1.0 if len(nv) > 0 else 0
+            ann_ret = (1 + total_ret) ** (252 / max(1, len(dr))) - 1 if len(dr) > 0 else 0
+            sharpe = result.get("sharpe_ratio", 0)
+
+            description = (
+                f"**调仓日期：** {current_rb.date()}\n"
+                f"**策略：** mvo_5G_Top2_P10d\n"
+                f"**执行时间建议：** 美东时间 15:45-16:00（收盘前15分钟）\n\n"
+                f"**策略表现：**\n"
+                f"• 总收益率：{total_ret:.2%}\n"
+                f"• 年化收益率：{ann_ret:.2%}\n"
+                f"• 夏普比率：{sharpe:.2f}\n"
+            )
+
+            # 操作明细
+            if not current_ops.empty:
+                sell_ops = current_ops[current_ops["Action"] == "Sell"]
+                buy_ops = current_ops[current_ops["Action"] == "Buy"]
+
+                fields = []
+
+                if not sell_ops.empty:
+                    sell_text = ""
+                    for _, row in sell_ops.head(10).iterrows():
+                        symbol = row["Symbol"]
+                        weight = row.get("Weight", 0) * 100
+                        sell_price = row.get("Sell_Price_Close", 0)
+                        sell_text += f"• {symbol}: {weight:.1f}% @ ${sell_price:.2f}\n"
+                    if len(sell_ops) > 10:
+                        sell_text += f"... 及其他 {len(sell_ops) - 10} 只股票\n"
+                    fields.append({
+                        "name": f"🔴 卖出操作 ({len(sell_ops)} 只)",
+                        "value": sell_text or "无",
+                        "inline": False
+                    })
+
+                if not buy_ops.empty:
+                    buy_text = ""
+                    for _, row in buy_ops.head(10).iterrows():
+                        symbol = row["Symbol"]
+                        weight = row.get("Weight", 0) * 100
+                        buy_price = row.get("Buy_Price_Close", 0)
+                        buy_text += f"• {symbol}: {weight:.1f}% @ ${buy_price:.2f}\n"
+                    if len(buy_ops) > 10:
+                        buy_text += f"... 及其他 {len(buy_ops) - 10} 只股票\n"
+                    fields.append({
+                        "name": f"🟢 买入操作 ({len(buy_ops)} 只)",
+                        "value": buy_text or "无",
+                        "inline": False
+                    })
+            else:
+                fields = [{
+                    "name": "⚠️ 操作明细",
+                    "value": "无操作数据（可能是数据不足或最后一个调仓日）",
+                    "inline": False
+                }]
+
+            # 下一调仓日
+            if next_rb:
+                fields.append({
+                    "name": "📅 下一调仓日",
+                    "value": f"{next_rb.date()}",
+                    "inline": False
+                })
+        else:
+            title = "ℹ️ 非调仓日 - 无需操作"
+            color = 0x808080  # 灰色
+            description = (
+                f"**当前日期：** {as_of.date()}\n"
+                f"**最近调仓日：** {current_rb.date() if current_rb else '无'}\n"
+                f"**下一调仓日：** {next_rb.date() if next_rb else '未知'}\n\n"
+                f"今日无需操作，请等待下一调仓日。"
+            )
+            fields = []
+
+        # 构建 embed
+        embed = {
+            "title": title,
+            "description": description,
+            "color": color,
+            "fields": fields,
+            "footer": {
+                "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 策略：beta_m3_N10"
+            }
+        }
+
+        payload = {
+            "embeds": [embed]
+        }
+
+        response = requests.post(webhook_url, json=payload, timeout=10)
+        response.raise_for_status()
+        print(f"✅ Discord 通知已发送（状态码：{response.status_code}）")
+
+    except Exception as e:
+        print(f"❌ Discord 通知发送失败：{e}")
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -432,11 +570,13 @@ def main(
     skip_pipeline: bool = False,
     skip_pull: bool = False,
     run_dir_arg: str | None = None,
+    send_discord: bool = True,
 ):
     """
     skip_pipeline: 若为 True，跳过 pipeline，从 run_dir_arg 或默认路径读取
     skip_pull: 若 pipeline 运行，是否跳过 pull_data
     run_dir_arg: 指定运行目录。若 skip_pipeline 且未指定，则使用默认项目路径并创建新时间戳目录保存报表
+    send_discord: 是否发送 Discord 通知（默认 True）
     """
     run_dir = _get_run_dir(skip_pipeline, run_dir_arg)
     os.makedirs(run_dir, exist_ok=True)
@@ -520,6 +660,13 @@ def main(
     print(f"  全部输出目录: {run_dir}")
     print("=" * 64)
 
+    # 发送 Discord 通知
+    if send_discord:
+        print("\n[阶段 4] 发送 Discord 通知...")
+        send_discord_notification(status, current_ops, result)
+    else:
+        print("\n[阶段 4] 跳过 Discord 通知")
+
 
 if __name__ == "__main__":
     import argparse
@@ -527,9 +674,11 @@ if __name__ == "__main__":
     parser.add_argument("--skip-pipeline", action="store_true", help="跳过 pipeline，使用已有数据")
     parser.add_argument("--skip-pull", action="store_true", help="pipeline 中跳过 pull_data")
     parser.add_argument("--run-dir", type=str, default=None, help="指定运行目录（skip-pipeline 时复用该目录数据）")
+    parser.add_argument("--no-discord", action="store_true", help="不发送 Discord 通知")
     args = parser.parse_args()
     main(
         skip_pipeline=args.skip_pipeline,
         skip_pull=args.skip_pull,
         run_dir_arg=args.run_dir,
+        send_discord=not args.no_discord,
     )

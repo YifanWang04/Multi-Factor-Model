@@ -19,7 +19,8 @@
       "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''d:/qqq/output/walk_forward_reports/parameter_stability.xlsx''\\); print\\(f''Shape: {df.shape}''\\); print\\(f''Columns: {df.columns.tolist\\(\\)}''\\); print\\(df.head\\(\\)\\)\")",
       "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''d:/qqq/output/walk_forward_reports/walk_comparison.xlsx''\\); print\\(f''Shape: {df.shape}''\\); print\\(f''Columns: {df.columns.tolist\\(\\)}''\\); print\\(df.head\\(\\)\\)\")",
       "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''d:/qqq/output/walk_forward_reports/parameter_stability.xlsx''\\); print\\(df[[''strategy_name'', ''avg_sharpe'', ''sharpe_std'', ''win_rate'', ''num_walks'']].head\\(10\\)\\)\")",
-      "Bash(python -c \"import numpy; print\\(f''NumPy version: {numpy.__version__}''\\)\")"
+      "Bash(python -c \"import numpy; print\\(f''NumPy version: {numpy.__version__}''\\)\")",
+      "Bash(python analysis/strategy/test_discord_notification.py)"
     ]
   }
 }
