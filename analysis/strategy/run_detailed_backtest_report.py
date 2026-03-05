@@ -64,6 +64,9 @@ TARGET_GROUP_NUM = 5
 TARGET_RANK = 2        # Top2 = 第 2 高组
 TARGET_REBALANCE_DAYS = 10
 
+# 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移
+REBALANCE_DATE_OFFSET = 0
+
 # composite_config 中因子索引 [20, 16, 43, 17, 34] 已用于生成 composite_factors.xlsx
 # 需先运行 run_composite_factor.py 确保 composite_factors.xlsx 存在且含 beta_m3_N10
 
@@ -118,12 +121,20 @@ def run_detailed_backtest(
     rebalance_period: int,
     weight_method: str,
     config,
+    rebalance_date_offset: int = 0,
 ) -> dict:
     """
     运行单策略详细回测，返回含调仓操作、日收益、累计收益等完整数据。
+
+    Parameters
+    ----------
+    rebalance_date_offset : int, optional
+        调仓日偏移天数（正数=提前，负数=延后），默认为 0
     """
     target_group = group_num - (target_rank - 1)
-    rebalance_dates = _select_rebalance_dates(factor_df.index, rebalance_period)
+    rebalance_dates = _select_rebalance_dates(
+        factor_df.index, rebalance_period, offset_days=rebalance_date_offset
+    )
     if len(rebalance_dates) < 2:
         return {"error": "调仓日不足 2 个"}
 
@@ -275,6 +286,7 @@ def run_detailed_backtest(
             "target_group": target_group,
             "rebalance_period": rebalance_period,
             "weight_method": weight_method,
+            "rebalance_date_offset": rebalance_date_offset,
         },
     }
 
@@ -306,6 +318,7 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["Group_Num", params.get("group_num", TARGET_GROUP_NUM)],
             ["Target_Rank", params.get("target_rank", TARGET_RANK)],
             ["Rebalance_Period_Days", params.get("rebalance_period", TARGET_REBALANCE_DAYS)],
+            ["Rebalance_Date_Offset_Days", params.get("rebalance_date_offset", REBALANCE_DATE_OFFSET)],
             ["Transaction_Cost_OneSide", f"{getattr(cfg, 'TRANSACTION_COST', 0.001):.3f}"],
             ["Timing_Convention", "Trade at T close, holding period (T, T_next]"],
             ["---", "---"],
@@ -384,6 +397,7 @@ def main():
         rebalance_period=TARGET_REBALANCE_DAYS,
         weight_method=TARGET_WEIGHT_METHOD,
         config=cfg,
+        rebalance_date_offset=REBALANCE_DATE_OFFSET,
     )
 
     if "error" in result:

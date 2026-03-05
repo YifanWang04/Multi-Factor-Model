@@ -352,6 +352,7 @@ class WalkForwardEngine:
             MAX_WEIGHT = config.MAX_WEIGHT
             TRANSACTION_COST = config.TRANSACTION_COST
             RISK_FREE_RATE = config.RISK_FREE_RATE
+            REBALANCE_DATE_OFFSET = getattr(config, "REBALANCE_DATE_OFFSET", 0)
 
         # 使用StrategyBacktester进行网格搜索
         backtester = StrategyBacktester(composite_factor, test_ret, TempConfig())

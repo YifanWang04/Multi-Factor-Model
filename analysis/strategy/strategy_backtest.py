@@ -24,6 +24,7 @@
 
 import sys
 import os
+from datetime import timedelta
 
 import numpy as np
 import pandas as pd
@@ -59,10 +60,24 @@ def _build_groups(factor_signal: pd.Series, group_num: int) -> dict:
 
 
 def _select_rebalance_dates(factor_index: pd.DatetimeIndex,
-                             rebalance_period_days: int) -> list:
+                             rebalance_period_days: int,
+                             offset_days: int = 0) -> list:
     """
-    从因子日期序列中，选取日历间隔 ≥ rebalance_period_days 的节点。
-    保证第一个因子日期始终被选入。
+    从因子日期序列中，选取日历间隔 ≥ rebalance_period_days 的节点，并可选应用偏移。
+
+    Parameters
+    ----------
+    factor_index : pd.DatetimeIndex
+        因子数据的日期索引
+    rebalance_period_days : int
+        调仓周期（日历天数）
+    offset_days : int, optional
+        调仓日偏移天数（正数=提前，负数=延后），默认为 0
+
+    Returns
+    -------
+    list
+        调仓日列表（已应用偏移）
     """
     dates = sorted(factor_index)
     if not dates:
@@ -72,6 +87,10 @@ def _select_rebalance_dates(factor_index: pd.DatetimeIndex,
     for d in dates[1:]:
         if (d - selected[-1]).days >= rebalance_period_days:
             selected.append(d)
+
+    if offset_days != 0:
+        selected = [d - timedelta(days=offset_days) for d in selected]
+
     return selected
 
 
@@ -157,8 +176,9 @@ class StrategyBacktester:
         """
         运行单一参数组合的策略，返回日频收益率序列和期间收益序列。
         """
+        offset_days = getattr(self.config, "REBALANCE_DATE_OFFSET", 0)
         rebalance_dates = _select_rebalance_dates(
-            self.factor_df.index, rebalance_period
+            self.factor_df.index, rebalance_period, offset_days=offset_days
         )
         if len(rebalance_dates) < 2:
             return self._empty_result()

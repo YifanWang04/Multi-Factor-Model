@@ -100,6 +100,7 @@ python pipeline/build_factors.py
 - 各模块有独立 config：`config.py`（单因子）、`multi_factor_config.py`、`composite_config.py`、`strategy_config.py`、`walk_forward_config.py`
 - 关键变量 `PROJECT_ROOT`：**务必统一**，项目根路径为 `D:\qqq`，所有 config 与 debug 路径均已统一
 - 常用路径变量：`PRICE_FILE`、`RETURN_COLUMN`、`FACTOR_FILE`、`OUTPUT_DIR`
+- **REBALANCE_DATE_OFFSET**：调仓日偏移（天数），正数=提前、负数=延后、0=不偏移；在 `strategy_config.py`、`run_detailed_backtest_report.py`、`walk_forward_config.py` 及 `run_rebalance_day.py` 中均可配置
 
 ---
 

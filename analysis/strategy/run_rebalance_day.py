@@ -71,6 +71,10 @@ TARGET_GROUP_NUM = 5
 TARGET_RANK = 2
 TARGET_REBALANCE_DAYS = 10
 
+# 调仓日偏移（天数）：正数=提前，负数=延后
+# 例如：REBALANCE_DATE_OFFSET = 6 表示所有调仓日提前6天
+REBALANCE_DATE_OFFSET = 6  # 将下一调仓日从 2026-03-11 提前到 2026-03-05
+
 STRATEGY_PARAMS = {
     "weight_method": TARGET_WEIGHT_METHOD,
     "group_num": TARGET_GROUP_NUM,
@@ -197,6 +201,10 @@ def get_rebalance_day_status(
             future_dates.append(d)
         if len(future_dates) >= 12:
             break
+
+    # 数据内无未来调仓日时，用 extrapolated future_dates 推算下一调仓日
+    if next_rebalance_date is None and future_dates:
+        next_rebalance_date = future_dates[0]
 
     return {
         "is_rebalance_today": is_rebalance_today,
@@ -380,7 +388,9 @@ def write_rebalance_day_report(
     max_dd = (nv / nv.cummax() - 1).min() * 100 if len(nv) > 0 else np.nan
 
     config_summary = [
+        ["Selected_Factors", ", ".join(SELECTED_FACTOR_NAMES)],
         ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
+        ["Composite_Method", "多元回归beta加权 (M=3月, N=10日)"],
         ["Weight_Method", params.get("weight_method", TARGET_WEIGHT_METHOD)],
         ["Group_Num", params.get("group_num", TARGET_GROUP_NUM)],
         ["Target_Rank", params.get("target_rank", TARGET_RANK)],
@@ -457,6 +467,12 @@ def send_discord_notification(
         next_rb = status["next_rebalance_date"]
 
         # 构建消息
+        # 策略基本信息（因子选择、复合方式）
+        factor_info = (
+            f"**选定因子：** {', '.join(SELECTED_FACTOR_NAMES)}\n"
+            f"**复合因子：** {COMPOSITE_FACTOR_SHEET}（多元回归beta加权 M3/N10）\n"
+        )
+
         if is_rebalance:
             title = "🔔 调仓日提醒 - 今日需要操作"
             color = 0x00FF00  # 绿色
@@ -469,8 +485,9 @@ def send_discord_notification(
             sharpe = result.get("sharpe_ratio", 0)
 
             description = (
-                f"**调仓日期：** {current_rb.date()}\n"
-                f"**策略：** mvo_5G_Top2_P10d\n"
+                factor_info
+                + f"**调仓日期：** {current_rb.date()}\n"
+                + f"**策略：** mvo_5G_Top2_P10d\n"
                 f"**执行时间建议：** 美东时间 15:45-16:00（收盘前15分钟）\n\n"
                 f"**策略表现：**\n"
                 f"• 总收益率：{total_ret:.2%}\n"
@@ -532,10 +549,11 @@ def send_discord_notification(
             title = "ℹ️ 非调仓日 - 无需操作"
             color = 0x808080  # 灰色
             description = (
-                f"**当前日期：** {as_of.date()}\n"
-                f"**最近调仓日：** {current_rb.date() if current_rb else '无'}\n"
-                f"**下一调仓日：** {next_rb.date() if next_rb else '未知'}\n\n"
-                f"今日无需操作，请等待下一调仓日。"
+                factor_info
+                + f"**当前日期：** {as_of.date()}\n"
+                + f"**最近调仓日：** {current_rb.date() if current_rb else '无'}\n"
+                + f"**下一调仓日：** {next_rb.date() if next_rb else '未知'}\n\n"
+                + "今日无需操作，请等待下一调仓日。"
             )
             fields = []
 
@@ -546,7 +564,7 @@ def send_discord_notification(
             "color": color,
             "fields": fields,
             "footer": {
-                "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 策略：beta_m3_N10"
+                "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 因子：{', '.join(SELECTED_FACTOR_NAMES)}"
             }
         }
 
@@ -621,6 +639,7 @@ def main(
         rebalance_period=TARGET_REBALANCE_DAYS,
         weight_method=TARGET_WEIGHT_METHOD,
         config=cfg,
+        rebalance_date_offset=REBALANCE_DATE_OFFSET,
     )
 
     if "error" in result:
@@ -632,7 +651,11 @@ def main(
     result["_price_df"] = price_df
     result["_config"] = cfg
 
-    rebalance_dates = _select_rebalance_dates(factor_df.index, TARGET_REBALANCE_DAYS)
+    rebalance_dates = _select_rebalance_dates(
+        factor_df.index,
+        TARGET_REBALANCE_DAYS,
+        offset_days=REBALANCE_DATE_OFFSET,
+    )
     last_factor_date = factor_df.index[-1]
     as_of_date = pd.Timestamp(datetime.now().date())
 
@@ -652,6 +675,9 @@ def main(
     write_rebalance_day_report(result, status, current_ops, output_path)
 
     print("\n" + "-" * 64)
+    print("策略概要:")
+    print(f"  选定因子: {', '.join(SELECTED_FACTOR_NAMES)}")
+    print(f"  复合因子: {COMPOSITE_FACTOR_SHEET} (多元回归beta加权 M3/N10)")
     print("调仓日判定:")
     print(f"  今日是否调仓日: {'是' if status['is_rebalance_today'] else '否'}")
     print(f"  当前调仓日: {current_rebalance_date}")
