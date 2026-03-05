@@ -13,6 +13,7 @@
 
 时序约定（与 CLAUDE.md 一致）：
   - 交易：T 日收盘执行，买卖价格均使用 Adj Close（收盘价）
+  - 调仓日且未收盘时：用当日开盘价（Today_Open）与现价（收盘价估计）替代
   - 持仓区间：(T, T_next]，T 日收益不计入当期持仓
 
 用法（项目根目录）：
@@ -27,9 +28,12 @@ import subprocess
 from datetime import datetime, timedelta
 import json
 
+import time
+
 import numpy as np
 import pandas as pd
 import requests
+import yfinance as yf
 
 # 设置 UTF-8 输出（Windows 兼容）
 if sys.platform == 'win32':
@@ -241,6 +245,79 @@ def _get_price_on_date(price_df: pd.DataFrame, date: pd.Timestamp, stocks: list)
     return row.reindex(stocks).dropna()
 
 
+def fetch_live_prices(symbols: list) -> dict:
+    """
+    通过 yfinance 获取当日开盘价和现价。
+    返回 {symbol: {"open": float, "current": float}}，失败的标的不包含在结果中。
+    """
+    result = {}
+    for sym in symbols:
+        try:
+            t = yf.Ticker(sym)
+            fi = t.fast_info
+            open_p = getattr(fi, "open", None)
+            current_p = getattr(fi, "last_price", None)
+            if open_p is not None and current_p is not None:
+                result[sym] = {"open": float(open_p), "current": float(current_p)}
+        except Exception as e:
+            print(f"  获取 {sym} 实时价失败: {e}")
+        time.sleep(0.1)  # 限流
+    return result
+
+
+def apply_live_prices_to_operations(
+    current_ops: pd.DataFrame,
+    price_df: pd.DataFrame,
+    current_rebalance_date: pd.Timestamp,
+    as_of_date: pd.Timestamp,
+) -> tuple[pd.DataFrame, bool]:
+    """
+    当调仓日且数据中无当日收盘价时，用 yfinance 获取当日开盘价和现价，
+    以开盘价作为 Today_Open，以现价作为收盘价替代（Buy_Price_Close / Sell_Price_Close）。
+    返回 (更新后的 current_ops, 是否使用了实时价)。
+    """
+    if current_ops.empty:
+        return current_ops, False
+
+    # 条件：调仓日是今天 且 今日不在价格数据中（即尚未收盘、无收盘价）
+    if current_rebalance_date.date() != as_of_date.date():
+        return current_ops, False
+    if price_df.empty or price_df.index.max().date() >= as_of_date.date():
+        return current_ops, False
+
+    symbols = current_ops["Symbol"].unique().tolist()
+    live = fetch_live_prices(symbols)
+    if len(live) == 0:
+        print("  无法获取实时价格，继续使用历史数据")
+        return current_ops, False
+
+    print(f"  调仓日且未收盘：使用实时价（开盘价+现价替代收盘价），成功获取 {len(live)}/{len(symbols)} 只")
+    ops = current_ops.copy()
+
+    # 先插入 Today_Open 列（若不存在）
+    if "Today_Open" not in ops.columns:
+        ops.insert(ops.columns.get_loc("Symbol") + 1, "Today_Open", np.nan)
+
+    for idx, row in ops.iterrows():
+        sym = row["Symbol"]
+        if sym not in live:
+            continue
+        o, c = live[sym]["open"], live[sym]["current"]
+        ops.at[idx, "Today_Open"] = o
+        if row["Action"] == "Buy":
+            ops.at[idx, "Buy_Price_Close"] = c
+            bv = row.get("Buy_Value", np.nan)
+            if not np.isnan(bv) and bv is not None and c > 0:
+                ops.at[idx, "Shares"] = bv / c
+        elif row["Action"] == "Sell":
+            ops.at[idx, "Sell_Price_Close"] = c
+            sh = row.get("Shares", np.nan)
+            if not np.isnan(sh) and sh is not None:
+                ops.at[idx, "Sell_Value"] = sh * c
+
+    return ops, True
+
+
 # ---------------------------------------------------------------------------
 # 当前调仓日操作明细
 # ---------------------------------------------------------------------------
@@ -386,8 +463,9 @@ def write_rebalance_day_report(
     status: dict,
     current_ops: pd.DataFrame,
     output_path: str,
+    used_live_prices: bool = False,
 ) -> None:
-    """写入调仓日报表。"""
+    """写入调仓日报表。used_live_prices: 调仓日且未收盘时是否已用实时价（开盘价+现价）替代收盘价。"""
     if "error" in result:
         raise ValueError(result["error"])
 
@@ -416,13 +494,19 @@ def write_rebalance_day_report(
         ["Sharpe_Ratio", f"{sharpe:.2f}" if not np.isnan(sharpe) else "-"],
         ["Max_Drawdown_Pct", f"{max_dd:.2f}" if not np.isnan(max_dd) else "-"],
     ]
+    price_conv = (
+        "调仓日且未收盘：Today_Open=当日开盘价，Buy/Sell_Price=现价（收盘价估计）；"
+        "其余：Adj Close（收盘价）"
+        if used_live_prices
+        else "Adj Close（收盘价）；T 日收盘执行，买卖均用当日收盘价"
+    )
     status_rows = [
         ["As_Of_Date", str(as_of.date())],
         ["Is_Rebalance_Today", "是" if status["is_rebalance_today"] else "否"],
         ["Current_Rebalance_Date", str(status["current_rebalance_date"].date()) if status["current_rebalance_date"] else "-"],
         ["Next_Rebalance_Date", str(status["next_rebalance_date"].date()) if status["next_rebalance_date"] else "-"],
         ["---", "---"],
-        ["Price_Convention", "Adj Close（收盘价）；T 日收盘执行，买卖均用当日收盘价"],
+        ["Price_Convention", price_conv],
         ["Rebalance_Period_Days", STRATEGY_PARAMS["rebalance_period"]],
         ["---", "---"],
         *config_summary,
@@ -469,8 +553,9 @@ def send_discord_notification(
     current_ops: pd.DataFrame,
     result: dict,
     webhook_url: str = DISCORD_WEBHOOK_URL,
+    used_live_prices: bool = False,
 ) -> None:
-    """发送 Discord 通知。"""
+    """发送 Discord 通知。used_live_prices: 价格是否为实时价（开盘+现价）。"""
     if not webhook_url:
         print("未配置 Discord Webhook URL，跳过推送")
         return
@@ -499,11 +584,12 @@ def send_discord_notification(
             ann_ret = (1 + total_ret) ** (252 / max(1, len(dr))) - 1 if len(dr) > 0 else 0
             sharpe = result.get("sharpe_ratio", 0)
 
+            price_note = "\n**价格说明：** 当日开盘价+现价（估计收盘价）" if used_live_prices else ""
             description = (
                 factor_info
                 + f"**调仓日期：** {current_rb.date()}\n"
                 + f"**策略：** {_strategy_name()}\n"
-                f"**执行时间建议：** 美东时间 15:45-16:00（收盘前15分钟）\n\n"
+                f"**执行时间建议：** 美东时间 15:45-16:00（收盘前15分钟）{price_note}\n\n"
                 f"**策略表现：**\n"
                 f"• 总收益率：{total_ret:.2%}\n"
                 f"• 年化收益率：{ann_ret:.2%}\n"
@@ -531,6 +617,8 @@ def send_discord_notification(
                     })
 
                 if not buy_ops.empty:
+                    # 按权重（百分比）从大到小排序
+                    buy_ops = buy_ops.sort_values(by="Weight", ascending=False)
                     buy_text = ""
                     for _, row in buy_ops.iterrows():
                         symbol = row["Symbol"]
@@ -681,9 +769,15 @@ def main(
     current_ops = pd.DataFrame()
     if current_rebalance_date is not None:
         current_ops = get_current_rebalance_operations(result, current_rebalance_date)
+        # 调仓日且未收盘时：用当日开盘价+现价替代收盘价
+        current_ops, used_live_prices = apply_live_prices_to_operations(
+            current_ops, price_df, current_rebalance_date, as_of_date
+        )
+    else:
+        used_live_prices = False
 
     output_path = os.path.join(run_dir, "rebalance_day_report.xlsx")
-    write_rebalance_day_report(result, status, current_ops, output_path)
+    write_rebalance_day_report(result, status, current_ops, output_path, used_live_prices=used_live_prices)
 
     print("\n" + "-" * 64)
     print("策略概要:")
@@ -700,7 +794,7 @@ def main(
     # 发送 Discord 通知
     if send_discord:
         print("\n[阶段 4] 发送 Discord 通知...")
-        send_discord_notification(status, current_ops, result)
+        send_discord_notification(status, current_ops, result, used_live_prices=used_live_prices)
     else:
         print("\n[阶段 4] 跳过 Discord 通知")
 
