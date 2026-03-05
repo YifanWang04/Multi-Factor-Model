@@ -59,17 +59,17 @@ PROJECT_ROOT = r"D:\qqq"
 OUTPUT_BASE = os.path.join(PROJECT_ROOT, "output")
 
 # 复合因子
-COMPOSITE_FACTOR_SHEET = "beta_m3_N10"
+COMPOSITE_FACTOR_SHEET = "beta_m1"
 
 # 选定因子（与 composite_config.SELECTED_FACTOR_INDICES [20, 16, 43, 17, 34] 对应）
 # 仅构建和处理这 5 个因子，不创建多余因子
-SELECTED_FACTOR_NAMES = ["alpha020", "alpha016", "alpha043", "alpha017", "alpha034"]
+SELECTED_FACTOR_NAMES = ["alpha095", "alpha032", "alpha042", "alpha020", "alpha073"]
 
-# 策略参数：mvo_5G_Top1_P10d
+# 策略参数：COMPOSITE_FACTOR_SHEET = "mvo_10G_Top1_P30d"
 TARGET_WEIGHT_METHOD = "mvo"
-TARGET_GROUP_NUM = 5
+TARGET_GROUP_NUM = 10
 TARGET_RANK = 1
-TARGET_REBALANCE_DAYS = 10
+TARGET_REBALANCE_DAYS = 30
 
 # 调仓日偏移（天数）：正数=提前，负数=延后
 # 例如：REBALANCE_DATE_OFFSET = 6 表示所有调仓日提前6天
@@ -197,7 +197,8 @@ def get_rebalance_day_status(
     d = last_rb
     while d <= as_of_date + timedelta(days=rebalance_period * 5):
         d = d + timedelta(days=rebalance_period)
-        if d > as_of_date:
+        # >= 确保「下一调仓日恰好是今天」时也能正确显示（不会被跳过到再下一期）
+        if d >= as_of_date:
             future_dates.append(d)
         if len(future_dates) >= 12:
             break
@@ -205,6 +206,11 @@ def get_rebalance_day_status(
     # 数据内无未来调仓日时，用 extrapolated future_dates 推算下一调仓日
     if next_rebalance_date is None and future_dates:
         next_rebalance_date = future_dates[0]
+
+    # 当推算出的下一调仓日就是今天时，今日也应视为调仓日（数据尚未包含今日时 current 为上一期）
+    if next_rebalance_date is not None and next_rebalance_date.date() == as_of_date.date():
+        is_rebalance_today = True
+        current_rebalance_date = pd.Timestamp(as_of_date.date())  # 语义上今日即为当前调仓日
 
     return {
         "is_rebalance_today": is_rebalance_today,
@@ -504,13 +510,11 @@ def send_discord_notification(
 
                 if not sell_ops.empty:
                     sell_text = ""
-                    for _, row in sell_ops.head(10).iterrows():
+                    for _, row in sell_ops.iterrows():
                         symbol = row["Symbol"]
                         weight = row.get("Weight", 0) * 100
                         sell_price = row.get("Sell_Price_Close", 0)
                         sell_text += f"• {symbol}: {weight:.1f}% @ ${sell_price:.2f}\n"
-                    if len(sell_ops) > 10:
-                        sell_text += f"... 及其他 {len(sell_ops) - 10} 只股票\n"
                     fields.append({
                         "name": f"🔴 卖出操作 ({len(sell_ops)} 只)",
                         "value": sell_text or "无",
@@ -519,13 +523,11 @@ def send_discord_notification(
 
                 if not buy_ops.empty:
                     buy_text = ""
-                    for _, row in buy_ops.head(10).iterrows():
+                    for _, row in buy_ops.iterrows():
                         symbol = row["Symbol"]
                         weight = row.get("Weight", 0) * 100
                         buy_price = row.get("Buy_Price_Close", 0)
                         buy_text += f"• {symbol}: {weight:.1f}% @ ${buy_price:.2f}\n"
-                    if len(buy_ops) > 10:
-                        buy_text += f"... 及其他 {len(buy_ops) - 10} 只股票\n"
                     fields.append({
                         "name": f"🟢 买入操作 ({len(buy_ops)} 只)",
                         "value": buy_text or "无",

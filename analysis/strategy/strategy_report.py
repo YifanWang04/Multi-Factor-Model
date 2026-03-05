@@ -116,6 +116,11 @@ class StrategyReporter:
         sheet2_df = self._build_sheet2_df()
         sheet3_df = self._build_sheet3_df(sheet2_df)
 
+        # 按夏普比率降序排序 Sheet1，并同步调整 Sheet2/Sheet3 的列顺序
+        sheet1_df, sheet2_df, sheet3_df = self._sort_by_sharpe(
+            sheet1_df, sheet2_df, sheet3_df
+        )
+
         if OPENPYXL_OK:
             self._write_with_format(output_path, sheet1_df, sheet2_df, sheet3_df)
         else:
@@ -179,6 +184,42 @@ class StrategyReporter:
         cum_ret = (1.0 + sheet2_df).cumprod() - 1.0
         cum_ret.index.name = "Date"
         return cum_ret
+
+    def _sort_by_sharpe(
+        self,
+        sheet1_df: pd.DataFrame,
+        sheet2_df: pd.DataFrame,
+        sheet3_df: pd.DataFrame,
+    ) -> tuple:
+        """
+        按夏普比率降序排序 Sheet1 行，并将 Sheet2/Sheet3 的列按相同顺序重排。
+        """
+        if "sharpe" not in sheet1_df.columns or len(sheet1_df) == 0:
+            return sheet1_df, sheet2_df, sheet3_df
+
+        # Sheet1：按夏普降序，NaN 置后
+        sheet1_sorted = sheet1_df.sort_values(
+            by="sharpe",
+            ascending=False,
+            na_position="last",
+        ).reset_index(drop=True)
+
+        # 取得排序后的策略名顺序
+        sorted_names = sheet1_sorted["strategy_name"].tolist()
+
+        # Sheet2/Sheet3：列按 sorted_names 重排，不在名单中的列置于末尾
+        def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
+            if len(df) == 0:
+                return df
+            in_order = [c for c in sorted_names if c in df.columns]
+            extra = [c for c in df.columns if c not in sorted_names]
+            new_order = in_order + extra
+            return df[new_order]
+
+        sheet2_reordered = reorder_columns(sheet2_df)
+        sheet3_reordered = reorder_columns(sheet3_df)
+
+        return sheet1_sorted, sheet2_reordered, sheet3_reordered
 
     # ------------------------------------------------------------------
     # Excel 写入与格式化
