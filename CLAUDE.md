@@ -24,7 +24,7 @@
 ```
 qqq/
 ├── data/                    # 原始数据
-│   ├── us_top100_daily_2023_present.xlsx   # 日频量价主数据，每个sheet对应一个股票一共有88个sheet
+│   ├── us_top100_daily_2023_present.xlsx   # 日频量价主数据，每个 sheet 对应一个股票（约 100 只）
 │   └── pull_yhfinance_Data.py             # 从 yfinance 拉取数据
 ├── pipeline/                # 数据与因子构建流水线
 │   ├── build_factors.py     # 从量价构建原始因子 → factor_raw/*.xlsx
@@ -134,6 +134,8 @@ python pipeline/build_factors.py
 6. **依赖：** 需 `.venv` 或相应虚拟环境，包含 pandas、numpy、scipy、sklearn、matplotlib、openpyxl、yfinance 等
 7. **run_detailed_backtest_report：** 需先运行 `run_composite_factor.py` 确保 `composite_factors.xlsx` 存在且含目标 sheet（如 `beta_m3_N10`）
 8. **Walk-Forward：** 训练/测试严格分离，因子处理与复合权重仅用训练期数据；`walk_forward_config.py` 控制时间窗口（训练 400d、测试 60d、步长 30d）、策略网格（120 组合）及输出
+9. **run_rebalance_day 策略名称：** 输出中的策略名称（如 `mvo_10G_Top1_P30d`）由 `TARGET_WEIGHT_METHOD`、`TARGET_GROUP_NUM`、`TARGET_RANK`、`TARGET_REBALANCE_DAYS` 动态生成，与配置一致
+10. **数据加载性能：** `load_price_data`、`load_return_data` 使用 `pd.concat` 一次性构建 DataFrame，避免 `frame.insert` 循环导致的 fragmentation 告警
 
 ---
 

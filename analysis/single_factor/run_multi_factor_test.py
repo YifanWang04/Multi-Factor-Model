@@ -57,7 +57,7 @@ except ImportError:
 def load_return_data(price_file, return_column="Return"):
     """从价格 Excel 加载日频收益率，与单因子一致。"""
     price_data = pd.read_excel(price_file, sheet_name=None)
-    ret = pd.DataFrame()
+    columns_dict = {}
     for ticker, df in price_data.items():
         if "Date" not in df.columns or "Adj Close" not in df.columns:
             continue
@@ -65,9 +65,12 @@ def load_return_data(price_file, return_column="Return"):
         df["Date"] = pd.to_datetime(df["Date"])
         df.set_index("Date", inplace=True)
         if return_column in df.columns:
-            ret[ticker] = df[return_column]
+            columns_dict[ticker] = df[return_column]
         else:
-            ret[ticker] = df["Adj Close"].pct_change()
+            columns_dict[ticker] = df["Adj Close"].pct_change()
+    if not columns_dict:
+        return pd.DataFrame()
+    ret = pd.concat(columns_dict, axis=1)
     ret = ret.replace([np.inf, -np.inf], np.nan)
     return ret
 

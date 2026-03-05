@@ -82,6 +82,12 @@ STRATEGY_PARAMS = {
     "rebalance_period": TARGET_REBALANCE_DAYS,
 }
 
+
+def _strategy_name() -> str:
+    """根据配置生成策略名称，如 mvo_10G_Top1_P30d。"""
+    return f"{TARGET_WEIGHT_METHOD}_{TARGET_GROUP_NUM}G_Top{TARGET_RANK}_P{TARGET_REBALANCE_DAYS}d"
+
+
 # Discord Webhook URL
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1478641216659652709/TRe7zHYv0x5AbYJMngnJbi1TbjUwXiOhIct-rze0wHFFYgi-Yqt320iGOCY4J1NUbq68"
 
@@ -103,14 +109,17 @@ def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.Data
     if not os.path.isfile(price_file):
         raise FileNotFoundError(f"价格文件不存在: {price_file}")
     price_data = pd.read_excel(price_file, sheet_name=None)
-    price_df = pd.DataFrame()
+    columns_dict = {}
     for ticker, df in price_data.items():
         if "Date" not in df.columns or price_column not in df.columns:
             continue
         df = df.copy()
         df["Date"] = pd.to_datetime(df["Date"])
         df = df.set_index("Date")
-        price_df[ticker] = df[price_column]
+        columns_dict[ticker] = df[price_column]
+    if not columns_dict:
+        return pd.DataFrame()
+    price_df = pd.concat(columns_dict, axis=1)
     price_df = price_df.apply(pd.to_numeric, errors="coerce")
     price_df.sort_index(inplace=True)
     return price_df
@@ -493,7 +502,7 @@ def send_discord_notification(
             description = (
                 factor_info
                 + f"**调仓日期：** {current_rb.date()}\n"
-                + f"**策略：** mvo_5G_Top2_P10d\n"
+                + f"**策略：** {_strategy_name()}\n"
                 f"**执行时间建议：** 美东时间 15:45-16:00（收盘前15分钟）\n\n"
                 f"**策略表现：**\n"
                 f"• 总收益率：{total_ret:.2%}\n"
@@ -616,7 +625,7 @@ def main(
     print("=" * 64)
     print("  调仓日全流程与报表")
     print(f"  输出目录: {run_dir}")
-    print("  策略参数: mvo_5G_Top2_P10d | 价格: Adj Close（收盘价）")
+    print(f"  策略参数: {_strategy_name()} | 价格: Adj Close（收盘价）")
     print("=" * 64)
 
     if not skip_pipeline:
@@ -631,7 +640,7 @@ def main(
     ret_df.sort_index(inplace=True)
     price_df = load_price_data(price_file, "Adj Close")
 
-    print("\n[阶段 3] 运行策略回测（mvo_5G_Top2_P10d）...")
+    print(f"\n[阶段 3] 运行策略回测（{_strategy_name()}）...")
     result = run_detailed_backtest(
         factor_df=factor_df,
         ret_df=ret_df,
