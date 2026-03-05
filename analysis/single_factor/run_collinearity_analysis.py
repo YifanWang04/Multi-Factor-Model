@@ -622,10 +622,9 @@ def main():
         FACTOR_FILES,
         FACTOR_PROCESSED_DIR,
         OUTPUT_DIR,
+        REBALANCE_PERIODS,
         get_all_factor_files,
     )
-
-    REBALANCE_PERIODS = [1, 5, 10]
 
     factor_list = FACTOR_FILES if FACTOR_FILES else get_all_factor_files(FACTOR_PROCESSED_DIR)
 

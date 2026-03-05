@@ -16,8 +16,8 @@ else:
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
 RETURN_COLUMN = "Return"
 
-# 选定因子的1-based索引（对应 factor_processed 目录排序后的因子）
-SELECTED_FACTOR_INDICES = [20, 16, 43, 17, 34]
+# 选定因子名称（如 alpha032、alpha095），按此顺序加载；不依赖文件排序
+SELECTED_FACTOR_NAMES = ["alpha095", "alpha032", "alpha042", "alpha020", "alpha073"]
 
 # 调仓周期（天）
 # ⚠️ 重要：此周期决定复合因子的生成频率
@@ -62,11 +62,8 @@ def get_selected_factor_files():
         # 调仓日流程已通过 REBALANCE_SELECTED_FACTORS 只构建了选定因子
         # factor_processed 中即为全部选定因子，直接返回
         return all_files
-    selected = []
-    for idx in SELECTED_FACTOR_INDICES:
-        if 1 <= idx <= len(all_files):
-            selected.append(all_files[idx - 1])
-    return selected
+    name_to_path = {get_factor_display_name(p): p for p in all_files}
+    return [name_to_path[n] for n in SELECTED_FACTOR_NAMES if n in name_to_path]
 
 
 def get_factor_display_name(filepath):

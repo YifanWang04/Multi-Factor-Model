@@ -27,7 +27,7 @@ from run_multi_factor_test import (
     load_return_data, load_factor,
     run_one_factor_one_period,
     build_sheet1_df, build_sheet2_df, build_long_excess_df, build_long_cumret_df,
-    write_excel_with_format,
+    write_excel_with_format, filter_factor_ret_by_lookback,
 )
 
 try:
@@ -98,7 +98,7 @@ def main():
     # 1. 加载数据
     factor_files = get_selected_factor_files()
     if not factor_files:
-        raise FileNotFoundError("未找到选定因子文件，请检查 SELECTED_FACTOR_INDICES 配置")
+        raise FileNotFoundError("未找到选定因子文件，请检查 SELECTED_FACTOR_NAMES 配置")
     print(f"选定因子文件 ({len(factor_files)} 个):")
     for f in factor_files:
         print(f"  {os.path.basename(f)}")
@@ -141,6 +141,7 @@ def main():
 
     factor_names = []
     records = []
+    records_3M, records_6M, records_1Y = [], [], []
     total = len(composite_dict)
     for i, (name, comp_df) in enumerate(composite_dict.items()):
         print(f"[{i+1}/{total}] 回测复合因子: {name}")
@@ -152,14 +153,29 @@ def main():
         factor_names.append(name)
         records.append(rec)
 
-    # 6. 输出2：集中回测报表 Excel
-    sheet1_df = build_sheet1_df(records, factor_names)
+        # 近期 3M / 6M / 1Y 的 factor_test_statistics
+        for lb_months, rec_list in [(3, records_3M), (6, records_6M), (12, records_1Y)]:
+            comp_filt, ret_filt = filter_factor_ret_by_lookback(comp_df, ret_periods, lb_months)
+            rec_lb = _run_composite_backtest(comp_filt, ret_filt, config)
+            rec_list.append(rec_lb)
+
+    # 6. 输出2：集中回测报表 Excel（前四个 sheet 每行按 long_annual_return 降序）
+    def _sort_by_return(df):
+        return df.sort_values(by="long_annual_return", ascending=False, na_position="last")
+
+    sheet1_df = _sort_by_return(build_sheet1_df(records, factor_names))
+    sheet1_3M_df = _sort_by_return(build_sheet1_df(records_3M, factor_names))
+    sheet1_6M_df = _sort_by_return(build_sheet1_df(records_6M, factor_names))
+    sheet1_1Y_df = _sort_by_return(build_sheet1_df(records_1Y, factor_names))
     sheet2_df = build_sheet2_df(records, factor_names)
     sheet3_df = build_long_excess_df(records, factor_names)
     sheet4_df = build_long_cumret_df(records, factor_names)
 
     out2 = os.path.join(OUTPUT_DIR, f"composite_backtest_report_P{REBALANCE_PERIOD}.xlsx")
-    write_excel_with_format(out2, sheet1_df, sheet2_df, sheet3_df, sheet4_df)
+    write_excel_with_format(
+        out2, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
+        sheet1_3M_df=sheet1_3M_df, sheet1_6M_df=sheet1_6M_df, sheet1_1Y_df=sheet1_1Y_df,
+    )
     print(f"回测报表已写入: {out2}")
 
 

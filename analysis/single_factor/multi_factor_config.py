@@ -29,7 +29,8 @@ REBALANCE_PERIODS = [5, 10]
 
 # 共线性分析：仅对指定因子运行（与多因子 report 中的行号一致，1-based）
 # 例如 [2, 10, 9, 8, 6] 表示第 2、10、9、8、6 个因子。留空 [] 表示使用全部因子
-COLLINEARITY_FACTOR_INDICES = [20, 16, 43, 17, 34]
+### other factors: 24共线性分析失败
+COLLINEARITY_FACTOR_INDICES = [95, 32, 42, 20, 64]
 
 # 共线性分析输出文件名前缀（调仓周期后缀由代码自动追加，如 _P5.xlsx）
 OUTPUT_COLLINEARITY_NAME = "factor_collinearity_report"
