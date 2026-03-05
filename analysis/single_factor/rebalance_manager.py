@@ -87,18 +87,12 @@ class RebalancePeriodManager:
             factor_date = available[-1]
             factor_value = self.factor.loc[factor_date]
             
-            # 持仓收益：(current_date, next_date]，跳过 current_date 当天
-            period_ret = self.ret.loc[current_date:next_date]
+            # 持仓收益：(current_date, next_date]，跳过 current_date 当天（current_date 可能不在 ret.index）
+            mask = (self.ret.index > current_date) & (self.ret.index <= next_date)
+            period_ret = self.ret.loc[mask]
             if len(period_ret) == 0:
                 continue
-            if len(period_ret) >= 2:
-                period_ret = period_ret.iloc[1:]
-            else:
-                period_ret = pd.DataFrame()
-            if len(period_ret) > 0:
-                cumulative_ret = (1 + period_ret).prod() - 1
-            else:
-                cumulative_ret = pd.Series(0.0, index=self.ret.columns)
+            cumulative_ret = (1 + period_ret).prod() - 1
             
             factor_periods.append(factor_value)
             ret_periods.append(cumulative_ret)

@@ -78,19 +78,23 @@ REBALANCE_DATE_OFFSET = 0
 def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.DataFrame:
     """
     加载日频价格数据，返回宽表 DataFrame(index=日期, columns=股票代码)。
+    使用 pd.concat 一次性构建，避免 frame.insert 循环导致的 fragmentation 告警。
     """
     if not os.path.isfile(price_file):
         raise FileNotFoundError(f"价格文件不存在: {price_file}")
 
     price_data = pd.read_excel(price_file, sheet_name=None)
-    price_df = pd.DataFrame()
+    columns_dict = {}
     for ticker, df in price_data.items():
         if "Date" not in df.columns or price_column not in df.columns:
             continue
         df = df.copy()
         df["Date"] = pd.to_datetime(df["Date"])
         df = df.set_index("Date")
-        price_df[ticker] = df[price_column]
+        columns_dict[ticker] = df[price_column]
+    if not columns_dict:
+        return pd.DataFrame()
+    price_df = pd.concat(columns_dict, axis=1)
     price_df = price_df.apply(pd.to_numeric, errors="coerce")
     price_df.sort_index(inplace=True)
     return price_df

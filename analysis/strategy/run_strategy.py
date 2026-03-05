@@ -85,6 +85,8 @@ def main():
     # ── 1. 加载复合因子 ────────────────────────────────────────────────
     print(f"\n[1/4] 加载复合因子: {cfg.COMPOSITE_FACTOR_SHEET}")
     factor_df = load_composite_factor(cfg.COMPOSITE_FACTOR_FILE, cfg.COMPOSITE_FACTOR_SHEET)
+    if factor_df.empty or len(factor_df) == 0:
+        raise ValueError("复合因子数据为空，请检查 COMPOSITE_FACTOR_FILE 与 COMPOSITE_FACTOR_SHEET")
     print(f"      因子形状: {factor_df.shape}  "
           f"日期范围: {factor_df.index[0].date()} ~ {factor_df.index[-1].date()}")
 

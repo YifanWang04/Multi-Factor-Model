@@ -54,7 +54,9 @@ for i, code in enumerate(codes, 1):
         print(f"{code} has no data")
         continue
 
-    df.columns = df.columns.get_level_values(0)
+    # 单标的 yf.download 可能返回单级或 MultiIndex 列名
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
 
     df.reset_index(inplace=True)
     df["Ticker"] = code
@@ -63,18 +65,19 @@ for i, code in enumerate(codes, 1):
 
 # 3. write into Excel (multiple sheets)
 
+if not data_dict:
+    raise RuntimeError("没有成功下载任何股票数据，请检查网络或股票代码")
+
 _run_dir = os.environ.get("REBALANCE_RUN_DIR")
 if _run_dir:
     _out_path = os.path.join(_run_dir, "data", "us_top100_daily_2023_present.xlsx")
     os.makedirs(os.path.dirname(_out_path), exist_ok=True)
 else:
     _out_path = "data/us_top100_daily_2023_present.xlsx"
-writer = pd.ExcelWriter(_out_path, engine="xlsxwriter")
 
-for sheet_name, df in data_dict.items():
-    df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-    print(f"Saved sheet: {sheet_name}")
-
-writer.close()
+with pd.ExcelWriter(_out_path, engine="xlsxwriter") as writer:
+    for sheet_name, df in data_dict.items():
+        df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+        print(f"Saved sheet: {sheet_name}")
 
 print("Data download completed.")

@@ -225,12 +225,16 @@ def _run_composite_backtest(comp_df, ret_periods, config):
     }
 
     cols = group_returns.columns.tolist()
-    if len(cols) < 4:
+    if len(cols) >= 4:
+        top2_cols, bottom2_cols = cols[-2:], cols[:2]
+    elif len(cols) >= 2:
+        # 分组 2~3 组时，根据实际列动态选取，避免与真实组号不一致
+        top2_cols, bottom2_cols = cols[-2:], cols[:2]
+    else:
+        # 分组不足 2 组时无法做多空，用占位零收益
         idx = group_returns.index if len(group_returns) > 0 else rp.index
         group_returns = pd.DataFrame(np.zeros((len(idx), 4)), index=idx, columns=[1, 2, 3, 4])
         top2_cols, bottom2_cols = [4, 3], [1, 2]
-    else:
-        top2_cols, bottom2_cols = cols[-2:], cols[:2]
 
     long_combined = group_returns[top2_cols].mean(axis=1)
     short_combined_raw = group_returns[bottom2_cols].mean(axis=1)

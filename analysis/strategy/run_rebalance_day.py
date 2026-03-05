@@ -225,11 +225,14 @@ def get_rebalance_day_status(
         is_rebalance_today = True
         current_rebalance_date = pd.Timestamp(as_of_date.date())  # 语义上今日即为当前调仓日
 
+    # 合并：数据内已有未来调仓日 + 推算的更远日期，去重排序（否则报表会漏掉数据内的未来调仓日）
+    all_future = sorted(set(future_in_data) | set(future_dates))
+
     return {
         "is_rebalance_today": is_rebalance_today,
         "current_rebalance_date": current_rebalance_date,
         "next_rebalance_date": next_rebalance_date,
-        "future_rebalance_dates": future_dates,
+        "future_rebalance_dates": all_future,
         "all_rebalance_dates": rebalance_dates,
     }
 
