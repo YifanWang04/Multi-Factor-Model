@@ -4,17 +4,19 @@
 输入：多个因子 Excel、收益率 Excel
 处理：对每个因子调用单因子测试流程（单周期），汇总 IC/多空/多头超额等指标
 输出：多因子集中测试报表 Excel
-  - Sheet1 (factor_test_statistics) : 因子 × 指标汇总表
+  - Sheet1 (factor_test_statistics) : 因子 × 指标汇总表（全样本）
+  - Sheet (factor_test_statistics_3M) : 同上，测试数据为近期三个月
+  - Sheet (factor_test_statistics_6M) : 同上，测试数据为近期半年
+  - Sheet (factor_test_statistics_1Y) : 同上，测试数据为近期一年
       列：ic_mean, ic_ir, ic_t_value, rank_ic_mean, rank_ic_ir, rank_ic_t_value,
           group_rank_ic_mean, group_rank_ic_ir, group_rank_ic_t_value,
           long_annual_return, long_sharpe,
           long_excess_annual, long_excess_sharpe,
           ic_p_value, rank_ic_p_value, group_rank_ic_p_value
-          （多空 ls_* 与空头 short_* 已注释，可按需启用）
       色阶：p 值越小越绿；其余指标越大越红
-  - Sheet2 (factor_cum_ic)      : 日期 × 因子 = 累计 IC，附折线图
-  - Sheet3 (factor_LE_cum_ret)  : 日期 × 因子 = 多头累计超额收益率（多头 - 市场），附折线图
-  - Sheet4 (factor_L_cum_ret)   : 日期 × 因子 = 多头累计收益率，附折线图
+  - Sheet (factor_cum_ic)      : 日期 × 因子 = 累计 IC，附折线图
+  - Sheet (factor_LE_cum_ret)  : 日期 × 因子 = 多头累计超额收益率（多头 - 市场），附折线图
+  - Sheet (factor_L_cum_ret)   : 日期 × 因子 = 多头累计收益率，附折线图
 """
 import os
 import sys
@@ -76,6 +78,21 @@ def load_factor(factor_file, sheet_name=0):
     factor.index = pd.to_datetime(factor.index)
     factor = factor.apply(pd.to_numeric, errors="coerce")
     return factor
+
+
+def filter_factor_ret_by_lookback(factor, ret, lookback_months):
+    """
+    按近 N 个月过滤因子与收益率数据。
+    lookback_months: int, 如 3/6/12 表示近期三个月/半年/一年
+    Returns: (factor_filtered, ret_filtered)，若数据不足则返回空 DataFrame。
+    """
+    if factor.empty or ret.empty:
+        return factor.head(0), ret.head(0)
+    end_date = min(factor.index.max(), ret.index.max())
+    start_date = end_date - pd.DateOffset(months=lookback_months)
+    factor_filtered = factor[(factor.index >= start_date) & (factor.index <= end_date)].copy()
+    ret_filtered = ret[(ret.index >= start_date) & (ret.index <= end_date)].copy()
+    return factor_filtered, ret_filtered
 
 
 def iter_factors_from_files(factor_files, get_factor_display_name):
@@ -329,16 +346,23 @@ def build_long_cumret_df(records, factor_names):
     return align_cumulative_series(cum_long)
 
 
-def write_excel_with_format(out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df):
+def write_excel_with_format(
+    out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
+    sheet1_3M_df=None, sheet1_6M_df=None, sheet1_1Y_df=None,
+):
     """
-    写入 Excel：Sheet1 色阶，Sheet2/3/4 数据+折线图。
+    写入 Excel：Sheet1 色阶，Sheet2/3/4 数据+折线图；可选：近期 3M/6M/1Y 的 factor_test_statistics。
 
     Parameters
     ----------
     sheet3_df : 多头累计超额收益率（多头 - 市场基准）→ Sheet3 factor_LE_cum_ret
     sheet4_df : 多头累计收益率                         → Sheet4 factor_L_cum_ret
+    sheet1_3M_df / sheet1_6M_df / sheet1_1Y_df : 近期三个月/半年/一年的因子统计表（格式同 factor_test_statistics）
     """
     SHEET1_NAME = "factor_test_statistics"
+    SHEET1_3M_NAME = "factor_test_statistics_3M"
+    SHEET1_6M_NAME = "factor_test_statistics_6M"
+    SHEET1_1Y_NAME = "factor_test_statistics_1Y"
     SHEET2_NAME = "factor_cum_ic"
     SHEET3_NAME = "factor_LE_cum_ret"
     SHEET4_NAME = "factor_L_cum_ret"
@@ -351,6 +375,12 @@ def write_excel_with_format(out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df
             engine = "xlsxwriter"
         with pd.ExcelWriter(out_path, engine=engine) as writer:
             sheet1_df.to_excel(writer, sheet_name=SHEET1_NAME)
+            if sheet1_3M_df is not None:
+                sheet1_3M_df.to_excel(writer, sheet_name=SHEET1_3M_NAME)
+            if sheet1_6M_df is not None:
+                sheet1_6M_df.to_excel(writer, sheet_name=SHEET1_6M_NAME)
+            if sheet1_1Y_df is not None:
+                sheet1_1Y_df.to_excel(writer, sheet_name=SHEET1_1Y_NAME)
             sheet2_df.to_excel(writer, sheet_name=SHEET2_NAME)
             sheet3_df.to_excel(writer, sheet_name=SHEET3_NAME)
             sheet4_df.to_excel(writer, sheet_name=SHEET4_NAME)
@@ -436,6 +466,53 @@ def write_excel_with_format(out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df
                     end_type="max",          end_color=_GREEN,
                 ),
             )
+
+    # 近期 3M / 6M / 1Y 的 factor_test_statistics（格式与 Sheet1 一致，含色阶）
+    def _write_statistics_sheet(ws, df, sheet_title):
+        """将统计表写入 worksheet，并应用与 factor_test_statistics 相同的色阶。"""
+        ws.title = sheet_title
+        ws.cell(row=1, column=1, value=df.index.name or "factor_name")
+        for c_idx, col_name in enumerate(df.columns, 2):
+            ws.cell(row=1, column=c_idx, value=col_name)
+        for r_idx, (idx_val, row_vals) in enumerate(zip(df.index, df.values), 2):
+            ws.cell(row=r_idx, column=1, value=idx_val)
+            for c_idx, val in enumerate(row_vals, 2):
+                ws.cell(row=r_idx, column=c_idx, value=_cell_val(val))
+        p_value_cols = ["ic_p_value", "rank_ic_p_value", "group_rank_ic_p_value"]
+        col_names = list(df.columns)
+        data_rows = len(df) + 1
+        for c_idx, col_name in enumerate(col_names, 2):
+            cell_range = (
+                f"{openpyxl.utils.get_column_letter(c_idx)}2:"
+                f"{openpyxl.utils.get_column_letter(c_idx)}{data_rows}"
+            )
+            if col_name in p_value_cols:
+                ws.conditional_formatting.add(
+                    cell_range,
+                    ColorScaleRule(
+                        start_type="min", start_color=_GREEN,
+                        mid_type="percentile", mid_value=50, mid_color=_YELLOW,
+                        end_type="max", end_color=_RED,
+                    ),
+                )
+            else:
+                ws.conditional_formatting.add(
+                    cell_range,
+                    ColorScaleRule(
+                        start_type="min", start_color=_RED,
+                        mid_type="percentile", mid_value=50, mid_color=_YELLOW,
+                        end_type="max", end_color=_GREEN,
+                    ),
+                )
+
+    for lb_df, lb_name in [
+        (sheet1_3M_df, SHEET1_3M_NAME),
+        (sheet1_6M_df, SHEET1_6M_NAME),
+        (sheet1_1Y_df, SHEET1_1Y_NAME),
+    ]:
+        if lb_df is not None:
+            ws_lb = wb.create_sheet(lb_name)
+            _write_statistics_sheet(ws_lb, lb_df, lb_name)
 
     # Sheet2: 行=调仓日，列=因子名，值=累计 IC
     ws2 = wb.create_sheet(SHEET2_NAME)
@@ -603,6 +680,7 @@ def run_multi_factor_test(
         raise ValueError(
             "未找到任何有效因子，请检查因子 Excel 是否含多 sheet 且每 sheet 有至少 2 行有效数据"
         )
+    records_3M, records_6M, records_1Y = [], [], []
     for i, (name, factor) in enumerate(factor_list):
         print(f"[{i+1}/{len(factor_list)}] 因子: {name}")
         rec = run_one_factor_one_period(factor, ret, rebalance_period, config)
@@ -611,13 +689,33 @@ def run_multi_factor_test(
         factor_names.append(name)
         records.append(rec)
 
-    sheet1_df = build_sheet1_df(records, factor_names)
+        # 不同时效性：近期三个月、半年、一年
+        for lb_months, rec_list in [(3, records_3M), (6, records_6M), (12, records_1Y)]:
+            f_filt, r_filt = filter_factor_ret_by_lookback(factor, ret, lb_months)
+            rec_lb = run_one_factor_one_period(f_filt, r_filt, rebalance_period, config)
+            rec_list.append(rec_lb)
+
+    sheet1_df = build_sheet1_df(records, factor_names).sort_values(
+        by="long_annual_return", ascending=False
+    )
+    sheet1_3M_df = build_sheet1_df(records_3M, factor_names).sort_values(
+        by="long_annual_return", ascending=False
+    )
+    sheet1_6M_df = build_sheet1_df(records_6M, factor_names).sort_values(
+        by="long_annual_return", ascending=False
+    )
+    sheet1_1Y_df = build_sheet1_df(records_1Y, factor_names).sort_values(
+        by="long_annual_return", ascending=False
+    )
     sheet2_df = build_sheet2_df(records, factor_names)
     sheet3_df = build_long_excess_df(records, factor_names)   # Sheet3: 多头累计超额
     sheet4_df = build_long_cumret_df(records, factor_names)   # Sheet4: 多头累计收益率
 
     out_path = os.path.join(output_dir, output_name)
-    write_excel_with_format(out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df)
+    write_excel_with_format(
+        out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
+        sheet1_3M_df=sheet1_3M_df, sheet1_6M_df=sheet1_6M_df, sheet1_1Y_df=sheet1_1Y_df,
+    )
     print(f"报表已写入: {out_path}")
     return out_path
 

@@ -65,10 +65,10 @@ COMPOSITE_FACTOR_SHEET = "beta_m3_N10"
 # 仅构建和处理这 5 个因子，不创建多余因子
 SELECTED_FACTOR_NAMES = ["alpha020", "alpha016", "alpha043", "alpha017", "alpha034"]
 
-# 策略参数：mvo_5G_Top2_P10d
+# 策略参数：mvo_5G_Top1_P10d
 TARGET_WEIGHT_METHOD = "mvo"
 TARGET_GROUP_NUM = 5
-TARGET_RANK = 2
+TARGET_RANK = 1
 TARGET_REBALANCE_DAYS = 10
 
 # 调仓日偏移（天数）：正数=提前，负数=延后

@@ -41,7 +41,7 @@ TARGET_GROUP_RANKS = [1, 2, 3]
 REBALANCE_PERIODS = [10, 20, 30, 60]
 
 # 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移
-REBALANCE_DATE_OFFSET = 0
+REBALANCE_DATE_OFFSET = 6
 
 # 权重方法
 WEIGHT_METHODS = ["equal", "min_variance", "mvo", "max_return", "factor_score"]

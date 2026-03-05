@@ -40,7 +40,7 @@ OUTPUT_EXCEL_NAME = "strategy_backtest_report.xlsx"
 GROUP_NUMS = [5, 10]
 
 # 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移
-REBALANCE_DATE_OFFSET = 0
+REBALANCE_DATE_OFFSET = 6
 
 # 调仓周期（日历天数）
 # 注意：系统从复合因子已有的调仓日期序列中取样，实际最小精度 = 因子原生周期

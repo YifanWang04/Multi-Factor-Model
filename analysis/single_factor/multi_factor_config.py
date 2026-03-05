@@ -25,7 +25,7 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "multi_factor_reports")
 OUTPUT_EXCEL_NAME = "multi_factor_test_report.xlsx"  # 可改为 factor_test_report.xlsx 等
 
 # 调仓周期列表（天）：每个周期生成一份独立报表，在此处统一配置
-REBALANCE_PERIODS = [1, 5, 10]
+REBALANCE_PERIODS = [5, 10]
 
 # 共线性分析：仅对指定因子运行（与多因子 report 中的行号一致，1-based）
 # 例如 [2, 10, 9, 8, 6] 表示第 2、10、9、8、6 个因子。留空 [] 表示使用全部因子
