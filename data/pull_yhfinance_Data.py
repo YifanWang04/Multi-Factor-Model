@@ -29,7 +29,10 @@ codes = [
     "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
     "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "MMC", "TGT",
     "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
-    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC"
+    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", 'CCJ', 'SVM',
+    'WPM', 'PAAS', 'TSM', 'MU', 'PLTR', 'WDC', 'STX', 'VRT',
+    'TER', 'AEP', 'TTMI', 'RKLB', 'ASTS', 'SNDK', 'RMBS', 'ONDS', 'HROW',
+    'SANM', 'ANET' 
 ]
 
 # 2. get data

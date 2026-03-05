@@ -9,7 +9,7 @@
 - process_factor_df(df)：对数值列先 MAD 去极值再 Z-score，保留索引与列名。
 - process_factor_excel(input_excel, output_excel, reference_excel=None)：读入多 sheet 因子表，可选用 reference_excel 的日期列修复或对齐索引，再调用 process_factor_df 写回。
 
-直接运行本文件时：遍历 factor_raw 中 factor_*.xlsx，输出到 factor_processed 下同名_processed.xlsx，参考日期默认使用 data/us_top100_daily_2023_present.xlsx 第一 sheet 的 Date 列。
+直接运行本文件时：遍历 factor_raw 中 factor_*.xlsx，输出到 factor_processed 下同名_processed.xlsx，参考日期默认使用 data/us_top100_daily_2023_present.xlsx 第一 sheet 的 Date 列。若某因子 Excel 的数值全为空/NaN/0，则删除该因子输入及对应输出文件，并在结束时 output 标记。
 """
 
 import numpy as np
@@ -61,6 +61,29 @@ def process_factor_df(df):
     df_numeric.index = original_index
     
     return df_numeric
+
+def is_factor_all_empty_nan_or_zero(excel_path):
+    """
+    检查因子 Excel 是否全为空 / NaN / 0。
+    若所有 sheet 的数值列均无有效数据（非空且非零），返回 True。
+    """
+    try:
+        sheets = pd.read_excel(excel_path, sheet_name=None, index_col=0)
+    except Exception:
+        return False
+    if not sheets:
+        return True
+    for sheet_name, df in sheets.items():
+        if df.empty:
+            continue
+        df_num = df.select_dtypes(include=[np.number])
+        if df_num.empty:
+            continue
+        mask_valid = df_num.notna() & (df_num != 0)
+        if mask_valid.any().any():
+            return False
+    return True
+
 
 def process_factor_excel(input_excel, output_excel, reference_excel=None):
     """
@@ -153,6 +176,8 @@ if __name__ == "__main__":
     print("因子数据处理（去极值 + 标准化）")
     print("=" * 60)
 
+    removed_empty_factors = []
+
     for file in os.listdir(input_dir):
         if file.startswith("factor_") and file.endswith(".xlsx"):
             if files_to_process is not None and file not in files_to_process:
@@ -162,6 +187,24 @@ if __name__ == "__main__":
                 output_dir,
                 file.replace(".xlsx", "_processed.xlsx")
             )
+
+            # 检查是否全为空/NaN/0，若是则删除并跳过
+            if is_factor_all_empty_nan_or_zero(input_path):
+                factor_name = file.replace("factor_", "").replace(".xlsx", "")
+                removed_empty_factors.append(factor_name)
+                print(f"\n[跳过] {file}：因子值全为空/NaN/0，已删除")
+                try:
+                    os.remove(input_path)
+                    print(f"  已删除: {input_path}")
+                except OSError as e:
+                    print(f"  删除输入文件失败: {e}")
+                try:
+                    if os.path.exists(output_path):
+                        os.remove(output_path)
+                        print(f"  已删除: {output_path}")
+                except OSError as e:
+                    print(f"  删除输出文件失败: {e}")
+                continue
 
             print(f"\n处理 {file} ...")
             
@@ -179,4 +222,10 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 60)
     print("所有因子文件处理完成")
+    if removed_empty_factors:
+        print("-" * 60)
+        print("已删除的空因子（全为空/NaN/0）:")
+        for name in removed_empty_factors:
+            print(f"  - {name}")
+        print("-" * 60)
     print("=" * 60)

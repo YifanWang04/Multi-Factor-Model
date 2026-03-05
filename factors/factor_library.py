@@ -1,7 +1,7 @@
 """
 因子库 (factors/factor_library.py)
 =====================================
-本模块实现 WorldQuant 101 Alpha 中的前 50 个因子（除需要行业中性化的 Alpha#48），
+本模块实现 WorldQuant 101 Alpha 中的因子（Alpha#1–101，除需行业中性化的 #48、#56、#58–59、#63、#67、#69–70、#76、#79–80、#82、#87、#89–91、#93、#97、#100），
 以及供 pipeline 使用的配置与元数据。
 
 因子函数约定：
@@ -752,6 +752,459 @@ def alpha050(volume, vwap):
 
 
 # ============================================================
+# WorldQuant 101 Alpha 因子（Alpha#51 ~ Alpha#101）
+# ============================================================
+
+def alpha051(close):
+    """
+    Alpha#51: (加速度 < -0.05) ? 1 : -1*delta(close,1)
+
+    逻辑：价格加速度低于 -0.05 时做多，否则按日内变化反转。
+    """
+    inner = ((delay(close, 20) - delay(close, 10)) / 10) - ((delay(close, 10) - close) / 10)
+    base = (-1 * delta(close, 1)).values.copy()
+    base[inner.values < -0.05] = 1
+    return pd.DataFrame(base, index=close.index, columns=close.columns)
+
+
+def alpha052(returns, low, volume):
+    """
+    Alpha#52: ((-1*delta(ts_min(low,5),5)) * rank((ts_sum(returns,240)-ts_sum(returns,20))/220))
+              * ts_rank(volume,5)
+
+    逻辑：低价 5 期最小值的 5 期差分负值，乘以长期/短期收益和之差的排名，乘以成交量时序排名。
+    """
+    return (
+        (-1 * delta(ts_min(low, 5), 5))
+        * rank((ts_sum(returns, 240) - ts_sum(returns, 20)) / 220)
+        * ts_rank(volume, 5)
+    )
+
+
+def alpha053(close, high, low):
+    """
+    Alpha#53: -1 * delta(((close-low)-(high-close))/(close-low), 9)
+
+    逻辑：日内位置（相对振幅）的 9 期差分负值。
+    """
+    inner = (close - low).replace(0, 1e-10)
+    return -1 * delta(((close - low) - (high - close)) / inner, 9)
+
+
+def alpha054(close, open_, high, low):
+    """
+    Alpha#54: -1 * (low-close) * (open^5) / ((low-high) * (close^5))
+
+    逻辑：低价偏离收盘与开盘五次方，除以振幅与收盘五次方。
+    """
+    denom = (low - high).replace(0, -1e-10)
+    return -1 * (low - close) * (open_ ** 5) / (denom * (close ** 5))
+
+
+def alpha055(close, high, low, volume):
+    """
+    Alpha#55: -1 * correlation(rank((close-ts_min(low,12))/(ts_max(high,12)-ts_min(low,12))),
+                              rank(volume), 6)
+
+    逻辑：收盘在振幅内位置的排名与成交量排名的 6 期相关系数负值。
+    """
+    divisor = (ts_max(high, 12) - ts_min(low, 12)).replace(0, 1e-10)
+    inner = (close - ts_min(low, 12)) / divisor
+    df = correlation(rank(inner), rank(volume), 6)
+    return -1 * df.replace([-np.inf, np.inf], 0).fillna(0)
+
+
+def alpha057(close, vwap):
+    """
+    Alpha#57: -1 * (close - vwap) / decay_linear(rank(ts_argmax(close, 30)), 2)
+
+    逻辑：收盘偏离 VWAP 除以收盘 30 期 argmax 排名的线性衰减。
+    """
+    denom = decay_linear(rank(ts_argmax(close, 30)), 2)
+    denom = denom.replace(0, np.nan)
+    return -1 * (close - vwap) / denom
+
+
+def alpha060(close, high, low, volume):
+    """
+    Alpha#60: -1 * (2*scale(rank(((close-low)-(high-close))/(high-low)*volume))
+                  - scale(rank(ts_argmax(close,10))))
+
+    逻辑：日内位置乘成交量的排名缩放，减去收盘 argmax 排名的缩放。
+    """
+    divisor = (high - low).replace(0, 1e-10)
+    inner = ((close - low) - (high - close)) * volume / divisor
+    return -1 * (2 * scale(rank(inner)) - scale(rank(ts_argmax(close, 10))))
+
+
+def alpha061(volume, vwap):
+    """
+    Alpha#61: rank(vwap - ts_min(vwap,16)) < rank(correlation(vwap, adv180, 18))
+
+    逻辑：VWAP 偏离 16 期低点的排名，与 VWAP 和 180 日均量的相关系数排名比较。
+    """
+    adv180 = sma(volume, 180)
+    corr = correlation(vwap, adv180, 18).replace([-np.inf, np.inf], 0).fillna(0)
+    return (rank(vwap - ts_min(vwap, 16)) < rank(corr)).astype(float)
+
+
+def alpha062(volume, open_, high, low, vwap):
+    """
+    Alpha#62: (rank(correlation(vwap,sma(adv20,22),10))
+              < rank((rank(open)+rank(open) < rank((high+low)/2)+rank(high)))) * -1
+
+    逻辑：VWAP 与均量均值的相关系数排名，与开盘与高低价排名条件比较，取负。
+    """
+    adv20 = sma(volume, 20)
+    corr = correlation(vwap, sma(adv20, 22), 10).replace([-np.inf, np.inf], 0).fillna(0)
+    cond = (rank(open_) + rank(open_)) < (rank((high + low) / 2) + rank(high))
+    return (rank(corr) < rank(cond.astype(float))).astype(float) * -1
+
+
+def alpha064(volume, open_, high, low, vwap):
+    """
+    Alpha#64: (rank(correlation(ts_sum(open*0.178+low*0.822,13), ts_sum(adv120,13), 17))
+              < rank(delta(((high+low)/2*0.178+vwap*0.822), 4))) * -1
+
+    逻辑：加权开盘低价与均量的相关系数排名，与加权中间价 VWAP 的 4 期差分排名比较。
+    """
+    adv120 = sma(volume, 120)
+    mix1 = ts_sum(open_ * 0.178404 + low * (1 - 0.178404), 13)
+    mix2 = ts_sum(adv120, 13)
+    corr = correlation(mix1, mix2, 17).replace([-np.inf, np.inf], 0).fillna(0)
+    hl_vwap = (high + low) / 2 * 0.178404 + vwap * (1 - 0.178404)
+    return (rank(corr) < rank(delta(hl_vwap, 4))).astype(float) * -1
+
+
+def alpha065(volume, open_, vwap):
+    """
+    Alpha#65: (rank(correlation(open*0.008+vwap*0.992, sma(adv60,9), 6))
+              < rank(open - ts_min(open,14))) * -1
+
+    逻辑：加权开盘 VWAP 与均量相关的排名，与开盘偏离 14 期低点的排名比较。
+    """
+    adv60 = sma(volume, 60)
+    mix = open_ * 0.00817205 + vwap * (1 - 0.00817205)
+    corr = correlation(mix, sma(adv60, 9), 6).replace([-np.inf, np.inf], 0).fillna(0)
+    return (rank(corr) < rank(open_ - ts_min(open_, 14))).astype(float) * -1
+
+
+def alpha066(open_, high, low, vwap):
+    """
+    Alpha#66: (rank(decay_linear(delta(vwap,4),7))
+              + ts_rank(decay_linear((low-vwap)/(open-(high+low)/2), 11), 7)) * -1
+
+    逻辑：VWAP 4 期差分的线性衰减排名，加上低价偏离 VWAP 相对开盘中间价差的衰减时序排名。
+    """
+    p1 = rank(decay_linear(delta(vwap, 4), 7))
+    inner = (low - vwap) / (open_ - (high + low) / 2).replace(0, np.nan)
+    p2 = ts_rank(decay_linear(inner, 11), 7)
+    return (p1 + p2) * -1
+
+
+# def alpha068(volume, close, high, low):
+#     """
+#     Alpha#68: (ts_rank(correlation(rank(high), rank(adv15), 9), 14)
+#               < rank(delta(close*0.518+low*0.482, 1))) * -1
+#
+#     逻辑：高价与 15 日均量排名的相关系数时序排名，与加权收盘低价 1 期差分排名比较。
+#     """
+#     adv15 = sma(volume, 15)
+#     corr = correlation(rank(high), rank(adv15), 9).replace([-np.inf, np.inf], 0).fillna(0)
+#     mix = close * 0.518371 + low * (1 - 0.518371)
+#     return (ts_rank(corr, 14) < rank(delta(mix, 1))).astype(float) * -1
+# 注释：输出为0或空集
+
+
+def alpha071(volume, close, open_, low, vwap):
+    """
+    Alpha#71: max(ts_rank(decay_linear(correlation(ts_rank(close,3),ts_rank(adv180,12),18),4),16),
+                 ts_rank(decay_linear(rank((low+open)-(vwap+vwap))^2, 16), 4))
+
+    逻辑：收盘与均量时序相关衰减的时序排名，与开盘低价偏离 VWAP 排名的衰减时序排名取大。
+    """
+    adv180 = sma(volume, 180)
+    p1 = ts_rank(decay_linear(correlation(ts_rank(close, 3), ts_rank(adv180, 12), 18), 4), 16)
+    inner = rank((low + open_) - (vwap + vwap)) ** 2
+    p2 = ts_rank(decay_linear(inner, 16), 4)
+    return pd.DataFrame(
+        np.maximum(p1.values, p2.values),
+        index=p1.index, columns=p1.columns,
+    )
+
+
+def alpha072(volume, high, low, vwap):
+    """
+    Alpha#72: rank(decay_linear(correlation((high+low)/2, adv40, 9), 10))
+             / rank(decay_linear(correlation(ts_rank(vwap,4), ts_rank(volume,19), 7), 3))
+
+    逻辑：中间价与 40 日均量相关的线性衰减排名，除以 VWAP 与成交量时序相关衰减排名。
+    """
+    adv40 = sma(volume, 40)
+    p1 = rank(decay_linear(correlation((high + low) / 2, adv40, 9), 10))
+    corr2 = correlation(ts_rank(vwap, 4), ts_rank(volume, 19), 7).replace([-np.inf, np.inf], 0).fillna(0)
+    p2 = rank(decay_linear(corr2, 3))
+    return p1 / p2.replace(0, np.nan)
+
+
+def alpha073(open_, high, low, vwap):
+    """
+    Alpha#73: max(rank(decay_linear(delta(vwap,5),3)),
+                 ts_rank(decay_linear(delta(open*0.147+low*0.853,2)/(open*0.147+low*0.853)*-1,3),17)) * -1
+
+    逻辑：VWAP 5 期差分衰减排名与加权开盘低价变化衰减时序排名的最大值取负。
+    """
+    p1 = rank(decay_linear(delta(vwap, 5), 3))
+    mix = open_ * 0.147155 + low * (1 - 0.147155)
+    inner = (delta(mix, 2) / mix.replace(0, np.nan) * -1)
+    p2 = ts_rank(decay_linear(inner, 3), 17)
+    return pd.DataFrame(
+        np.maximum(p1.values, p2.values) * -1,
+        index=p1.index, columns=p1.columns,
+    )
+
+
+def alpha074(volume, close, high, vwap):
+    """
+    Alpha#74: (rank(correlation(close, sma(adv30,37), 15))
+              < rank(correlation(rank(high*0.027+vwap*0.973), rank(volume), 11))) * -1
+
+    逻辑：收盘与均量均值的相关系数排名，与加权高价 VWAP 排名和成交量排名的相关系数排名比较。
+    """
+    adv30 = sma(volume, 30)
+    corr1 = correlation(close, sma(adv30, 37), 15).replace([-np.inf, np.inf], 0).fillna(0)
+    mix = high * 0.0261661 + vwap * (1 - 0.0261661)
+    corr2 = correlation(rank(mix), rank(volume), 11).replace([-np.inf, np.inf], 0).fillna(0)
+    return (rank(corr1) < rank(corr2)).astype(float) * -1
+
+
+def alpha075(volume, vwap, low):
+    """
+    Alpha#75: rank(correlation(vwap, volume, 4)) < rank(correlation(rank(low), rank(adv50), 12))
+
+    逻辑：VWAP 与成交量的 4 期相关排名，与低价和 50 日均量排名的 12 期相关排名比较。
+    """
+    adv50 = sma(volume, 50)
+    corr1 = correlation(vwap, volume, 4).replace([-np.inf, np.inf], 0).fillna(0)
+    corr2 = correlation(rank(low), rank(adv50), 12).replace([-np.inf, np.inf], 0).fillna(0)
+    return (rank(corr1) < rank(corr2)).astype(float)
+
+
+def alpha077(volume, high, low, vwap):
+    """
+    Alpha#77: min(rank(decay_linear(((high+low)/2+high)-(vwap+high), 20)),
+                 rank(decay_linear(correlation((high+low)/2, adv40, 3), 6)))
+
+    逻辑：振幅与 VWAP 偏离的线性衰减排名，与中间价和 40 日均量相关衰减排名取小。
+    """
+    adv40 = sma(volume, 40)
+    p1 = rank(decay_linear(((high + low) / 2 + high) - (vwap + high), 20))
+    corr = correlation((high + low) / 2, adv40, 3).replace([-np.inf, np.inf], 0).fillna(0)
+    p2 = rank(decay_linear(corr, 6))
+    return pd.DataFrame(
+        np.minimum(p1.values, p2.values),
+        index=p1.index, columns=p1.columns,
+    )
+
+
+def alpha078(volume, low, vwap):
+    """
+    Alpha#78: rank(correlation(ts_sum(low*0.352+vwap*0.648, 20), ts_sum(adv40,20), 7))
+              ** rank(correlation(rank(vwap), rank(volume), 6))
+
+    逻辑：加权低价 VWAP 的 20 期和与均量和的相关系数排名，以量价相关排名为幂。
+    """
+    adv40 = sma(volume, 40)
+    mix = low * 0.352233 + vwap * (1 - 0.352233)
+    corr1 = correlation(ts_sum(mix, 20), ts_sum(adv40, 20), 7).replace([-np.inf, np.inf], 0).fillna(0)
+    corr2 = correlation(rank(vwap), rank(volume), 6).replace([-np.inf, np.inf], 0).fillna(0)
+    return rank(corr1).pow(rank(corr2))
+
+
+def alpha081(volume, vwap):
+    """
+    Alpha#81: (rank(log(product(rank(rank(correlation(vwap,ts_sum(adv10,50),8))^4), 15)))
+              < rank(correlation(rank(vwap), rank(volume), 5))) * -1
+
+    逻辑：VWAP 与均量和的相关系数四次方排名的滚动乘积对数的排名，与量价排名相关比较。
+    """
+    adv10 = sma(volume, 10)
+    corr_inner = correlation(vwap, ts_sum(adv10, 50), 8).replace([-np.inf, np.inf], 0).fillna(0)
+    inner = rank(corr_inner) ** 4
+    p1 = rank(np.log(product(inner.replace(0, 1e-10), 15).replace(0, 1e-10)))
+    corr2 = correlation(rank(vwap), rank(volume), 5).replace([-np.inf, np.inf], 0).fillna(0)
+    return (p1 < rank(corr2)).astype(float) * -1
+
+
+def alpha083(close, high, low, volume, vwap):
+    """
+    Alpha#83: (rank(delay((high-low)/(ts_sum(close,5)/5), 2)) * rank(rank(volume)))
+              / (((high-low)/(ts_sum(close,5)/5)) / (vwap-close))
+
+    逻辑：滞后振幅均价比的排名乘成交量排名，除以振幅均价比与 VWAP 收盘差之比。
+    """
+    hl_ratio = (high - low) / (ts_sum(close, 5) / 5)
+    denom = hl_ratio / (vwap - close).replace(0, np.nan)
+    return (rank(delay(hl_ratio, 2)) * rank(rank(volume))) / denom
+
+
+def alpha084(close, vwap):
+    """
+    Alpha#84: SignedPower(ts_rank(vwap - ts_max(vwap,15), 21), delta(close,5))
+
+    逻辑：VWAP 偏离 15 期最大值的时序排名的有符号幂，指数为收盘 5 期差分。
+    """
+    base = ts_rank(vwap - ts_max(vwap, 15), 21)
+    return SignedPower(base, delta(close, 5))
+
+
+def alpha085(volume, high, low, close, vwap):
+    """
+    Alpha#85: rank(correlation(high*0.877+close*0.123, adv30, 10))
+              ** rank(correlation(ts_rank((high+low)/2,4), ts_rank(volume,10), 7))
+
+    逻辑：加权高价收盘与 30 日均量的相关系数排名，以中间价与成交量时序相关排名为幂。
+    """
+    adv30 = sma(volume, 30)
+    mix = high * 0.876703 + close * (1 - 0.876703)
+    corr1 = correlation(mix, adv30, 10).replace([-np.inf, np.inf], 0).fillna(0)
+    corr2 = correlation(ts_rank((high + low) / 2, 4), ts_rank(volume, 10), 7).replace([-np.inf, np.inf], 0).fillna(0)
+    return rank(corr1).pow(rank(corr2))
+
+
+# def alpha086(volume, close, open_, vwap):
+#     """
+#     Alpha#86: (ts_rank(correlation(close, sma(adv20,15), 6), 20)
+#               < rank((open+close)-(vwap+open))) * -1
+#
+#     逻辑：收盘与均量均值的相关系数时序排名，与开盘收盘偏离 VWAP 的排名比较取负。
+#     """
+#     adv20 = sma(volume, 20)
+#     corr = correlation(close, sma(adv20, 15), 6).replace([-np.inf, np.inf], 0).fillna(0)
+#     return (ts_rank(corr, 20) < rank((open_ + close) - (vwap + open_))).astype(float) * -1
+# 注释：输出为0或空集
+
+
+def alpha088(volume, open_, high, low, close):
+    """
+    Alpha#88: min(rank(decay_linear((rank(open)+rank(low))-(rank(high)+rank(close)), 8)),
+                 ts_rank(decay_linear(correlation(ts_rank(close,8), ts_rank(adv60,21), 8), 7), 3))
+
+    逻辑：开低高收排名差的线性衰减排名，与收盘均量时序相关衰减时序排名取小。
+    """
+    adv60 = sma(volume, 60)
+    p1 = rank(decay_linear((rank(open_) + rank(low)) - (rank(high) + rank(close)), 8))
+    corr = correlation(ts_rank(close, 8), ts_rank(adv60, 21), 8).replace([-np.inf, np.inf], 0).fillna(0)
+    p2 = ts_rank(decay_linear(corr, 7), 3)
+    return pd.DataFrame(
+        np.minimum(p1.values, p2.values),
+        index=p1.index, columns=p1.columns,
+    )
+
+
+def alpha092(volume, high, low, open_, close):
+    """
+    Alpha#92: min(ts_rank(decay_linear(((high+low)/2+close)<(low+open), 15), 19),
+                 ts_rank(decay_linear(correlation(rank(low), rank(adv30), 8), 7), 7))
+
+    逻辑：中间价加收盘低于低价加开盘的布尔衰减时序排名，与低价均量相关衰减时序排名取小。
+    """
+    adv30 = sma(volume, 30)
+    cond = (((high + low) / 2 + close) < (low + open_)).astype(float)
+    p1 = ts_rank(decay_linear(cond, 15), 19)
+    corr = correlation(rank(low), rank(adv30), 8).replace([-np.inf, np.inf], 0).fillna(0)
+    p2 = ts_rank(decay_linear(corr, 7), 7)
+    return pd.DataFrame(
+        np.minimum(p1.values, p2.values),
+        index=p1.index, columns=p1.columns,
+    )
+
+
+def alpha094(volume, vwap):
+    """
+    Alpha#94: (rank(vwap - ts_min(vwap,12)) ** ts_rank(correlation(ts_rank(vwap,20), ts_rank(adv60,4),18), 3)) * -1
+
+    逻辑：VWAP 偏离 12 期低点的排名，以 VWAP 与均量时序相关时序排名为幂，取负。
+    """
+    adv60 = sma(volume, 60)
+    p1 = rank(vwap - ts_min(vwap, 12))
+    corr = correlation(ts_rank(vwap, 20), ts_rank(adv60, 4), 18).replace([-np.inf, np.inf], 0).fillna(0)
+    p2 = ts_rank(corr, 3)
+    return (p1.pow(p2) * -1)
+
+
+def alpha095(volume, open_, high, low):
+    """
+    Alpha#95: rank(open - ts_min(open,12))
+              < ts_rank(rank(correlation(sma((high+low)/2,19), sma(adv40,19),13))^5, 12)
+
+    逻辑：开盘偏离 12 期低点的排名，与中间价均量相关五次方排名的时序排名比较。
+    """
+    adv40 = sma(volume, 40)
+    corr = correlation(sma((high + low) / 2, 19), sma(adv40, 19), 13).replace([-np.inf, np.inf], 0).fillna(0)
+    inner = rank(corr) ** 5
+    return (rank(open_ - ts_min(open_, 12)) < ts_rank(inner, 12)).astype(float)
+
+
+def alpha096(volume, close, vwap):
+    """
+    Alpha#96: max(ts_rank(decay_linear(correlation(rank(vwap), rank(volume),4),4),8),
+                 ts_rank(decay_linear(ts_argmax(correlation(ts_rank(close,7),ts_rank(adv60,4),4),13),14),13)) * -1
+
+    逻辑：量价排名相关衰减时序排名，与收盘均量相关 argmax 衰减时序排名的最大值取负。
+    """
+    adv60 = sma(volume, 60)
+    corr1 = correlation(rank(vwap), rank(volume), 4).replace([-np.inf, np.inf], 0).fillna(0)
+    p1 = ts_rank(decay_linear(corr1, 4), 8)
+    corr2 = correlation(ts_rank(close, 7), ts_rank(adv60, 4), 4).replace([-np.inf, np.inf], 0).fillna(0)
+    argmax_ts = ts_argmax(corr2, 13)
+    p2 = ts_rank(decay_linear(argmax_ts, 14), 13)
+    return pd.DataFrame(
+        np.maximum(p1.values, p2.values) * -1,
+        index=p1.index, columns=p1.columns,
+    )
+
+
+def alpha098(volume, vwap, open_):
+    """
+    Alpha#98: rank(decay_linear(correlation(vwap, sma(adv5,26), 5), 7))
+              - rank(decay_linear(ts_rank(ts_argmin(correlation(rank(open), rank(adv15),21), 9), 7), 8))
+
+    逻辑：VWAP 与 5 日均量均值的相关系数衰减排名，减去开盘均量相关 argmin 衰减时序排名。
+    """
+    adv5 = sma(volume, 5)
+    adv15 = sma(volume, 15)
+    corr1 = correlation(vwap, sma(adv5, 26), 5).replace([-np.inf, np.inf], 0).fillna(0)
+    p1 = rank(decay_linear(corr1, 7))
+    corr2 = correlation(rank(open_), rank(adv15), 21).replace([-np.inf, np.inf], 0).fillna(0)
+    argmin_ts = ts_argmin(corr2, 9)
+    p2 = rank(decay_linear(ts_rank(argmin_ts, 7), 8))
+    return p1 - p2
+
+
+def alpha099(volume, high, low):
+    """
+    Alpha#99: (rank(correlation(ts_sum((high+low)/2,20), ts_sum(adv60,20), 9))
+              < rank(correlation(low, volume, 6))) * -1
+
+    逻辑：中间价 20 期和与均量 20 期和的相关系数排名，与低价成交量相关排名比较取负。
+    """
+    adv60 = sma(volume, 60)
+    corr1 = correlation(ts_sum((high + low) / 2, 20), ts_sum(adv60, 20), 9).replace([-np.inf, np.inf], 0).fillna(0)
+    corr2 = correlation(low, volume, 6).replace([-np.inf, np.inf], 0).fillna(0)
+    return (rank(corr1) < rank(corr2)).astype(float) * -1
+
+
+def alpha101(open_, high, low, close):
+    """
+    Alpha#101: (close - open) / ((high - low) + 0.001)
+
+    逻辑：日内收益（收盘开盘差）除以振幅，衡量日内方向强度。
+    """
+    return (close - open_) / ((high - low) + 0.001)
+
+
+# ============================================================
 # 因子配置与元数据
 # ============================================================
 
@@ -807,6 +1260,39 @@ FACTOR_CONFIGS = {
     'alpha047': {'func': alpha047, 'data_keys': ['close', 'volume', 'high', 'vwap']},
     'alpha049': {'func': alpha049, 'data_keys': ['close']},
     'alpha050': {'func': alpha050, 'data_keys': ['volume', 'vwap']},
+    'alpha051': {'func': alpha051, 'data_keys': ['close']},
+    'alpha052': {'func': alpha052, 'data_keys': ['returns', 'low', 'volume']},
+    'alpha053': {'func': alpha053, 'data_keys': ['close', 'high', 'low']},
+    'alpha054': {'func': alpha054, 'data_keys': ['close', 'open', 'high', 'low']},
+    'alpha055': {'func': alpha055, 'data_keys': ['close', 'high', 'low', 'volume']},
+    'alpha057': {'func': alpha057, 'data_keys': ['close', 'vwap']},
+    'alpha060': {'func': alpha060, 'data_keys': ['close', 'high', 'low', 'volume']},
+    'alpha061': {'func': alpha061, 'data_keys': ['volume', 'vwap']},
+    'alpha062': {'func': alpha062, 'data_keys': ['volume', 'open', 'high', 'low', 'vwap']},
+    'alpha064': {'func': alpha064, 'data_keys': ['volume', 'open', 'high', 'low', 'vwap']},
+    'alpha065': {'func': alpha065, 'data_keys': ['volume', 'open', 'vwap']},
+    'alpha066': {'func': alpha066, 'data_keys': ['open', 'high', 'low', 'vwap']},
+    # 'alpha068': {'func': alpha068, 'data_keys': ['volume', 'close', 'high', 'low']},  # 输出为0或空集
+    'alpha071': {'func': alpha071, 'data_keys': ['volume', 'close', 'open', 'low', 'vwap']},
+    'alpha072': {'func': alpha072, 'data_keys': ['volume', 'high', 'low', 'vwap']},
+    'alpha073': {'func': alpha073, 'data_keys': ['open', 'high', 'low', 'vwap']},
+    'alpha074': {'func': alpha074, 'data_keys': ['volume', 'close', 'high', 'vwap']},
+    'alpha075': {'func': alpha075, 'data_keys': ['volume', 'vwap', 'low']},
+    'alpha077': {'func': alpha077, 'data_keys': ['volume', 'high', 'low', 'vwap']},
+    'alpha078': {'func': alpha078, 'data_keys': ['volume', 'low', 'vwap']},
+    'alpha081': {'func': alpha081, 'data_keys': ['volume', 'vwap']},
+    'alpha083': {'func': alpha083, 'data_keys': ['close', 'high', 'low', 'volume', 'vwap']},
+    'alpha084': {'func': alpha084, 'data_keys': ['close', 'vwap']},
+    'alpha085': {'func': alpha085, 'data_keys': ['volume', 'high', 'low', 'close', 'vwap']},
+    # 'alpha086': {'func': alpha086, 'data_keys': ['volume', 'close', 'open', 'vwap']},  # 输出为0或空集
+    'alpha088': {'func': alpha088, 'data_keys': ['volume', 'open', 'high', 'low', 'close']},
+    'alpha092': {'func': alpha092, 'data_keys': ['volume', 'high', 'low', 'open', 'close']},
+    'alpha094': {'func': alpha094, 'data_keys': ['volume', 'vwap']},
+    'alpha095': {'func': alpha095, 'data_keys': ['volume', 'open', 'high', 'low']},
+    'alpha096': {'func': alpha096, 'data_keys': ['volume', 'close', 'vwap']},
+    'alpha098': {'func': alpha098, 'data_keys': ['volume', 'vwap', 'open']},
+    'alpha099': {'func': alpha099, 'data_keys': ['volume', 'high', 'low']},
+    'alpha101': {'func': alpha101, 'data_keys': ['open', 'high', 'low', 'close']},
 }
 
 # 保留空字典以兼容原有 pipeline 接口（所有因子已统一至 FACTOR_CONFIGS）
@@ -1205,4 +1691,37 @@ FACTOR_DESCRIPTIONS = {
         'category': '量价/VWAP',
         'evidence': 'WorldQuant 101 Alphas',
     },
+    'alpha051': {'name': 'Alpha#51 价格加速度阈值（-0.05）', 'theory': '加速度低于-0.05时做多，否则按日内变化反转', 'direction': '混合', 'holding_period': '中期', 'category': '趋势/反转', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha052': {'name': 'Alpha#52 低价动量×收益差×成交量', 'theory': '低价5期最小值5期差分负值乘长短期收益和排名乘成交量时序排名', 'direction': '混合', 'holding_period': '中长期', 'category': '量价/动量', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha053': {'name': 'Alpha#53 日内位置差分', 'theory': '收盘在振幅内相对位置的9期差分负值', 'direction': '负向', 'holding_period': '短期', 'category': '价格', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha054': {'name': 'Alpha#54 低价偏离×开盘五次方', 'theory': '低价偏离收盘与开盘五次方除以振幅与收盘五次方', 'direction': '混合', 'holding_period': '短期', 'category': '价格', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha055': {'name': 'Alpha#55 振幅位置与量相关', 'theory': '收盘在振幅内位置排名与成交量排名的6期相关系数负值', 'direction': '负向', 'holding_period': '短期', 'category': '量价', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha057': {'name': 'Alpha#57 收盘偏离VWAP衰减', 'theory': '收盘偏离VWAP除以收盘argmax排名的线性衰减', 'direction': '负向', 'holding_period': '短期', 'category': 'VWAP/价格', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha060': {'name': 'Alpha#60 日内位置缩放', 'theory': '日内位置乘成交量排名缩放减去收盘argmax排名缩放', 'direction': '负向', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha061': {'name': 'Alpha#61 VWAP偏离与量相关比较', 'theory': 'VWAP偏离16期低点排名与VWAP均量相关系数排名比较', 'direction': '混合', 'holding_period': '中期', 'category': 'VWAP/量价', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha062': {'name': 'Alpha#62 VWAP均量相关与开盘条件', 'theory': 'VWAP与均量相关系数排名与开盘高低价排名条件比较', 'direction': '负向', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha064': {'name': 'Alpha#64 加权开盘低价与均量相关', 'theory': '加权开盘低价与均量相关系数排名与加权中间价VWAP差分比较', 'direction': '负向', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha065': {'name': 'Alpha#65 加权开盘VWAP与均量相关', 'theory': '加权开盘VWAP与均量相关排名与开盘偏离低点排名比较', 'direction': '负向', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha066': {'name': 'Alpha#66 VWAP差分与低价偏离衰减', 'theory': 'VWAP差分线性衰减排名加低价偏离VWAP相对开盘中间价衰减时序排名', 'direction': '负向', 'holding_period': '短期', 'category': 'VWAP/价格', 'evidence': 'WorldQuant 101 Alphas'},
+    # 'alpha068': {'name': 'Alpha#68 高价均量相关与加权收盘', 'theory': '高价与15日均量排名的相关系数时序排名与加权收盘低价差分比较', 'direction': '负向', 'holding_period': '短期', 'category': '量价', 'evidence': 'WorldQuant 101 Alphas'},  # 输出为0或空集
+    'alpha071': {'name': 'Alpha#71 收盘均量相关与开盘低价VWAP', 'theory': '收盘均量时序相关衰减与开盘低价偏离VWAP衰减时序排名的最大值', 'direction': '混合', 'holding_period': '中期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha072': {'name': 'Alpha#72 中间价均量相关比', 'theory': '中间价与40日均量相关衰减排名除以VWAP成交量时序相关衰减排名', 'direction': '混合', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha073': {'name': 'Alpha#73 VWAP差分与加权开盘低价衰减', 'theory': 'VWAP差分衰减排名与加权开盘低价变化衰减时序排名最大值取负', 'direction': '负向', 'holding_period': '短期', 'category': 'VWAP/价格', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha074': {'name': 'Alpha#74 收盘均量与高价VWAP量相关比较', 'theory': '收盘均量相关系数排名与加权高价VWAP成交量相关排名比较', 'direction': '负向', 'holding_period': '短期', 'category': '量价', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha075': {'name': 'Alpha#75 VWAP量与低价均量相关比较', 'theory': 'VWAP成交量相关排名与低价50日均量相关排名比较', 'direction': '混合', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha077': {'name': 'Alpha#77 振幅VWAP与中间价均量衰减', 'theory': '振幅与VWAP偏离衰减排名与中间价40日均量相关衰减排名取小', 'direction': '混合', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha078': {'name': 'Alpha#78 低价VWAP均量相关幂', 'theory': '加权低价VWAP与均量相关系数排名以量价相关排名为幂', 'direction': '混合', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha081': {'name': 'Alpha#81 VWAP均量相关乘积与量价相关', 'theory': 'VWAP均量和相关系数四次方排名滚动乘积对数与量价排名相关比较', 'direction': '负向', 'holding_period': '中期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha083': {'name': 'Alpha#83 振幅均价比×成交量除以VWAP偏离', 'theory': '滞后振幅均价比排名乘成交量排名除以振幅均价比与VWAP收盘差之比', 'direction': '混合', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha084': {'name': 'Alpha#84 VWAP偏离有符号幂', 'theory': 'VWAP偏离15期最大值的时序排名以收盘5期差分为指数', 'direction': '混合', 'holding_period': '短期', 'category': 'VWAP/价格', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha085': {'name': 'Alpha#85 高价收盘均量相关幂', 'theory': '加权高价收盘与30日均量相关排名以中间价成交量时序相关为幂', 'direction': '混合', 'holding_period': '短期', 'category': '量价', 'evidence': 'WorldQuant 101 Alphas'},
+    # 'alpha086': {'name': 'Alpha#86 收盘均量相关与开盘收盘VWAP', 'theory': '收盘均量均值相关系数时序排名与开盘收盘偏离VWAP排名比较', 'direction': '负向', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},  # 输出为0或空集
+    'alpha088': {'name': 'Alpha#88 开低高收排名差衰减', 'theory': '开低高收排名差的线性衰减排名与收盘均量时序相关衰减取小', 'direction': '混合', 'holding_period': '短期', 'category': '价格/量价', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha092': {'name': 'Alpha#92 中间价条件与低价均量衰减', 'theory': '中间价加收盘低于低价加开盘的布尔衰减与低价均量相关衰减取小', 'direction': '混合', 'holding_period': '短期', 'category': '价格/量价', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha094': {'name': 'Alpha#94 VWAP偏离幂', 'theory': 'VWAP偏离12期低点排名以VWAP均量时序相关时序排名为幂', 'direction': '负向', 'holding_period': '短期', 'category': 'VWAP/量价', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha095': {'name': 'Alpha#95 开盘偏离与中间价均量相关', 'theory': '开盘偏离12期低点排名与中间价均量相关五次方时序排名比较', 'direction': '混合', 'holding_period': '短期', 'category': '量价', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha096': {'name': 'Alpha#96 量价相关与收盘均量argmax衰减', 'theory': '量价排名相关衰减与收盘均量相关argmax衰减时序排名最大值取负', 'direction': '负向', 'holding_period': '中期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha098': {'name': 'Alpha#98 VWAP均量相关与开盘argmin衰减', 'theory': 'VWAP与5日均量均值相关衰减排名减去开盘均量相关argmin衰减排名', 'direction': '混合', 'holding_period': '短期', 'category': '量价/VWAP', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha099': {'name': 'Alpha#99 中间价均量和相关与低价量相关', 'theory': '中间价20期和与均量20期和相关系数排名与低价成交量相关比较', 'direction': '负向', 'holding_period': '短期', 'category': '量价', 'evidence': 'WorldQuant 101 Alphas'},
+    'alpha101': {'name': 'Alpha#101 日内收益除以振幅', 'theory': '日内收益（收盘开盘差）除以振幅，衡量日内方向强度', 'direction': '正向', 'holding_period': '极短期', 'category': '价格', 'evidence': 'WorldQuant 101 Alphas'},
 }
