@@ -563,14 +563,25 @@ def run_collinearity_analysis(
     factor_list = list(iter_factors_from_files(factor_files, get_factor_display_name))
     if not factor_list:
         raise ValueError("未找到任何有效因子数据，请检查因子 Excel 文件。")
-    # 若配置了共线性分析因子下标（1-based），只保留这些因子
-    n_total = len(factor_list)
+    # 若配置了共线性分析因子，只保留这些因子（编号为 factor_library 中的因子编号，如 95 → alpha095）
     if COLLINEARITY_FACTOR_INDICES:
-        indices_0based = [i - 1 for i in COLLINEARITY_FACTOR_INDICES if 1 <= i <= n_total]
-        factor_list = [factor_list[j] for j in indices_0based]
+        name_to_factors = {}  # base_name -> [(name, factor), ...]
+        for name, factor in factor_list:
+            base = name.split("_")[0].split(" ")[0]
+            if base not in name_to_factors:
+                name_to_factors[base] = []
+            name_to_factors[base].append((name, factor))
+        ordered = []
+        for idx in COLLINEARITY_FACTOR_INDICES:
+            target = f"alpha{idx:03d}"
+            if target in name_to_factors:
+                # 取该因子的第一个 sheet（多 sheet 时取首个）
+                ordered.append(name_to_factors[target][0])
+        factor_list = ordered
         if not factor_list:
             raise ValueError(
-                f"COLLINEARITY_FACTOR_INDICES={COLLINEARITY_FACTOR_INDICES} 在总因子数 {n_total} 下无有效下标（1-based）。"
+                f"COLLINEARITY_FACTOR_INDICES={COLLINEARITY_FACTOR_INDICES} 未匹配到任何因子 "
+                f"（编号对应 factor_library 中的 alphaXXX，如 95→alpha095）。"
             )
     factor_dict = {name: factor for name, factor in factor_list}
 

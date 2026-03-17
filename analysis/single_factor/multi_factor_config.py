@@ -27,10 +27,11 @@ OUTPUT_EXCEL_NAME = "multi_factor_test_report.xlsx"  # 可改为 factor_test_rep
 # 调仓周期列表（天）：每个周期生成一份独立报表，在此处统一配置
 REBALANCE_PERIODS = [5, 10]
 
-# 共线性分析：仅对指定因子运行（与多因子 report 中的行号一致，1-based）
-# 例如 [2, 10, 9, 8, 6] 表示第 2、10、9、8、6 个因子。留空 [] 表示使用全部因子
+# 共线性分析：仅对指定因子运行（编号为 factor_library 中的因子编号，如 95 → alpha095）
+# 例如 [95, 7, 21, 32, 65] 表示 alpha095、alpha007、alpha021、alpha032、alpha065。留空 [] 表示使用全部因子
 ### other factors: 24共线性分析失败
-COLLINEARITY_FACTOR_INDICES = [95, 32, 42, 20, 64]
+# COLLINEARITY_FACTOR_INDICES = [95, 32, 42, 20, 64] #3.1
+COLLINEARITY_FACTOR_INDICES = [95, 7, 21, 32, 65]
 
 # 共线性分析输出文件名前缀（调仓周期后缀由代码自动追加，如 _P5.xlsx）
 OUTPUT_COLLINEARITY_NAME = "factor_collinearity_report"
@@ -78,3 +79,15 @@ def get_all_factor_files(factor_dir=None):
             seen.add(base)
             out.append(full)
     return out
+
+
+def get_factor_names_by_indices(indices=None):
+    """
+    根据 factor_library 中的因子编号返回因子名称列表。
+    编号如 95 → alpha095，与 run_collinearity_analysis 逻辑一致。
+    供 composite_config 使用，确保复合因子与共线性分析选用相同因子。
+    """
+    indices = indices or COLLINEARITY_FACTOR_INDICES
+    if not indices:
+        return []
+    return [f"alpha{i:03d}" for i in indices]

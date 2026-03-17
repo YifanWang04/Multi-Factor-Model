@@ -41,10 +41,12 @@ if sys.platform == 'win32':
 
 # ── 路径注册 ─────────────────────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_SF_DIR = os.path.join(os.path.dirname(os.path.dirname(_HERE)), "analysis", "single_factor")
-_ROOT = os.path.dirname(os.path.dirname(_HERE))
+_ANALYSIS = os.path.dirname(os.path.dirname(_HERE))
+_SF_DIR = os.path.join(_ANALYSIS, "single_factor")
+_MF_DIR = os.path.join(_ANALYSIS, "multi_factor")
+_ROOT = os.path.dirname(_ANALYSIS)
 
-for _p in [_HERE, _SF_DIR, _ROOT]:
+for _p in [_HERE, _SF_DIR, _MF_DIR, _ROOT]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -65,9 +67,8 @@ OUTPUT_BASE = os.path.join(PROJECT_ROOT, "output")
 # 复合因子
 COMPOSITE_FACTOR_SHEET = "beta_m1"
 
-# 选定因子（与 composite_config.SELECTED_FACTOR_INDICES [20, 16, 43, 17, 34] 对应）
-# 仅构建和处理这 5 个因子，不创建多余因子
-SELECTED_FACTOR_NAMES = ["alpha095", "alpha032", "alpha042", "alpha020", "alpha073"]
+# 选定因子：与 composite_config 一致，由 multi_factor_config.COLLINEARITY_FACTOR_INDICES 派生
+from composite_config import SELECTED_FACTOR_NAMES
 
 # 策略参数：COMPOSITE_FACTOR_SHEET = "mvo_10G_Top1_P30d"
 TARGET_WEIGHT_METHOD = "mvo"

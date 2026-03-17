@@ -16,8 +16,16 @@ else:
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
 RETURN_COLUMN = "Return"
 
-# 选定因子名称（如 alpha032、alpha095），按此顺序加载；不依赖文件排序
-SELECTED_FACTOR_NAMES = ["alpha095", "alpha032", "alpha042", "alpha020", "alpha073"]
+# 选定因子：从 multi_factor_config.COLLINEARITY_FACTOR_INDICES 派生，确保与共线性分析一致
+# 编号为 factor_library 中的因子编号（如 95 → alpha095）
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ANALYSIS_DIR = os.path.dirname(_SCRIPT_DIR)
+_SINGLE_FACTOR_DIR = os.path.join(_ANALYSIS_DIR, "single_factor")
+if _SINGLE_FACTOR_DIR not in sys.path:
+    sys.path.insert(0, _SINGLE_FACTOR_DIR)
+from multi_factor_config import COLLINEARITY_FACTOR_INDICES, get_factor_names_by_indices
+
+SELECTED_FACTOR_NAMES = get_factor_names_by_indices(COLLINEARITY_FACTOR_INDICES)
 
 # 调仓周期（天）
 # ⚠️ 重要：此周期决定复合因子的生成频率
