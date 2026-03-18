@@ -51,23 +51,47 @@ import strategy_config as cfg
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = r"D:\qqq"
-COMPOSITE_FACTOR_FILE = os.path.join(
-    PROJECT_ROOT, "output", "composite_factor_reports", "composite_factors.xlsx"
+from data.data_config import (
+    PRICE_FILE, COMPOSITE_FACTOR_FILE, DATA_START_OFFSET_DAYS, STRATEGY_REPORTS_DIR,
 )
 COMPOSITE_FACTOR_SHEET = "ic_m3_N20"  # beta_m3 方法，N=10 窗口
-PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "strategy_reports")
+
+def _get_data_offset():
+    return DATA_START_OFFSET_DAYS
+OUTPUT_DIR = STRATEGY_REPORTS_DIR
 OUTPUT_EXCEL_NAME = "strategy_detailed_backtest_report.xlsx"
 
 # 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
 # 例：max_return_5G_Top1_P10d、mvo_10G_Top2_P30d、min_variance_5G_Top3_P20d
 STRATEGY_PARAM = "max_return_5G_Top1_P10d"
 
-# 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移
-REBALANCE_DATE_OFFSET = 7
-
 # composite_config 中因子索引 [20, 16, 43, 17, 34] 已用于生成 composite_factors.xlsx
 # 需先运行 run_composite_factor.py 确保 composite_factors.xlsx 存在且含 beta_m3_N10
+
+
+def _safe_tag(s: str) -> str:
+    """将字符串转成适合文件名的 tag（尽量保持可读性）。"""
+    s = str(s)
+    s = s.strip().replace(" ", "")
+    return "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in s)
+
+
+def build_detailed_report_filename(
+    base_name: str,
+    composite_sheet: str,
+    strategy_param: str,
+    data_start_offset_days: int = 0,
+) -> str:
+    """
+    在文件名里追加：复合因子方法（sheet）+ 策略参数 + 数据起始日偏移。
+    例：strategy_detailed_backtest_report__ic_m3_N20__max_return_5G_Top1_P10d__dataoffset0.xlsx
+    """
+    root, ext = os.path.splitext(base_name)
+    ext = ext or ".xlsx"
+    sheet_tag = _safe_tag(composite_sheet)
+    strat_tag = _safe_tag(strategy_param)
+    offset_tag = f"dataoffset{int(data_start_offset_days)}"
+    return f"{root}__{sheet_tag}__{strat_tag}__{offset_tag}{ext}"
 
 
 def parse_strategy_param(param: str) -> tuple:
@@ -157,22 +181,16 @@ def run_detailed_backtest(
     rebalance_period: int,
     weight_method: str,
     config,
-    rebalance_date_offset: int = 0,
 ) -> dict:
     """
     运行单策略详细回测，返回含调仓操作、日收益、累计收益等完整数据。
-
-    Parameters
-    ----------
-    rebalance_date_offset : int, optional
-        调仓日偏移（交易日数，正数=提前，负数=延后），默认为 0
+    调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制。
     """
     target_group = group_num - (target_rank - 1)
     rebalance_dates = _select_rebalance_dates(
         factor_df.index,
         ret_df.index,
         rebalance_period,
-        offset_days=rebalance_date_offset,
     )
     if len(rebalance_dates) < 2:
         return {"error": "调仓日不足 2 个"}
@@ -325,7 +343,7 @@ def run_detailed_backtest(
             "target_group": target_group,
             "rebalance_period": rebalance_period,
             "weight_method": weight_method,
-            "rebalance_date_offset": rebalance_date_offset,
+            "data_start_offset_days": _get_data_offset(),
         },
     }
 
@@ -358,7 +376,7 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["Group_Num", params.get("group_num", "")],
             ["Target_Rank", params.get("target_rank", "")],
             ["Rebalance_Period_TradingDays", params.get("rebalance_period", "")],
-            ["Rebalance_Date_Offset_TradingDays", params.get("rebalance_date_offset", REBALANCE_DATE_OFFSET)],
+            ["Data_Start_Offset_TradingDays", params.get("data_start_offset_days", _get_data_offset())],
             ["Transaction_Cost_OneSide", f"{getattr(cfg, 'TRANSACTION_COST', 0.001):.3f}"],
             ["Timing_Convention", "Trade at T close, holding period (T, T_next]"],
             ["---", "---"],
@@ -439,7 +457,6 @@ def main():
         rebalance_period=rebalance_days,
         weight_method=weight_method,
         config=cfg,
-        rebalance_date_offset=REBALANCE_DATE_OFFSET,
     )
 
     if "error" in result:
@@ -447,7 +464,13 @@ def main():
         return
 
     # 5. 写入 Excel
-    output_path = os.path.join(OUTPUT_DIR, OUTPUT_EXCEL_NAME)
+    report_name = build_detailed_report_filename(
+        base_name=OUTPUT_EXCEL_NAME,
+        composite_sheet=COMPOSITE_FACTOR_SHEET,
+        strategy_param=STRATEGY_PARAM,
+        data_start_offset_days=DATA_START_OFFSET_DAYS,
+    )
+    output_path = os.path.join(OUTPUT_DIR, report_name)
     write_detailed_report(result, output_path)
 
     print(f"\n共 {len(result['rebalance_dates'])} 次调仓，{len(result['operations_df'])} 条操作记录")

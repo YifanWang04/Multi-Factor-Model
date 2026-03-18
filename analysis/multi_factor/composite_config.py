@@ -5,14 +5,23 @@ import os
 
 PROJECT_ROOT = r"D:\qqq"
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
+
+# 路径：根据 data_config 按 offset 分子目录（不覆盖）
+from data.data_config import (
+    PRICE_FILE as _DEFAULT_PRICE_FILE,
+    _price_filename,
+    FACTOR_PROCESSED_DIR as _DEFAULT_FACTOR_PROCESSED_DIR,
+    COMPOSITE_FACTOR_OUTPUT_DIR as _DEFAULT_COMPOSITE_OUTPUT_DIR,
+)
+
 if _RUN_DIR:
     FACTOR_PROCESSED_DIR = os.path.join(_RUN_DIR, "factor_processed")
-    PRICE_FILE = os.path.join(_RUN_DIR, "data", "us_top100_daily_2023_present.xlsx")
+    PRICE_FILE = os.path.join(_RUN_DIR, "data", _price_filename())
     OUTPUT_DIR = os.path.join(_RUN_DIR, "composite_factor_reports")
 else:
-    FACTOR_PROCESSED_DIR = os.path.join(PROJECT_ROOT, "factor_processed")
-    PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
+    FACTOR_PROCESSED_DIR = _DEFAULT_FACTOR_PROCESSED_DIR
+    PRICE_FILE = _DEFAULT_PRICE_FILE
+    OUTPUT_DIR = _DEFAULT_COMPOSITE_OUTPUT_DIR
 RETURN_COLUMN = "Return"
 
 # 选定因子：在 config 中直接写因子编号（factor_library 中的编号，如 95 → alpha095）

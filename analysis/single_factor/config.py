@@ -13,6 +13,12 @@
 """
 import os
 
+from data.data_config import (
+    PRICE_FILE as _PRICE_FILE,
+    FACTOR_PROCESSED_DIR as _FACTOR_PROCESSED_DIR,
+    SINGLE_FACTOR_REPORTS_DIR as _SINGLE_FACTOR_REPORTS_DIR,
+)
+
 class SingleFactorConfig:
     """
     单因子测试配置
@@ -25,11 +31,11 @@ class SingleFactorConfig:
     # 数据路径
     # 指定单因子测试时使用的因子文件（运行 run_single_factor_test.py 时生效）
     # 批量测试（run_all_factors_backtest.py）会自动扫描 factor_processed 目录，忽略此项
-    FACTOR_FILE = os.path.join(PROJECT_ROOT, "factor_processed", "factor_alpha001_processed.xlsx")
-    PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
+    FACTOR_FILE = os.path.join(_FACTOR_PROCESSED_DIR, "factor_alpha001_processed.xlsx")
+    PRICE_FILE = _PRICE_FILE
     # 收益率：从 PRICE_FILE 读。若某 sheet 有 RETURN_COLUMN 列（如 "Return"）则直接用，否则用该 sheet 的收盘价 pct_change() 计算
     RETURN_COLUMN = "Return"
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "single_factor_reports")
+    OUTPUT_DIR = _SINGLE_FACTOR_REPORTS_DIR
     
     # ==================== 测试参数 ====================
     # 调仓周期列表（交易日数），单因子回测时会对每个周期分别跑

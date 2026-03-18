@@ -26,9 +26,7 @@ if _PROJECT_ROOT not in sys.path:
 
 from config import SingleFactorConfig
 from run_single_factor_test import SingleFactorTesterOptimized
-
-
-FACTOR_PROCESSED_DIR = os.path.join(_PROJECT_ROOT, "factor_processed")
+from data.data_config import FACTOR_PROCESSED_DIR, PRICE_FILE as _PRICE_FILE
 # 匹配 factor_xxx_processed.xlsx 或 factor_xxx.xlsx
 PROCESSED_PATTERN = "_processed.xlsx"
 FALLBACK_PATTERN = ".xlsx"
@@ -79,7 +77,7 @@ def make_config_for_factor(factor_file_path, factor_display_name, project_root=N
     return SimpleNamespace(
         PROJECT_ROOT=root,
         FACTOR_FILE=os.path.abspath(factor_file_path),
-        PRICE_FILE=os.path.join(root, "data", "us_top100_daily_2023_present.xlsx"),
+        PRICE_FILE=_PRICE_FILE,
         RETURN_COLUMN=getattr(c, 'RETURN_COLUMN', 'Return'),
         OUTPUT_DIR=os.path.join(root, "output", "single_factor_reports"),
         REBALANCE_PERIODS=c.REBALANCE_PERIODS,

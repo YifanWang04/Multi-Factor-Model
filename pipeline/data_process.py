@@ -9,12 +9,20 @@
 - process_factor_df(df)：对数值列先 MAD 去极值再 Z-score，保留索引与列名。
 - process_factor_excel(input_excel, output_excel, reference_excel=None)：读入多 sheet 因子表，可选用 reference_excel 的日期列修复或对齐索引，再调用 process_factor_df 写回。
 
-直接运行本文件时：遍历 factor_raw 中 factor_*.xlsx，输出到 factor_processed 下同名_processed.xlsx，参考日期默认使用 data/us_top100_daily_2023_present.xlsx 第一 sheet 的 Date 列。若某因子 Excel 的数值全为空/NaN/0，则删除该因子输入及对应输出文件，并在结束时 output 标记。
+直接运行本文件时：遍历 factor_raw 中 factor_*.xlsx，输出到 factor_processed 下同名_processed.xlsx，参考日期使用 data_config.PRICE_FILE。若某因子 Excel 的数值全为空/NaN/0，则删除该因子输入及对应输出文件，并在结束时 output 标记。
 """
+
+import os
+import sys
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import numpy as np
 import pandas as pd
-import os
+
+from data.data_config import PRICE_FILE, _price_filename, FACTOR_RAW_DIR, FACTOR_PROCESSED_DIR
 
 def mad_winsorize(df, n=3):
     """
@@ -155,11 +163,11 @@ if __name__ == "__main__":
     if _run_dir:
         input_dir = os.path.join(_run_dir, "factor_raw")
         output_dir = os.path.join(_run_dir, "factor_processed")
-        reference_file = os.path.join(_run_dir, "data", "us_top100_daily_2023_present.xlsx")
+        reference_file = os.path.join(_run_dir, "data", _price_filename())
     else:
-        input_dir = "factor_raw"
-        output_dir = "factor_processed"
-        reference_file = "data/us_top100_daily_2023_present.xlsx"
+        input_dir = FACTOR_RAW_DIR
+        output_dir = FACTOR_PROCESSED_DIR
+        reference_file = PRICE_FILE
 
     os.makedirs(output_dir, exist_ok=True)
 

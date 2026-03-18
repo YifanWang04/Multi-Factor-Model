@@ -43,6 +43,29 @@ from run_multi_factor_test import load_return_data
 
 
 # ---------------------------------------------------------------------------
+# 输出命名
+# ---------------------------------------------------------------------------
+
+def _safe_tag(s: str) -> str:
+    """将字符串转成适合文件名的 tag（尽量保持可读性）。"""
+    s = str(s)
+    s = s.strip().replace(" ", "")
+    return "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in s)
+
+
+def build_strategy_report_filename(base_name: str, composite_sheet: str, data_start_offset_days: int = 0) -> str:
+    """
+    在文件名里追加：复合因子方法（sheet）+ 数据起始日偏移。
+    例：strategy_backtest_report__ic_m3_N20__dataoffset0.xlsx
+    """
+    root, ext = os.path.splitext(base_name)
+    ext = ext or ".xlsx"
+    sheet_tag = _safe_tag(composite_sheet)
+    offset_tag = f"dataoffset{int(data_start_offset_days)}"
+    return f"{root}__{sheet_tag}__{offset_tag}{ext}"
+
+
+# ---------------------------------------------------------------------------
 # 数据加载
 # ---------------------------------------------------------------------------
 
@@ -126,7 +149,13 @@ def main():
     all_metrics = compute_all_metrics(results, rf=cfg.RISK_FREE_RATE)
 
     # ── 5. 输出 Excel ─────────────────────────────────────────────────
-    output_path = os.path.join(cfg.OUTPUT_DIR, cfg.OUTPUT_EXCEL_NAME)
+    from data.data_config import DATA_START_OFFSET_DAYS
+    report_name = build_strategy_report_filename(
+        base_name=cfg.OUTPUT_EXCEL_NAME,
+        composite_sheet=cfg.COMPOSITE_FACTOR_SHEET,
+        data_start_offset_days=DATA_START_OFFSET_DAYS,
+    )
+    output_path = os.path.join(cfg.OUTPUT_DIR, report_name)
     reporter = StrategyReporter(results, all_metrics, cfg)
     reporter.write(output_path)
 

@@ -11,7 +11,7 @@
   - composite_factor_reports/ # run_composite_factor 输出
   - rebalance_day_report.xlsx # 本脚本报表
 
-时序约定（与 CLAUDE.md 一致）：
+时序约定（与 README.md 一致）：
   - 交易：T 日收盘执行，买卖价格均使用 Adj Close（收盘价）
   - 调仓日且未收盘时：用当日开盘价（Today_Open）与现价（收盘价估计）替代
   - 持仓区间：(T, T_next]，T 日收益不计入当期持仓
@@ -55,6 +55,7 @@ from run_detailed_backtest_report import run_detailed_backtest, parse_strategy_p
 from strategy_backtest import _build_groups, _select_rebalance_dates
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
+from data.data_config import DATA_START_OFFSET_DAYS, _price_filename
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +84,7 @@ STRATEGY_PARAMS = {
     "rebalance_period": _parsed[3],
 }
 
-# 调仓日偏移（交易日数）：正数=提前，负数=延后
-# 例如：REBALANCE_DATE_OFFSET = 6 表示所有调仓日提前 6 个交易日
-REBALANCE_DATE_OFFSET = 0  # 将下一调仓日从 2026-03-11 提前到 2026-03-05
+# 数据起始日偏移由 data.data_config.DATA_START_OFFSET_DAYS 控制（或环境变量 DATA_START_OFFSET_DAYS）
 
 
 def _strategy_name() -> str:
@@ -142,6 +141,9 @@ def run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
     env["REBALANCE_RUN_DIR"] = run_dir
     env["REBALANCE_SELECTED_FACTORS"] = ",".join(SELECTED_FACTOR_NAMES)
     env["REBALANCE_SELECTED_COMPOSITE"] = COMPOSITE_FACTOR_SHEET
+    # 传递数据起始日偏移，使 pull 与当前配置一致
+    from data.data_config import DATA_START_OFFSET_DAYS
+    env["DATA_START_OFFSET_DAYS"] = str(DATA_START_OFFSET_DAYS)
 
     data_dir = os.path.join(run_dir, "data")
     os.makedirs(data_dir, exist_ok=True)
@@ -150,14 +152,15 @@ def run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
     os.makedirs(os.path.join(run_dir, "composite_factor_reports"), exist_ok=True)
 
     if skip_pull:
-        # 复制项目默认数据到 run_dir，供后续步骤使用
-        src = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
-        dst = os.path.join(data_dir, "us_top100_daily_2023_present.xlsx")
+        # 复制项目数据到 run_dir，供后续步骤使用（根据 data_config 选择对应 offset 文件）
+        from data.data_config import PRICE_FILE as _src_price, _price_filename
+        src = _src_price
+        dst = os.path.join(data_dir, _price_filename())
         if os.path.isfile(src):
             shutil.copy2(src, dst)
             print(f"  已复制数据至: {dst}")
         else:
-            raise FileNotFoundError(f"skip_pull 时需存在 {src}")
+            raise FileNotFoundError(f"skip_pull 时需存在 {src}，请先运行 pull 或设置 DATA_START_OFFSET_DAYS")
 
     steps = []
     if not skip_pull:
@@ -533,7 +536,7 @@ def write_rebalance_day_report(
         ["---", "---"],
         ["Price_Convention", price_conv],
         ["Rebalance_Period_TradingDays", STRATEGY_PARAMS["rebalance_period"]],
-        ["Rebalance_Date_Offset_TradingDays", REBALANCE_DATE_OFFSET],
+        ["Data_Start_Offset_TradingDays", DATA_START_OFFSET_DAYS],
         ["---", "---"],
         *config_summary,
     ]
@@ -602,7 +605,7 @@ def send_discord_notification(
             f"**分组数：** {STRATEGY_PARAMS['group_num']}　"
             f"**目标组：** Top{STRATEGY_PARAMS['target_rank']}　"
             f"**调仓周期：** {STRATEGY_PARAMS['rebalance_period']} 交易日　"
-            f"**日期偏移：** {REBALANCE_DATE_OFFSET} 交易日\n"
+            f"**数据起始日偏移：** {DATA_START_OFFSET_DAYS} 交易日\n"
         )
 
         if is_rebalance:
@@ -730,17 +733,18 @@ def main(
     run_dir = _get_run_dir(skip_pipeline, run_dir_arg)
     os.makedirs(run_dir, exist_ok=True)
 
-    # 确定数据路径
+    # 确定数据路径（skip_pipeline 且无 run_dir_arg 时用 data_config 按 offset 分子目录）
     if skip_pipeline:
         if run_dir_arg:
             composite_file = os.path.join(run_dir, "composite_factor_reports", "composite_factors.xlsx")
-            price_file = os.path.join(run_dir, "data", "us_top100_daily_2023_present.xlsx")
+            price_file = os.path.join(run_dir, "data", _price_filename())
         else:
-            composite_file = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports", "composite_factors.xlsx")
-            price_file = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
+            from data.data_config import COMPOSITE_FACTOR_FILE, PRICE_FILE
+            composite_file = COMPOSITE_FACTOR_FILE
+            price_file = PRICE_FILE
     else:
         composite_file = os.path.join(run_dir, "composite_factor_reports", "composite_factors.xlsx")
-        price_file = os.path.join(run_dir, "data", "us_top100_daily_2023_present.xlsx")
+        price_file = os.path.join(run_dir, "data", _price_filename())
 
     print("=" * 64)
     print("  调仓日全流程与报表")
@@ -770,7 +774,6 @@ def main(
         rebalance_period=STRATEGY_PARAMS["rebalance_period"],
         weight_method=STRATEGY_PARAMS["weight_method"],
         config=cfg,
-        rebalance_date_offset=REBALANCE_DATE_OFFSET,
     )
 
     if "error" in result:
@@ -786,7 +789,6 @@ def main(
         factor_df.index,
         ret_df.index,
         STRATEGY_PARAMS["rebalance_period"],
-        offset_days=REBALANCE_DATE_OFFSET,
     )
     last_factor_date = factor_df.index[-1]
     as_of_date = pd.Timestamp(datetime.now().date())
@@ -822,7 +824,7 @@ def main(
     print(f"    分组数:   {STRATEGY_PARAMS['group_num']}")
     print(f"    目标组:   Top{STRATEGY_PARAMS['target_rank']}")
     print(f"    调仓周期: {STRATEGY_PARAMS['rebalance_period']} 交易日")
-    print(f"    日期偏移: {REBALANCE_DATE_OFFSET} 交易日")
+    print(f"    数据起始日偏移: {DATA_START_OFFSET_DAYS} 交易日")
     print("调仓日判定:")
     print(f"  今日是否调仓日: {'是' if status['is_rebalance_today'] else '否'}")
     print(f"  当前调仓日: {current_rebalance_date}")

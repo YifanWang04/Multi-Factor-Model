@@ -63,12 +63,12 @@ def _select_rebalance_dates(
     factor_index: pd.DatetimeIndex,
     ret_index: pd.DatetimeIndex,
     rebalance_period_days: int,
-    offset_days: int = 0,
 ) -> list:
     """
-    从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点，并可选应用偏移。
+    从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点。
     即相邻调仓日之间至少相隔 rebalance_period_days 个交易日（按 ret_index 计数）。
-    偏移（offset_days）为交易日偏移：正数=提前 offset_days 个交易日，负数=延后。
+
+    调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制，已移除 offset 参数。
 
     Parameters
     ----------
@@ -78,13 +78,11 @@ def _select_rebalance_dates(
         日频收益率/交易日的日期索引，用于正确计数交易日间隔
     rebalance_period_days : int
         调仓周期（交易日数），相邻调仓日之间至少相隔该交易日数
-    offset_days : int, optional
-        调仓日偏移（交易日数，正数=提前，负数=延后），默认为 0
 
     Returns
     -------
     list
-        调仓日列表（已应用偏移，且均为交易日）
+        调仓日列表（均为交易日）
     """
     dates = sorted(factor_index)
     if not dates:
@@ -99,25 +97,6 @@ def _select_rebalance_dates(
         if n_trading_days >= rebalance_period_days:
             selected.append(d)
             last_selected = d
-
-    if offset_days != 0:
-        # 交易日偏移：使用 ret_index 作为交易日历进行索引位移
-        result = []
-        for d in selected:
-            # d 本身应为交易日；若不在交易日历中，取 <= d 的最近交易日
-            pos = int(ret_sorted.get_indexer([d], method="pad")[0])
-            if pos < 0:
-                # 没有 <= d 的交易日（极端情况），退化为第一个交易日
-                pos = 0
-
-            mapped_pos = pos - int(offset_days)
-            mapped_pos = max(0, min(mapped_pos, len(ret_sorted) - 1))
-            mapped = ret_sorted[mapped_pos]
-
-            # 去重：若映射结果与上一项相同则跳过，避免同一天重复调仓
-            if not result or mapped != result[-1]:
-                result.append(mapped)
-        selected = result
 
     return selected
 
@@ -204,12 +183,10 @@ class StrategyBacktester:
         """
         运行单一参数组合的策略，返回日频收益率序列和期间收益序列。
         """
-        offset_days = getattr(self.config, "REBALANCE_DATE_OFFSET", 0)
         rebalance_dates = _select_rebalance_dates(
             self.factor_df.index,
             self.ret_df.index,
             rebalance_period,
-            offset_days=offset_days,
         )
         if len(rebalance_dates) < 2:
             return self._empty_result()

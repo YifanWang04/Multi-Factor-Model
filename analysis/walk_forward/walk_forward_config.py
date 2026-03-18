@@ -9,11 +9,9 @@ import os
 # ==================== 项目路径 ====================
 PROJECT_ROOT = r"D:\qqq"
 
-# ==================== 数据文件 ====================
-PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
-FACTOR_RAW_DIR = os.path.join(PROJECT_ROOT, "factor_raw")
-FACTOR_PROCESSED_DIR = os.path.join(PROJECT_ROOT, "factor_processed")
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "walk_forward_reports")
+# ==================== 数据文件（按 offset 分子目录，不覆盖）====================
+from data.data_config import PRICE_FILE, FACTOR_RAW_DIR, FACTOR_PROCESSED_DIR, WALK_FORWARD_REPORTS_DIR
+OUTPUT_DIR = WALK_FORWARD_REPORTS_DIR
 
 # ==================== 时间窗口参数 ====================
 TRAINING_WINDOW = 400  # 训练窗口：400个交易日 (~1.6年)
@@ -39,9 +37,6 @@ TARGET_GROUP_RANKS = [1, 2, 3]
 
 # 调仓周期（交易日数）
 REBALANCE_PERIODS = [10, 20, 30, 60]
-
-# 调仓日偏移（交易日数）：正数=提前，负数=延后；0=不偏移
-REBALANCE_DATE_OFFSET = 6
 
 # 权重方法
 WEIGHT_METHODS = ["equal", "min_variance", "mvo", "max_return", "factor_score"]

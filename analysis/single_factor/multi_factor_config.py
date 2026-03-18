@@ -8,20 +8,21 @@ import os
 # 项目根目录
 PROJECT_ROOT = r"D:\qqq"
 
-# 因子数据目录：多因子测试默认扫描该目录下所有因子 Excel
-FACTOR_PROCESSED_DIR = os.path.join(PROJECT_ROOT, "factor_processed")
+# 因子数据目录：按 data_config 的 offset 分子目录
+from data.data_config import FACTOR_PROCESSED_DIR
 
 # 多个因子数据 Excel 路径。留空 [] 表示使用「所有因子」（扫描 FACTOR_PROCESSED_DIR）
 # 若需只跑指定因子，可显式列出路径，例如：
 # FACTOR_FILES = [os.path.join(FACTOR_PROCESSED_DIR, "factor_price_slope_processed.xlsx")]
 FACTOR_FILES = []
 
-# 收益率数据：与单因子一致，从价格文件计算或使用 Return 列
-PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
+# 收益率数据：与单因子一致，根据 data_config.DATA_START_OFFSET_DAYS 选择
+from data.data_config import PRICE_FILE
 RETURN_COLUMN = "Return"
 
-# 多因子报告输出路径（与参考报表一致，便于归档）
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "multi_factor_reports")
+# 多因子报告输出路径（按 offset 分子目录）
+from data.data_config import MULTI_FACTOR_REPORTS_DIR
+OUTPUT_DIR = MULTI_FACTOR_REPORTS_DIR
 OUTPUT_EXCEL_NAME = "multi_factor_test_report.xlsx"  # 可改为 factor_test_report.xlsx 等
 
 # 调仓周期列表（交易日数）：每个周期生成一份独立报表，在此处统一配置

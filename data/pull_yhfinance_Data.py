@@ -6,18 +6,41 @@ Yahoo Finance 行情数据下载脚本 (data/pull_yhfinance_Data.py)
 行为说明：
 - 股票列表：脚本内硬编码为约 100 只美股的 ticker（如 AAPL, MSFT 等）。
 - 时间范围：start_date 至当前日期（end_date 使用 datetime.today()）。
-- 下载字段：yf.download 返回的 OHLCV；脚本中使用 Adj Close 与 Volume（在 build_factors 中读取）。
-- 输出：us_top100_daily_2023_present.xlsx，每个 sheet 名为 ticker（Excel 限制 31 字符），含 Date 与 Ticker 列。保存路径为运行时的当前目录，通常应放在项目 data 目录下并供 config/pipeline 引用。
+- DATA_START_OFFSET_DAYS：数据起始日提前的交易日数，0=不提前；正数=提前 N 天，使调仓日历整体前移。
+- 输出：offset=0 时为 us_top100_daily_2023_present.xlsx；offset!=0 时为 us_top100_daily_2023_present_offset{N}d.xlsx，避免覆盖原数据。
 """
 
 import os
+import sys
+
+# 确保项目根目录在 path 中，以便 import data.data_config
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
 
+from data.data_config import (
+    DATA_START_OFFSET_DAYS,
+    DATA_BASE_START_DATE,
+    PRICE_FILE,
+    _price_filename,
+)
+
 # 1. 参数设置
 
-start_date = "2023-01-01"
+# 计算实际 start_date：基准日向前推 N 个交易日
+if DATA_START_OFFSET_DAYS <= 0:
+    start_date = DATA_BASE_START_DATE
+else:
+    base = pd.Timestamp(DATA_BASE_START_DATE)
+    # 向前取 N 个交易日（bdate_range 的 periods 从 base 开始，需反向）
+    bd = pd.bdate_range(end=base, periods=DATA_START_OFFSET_DAYS + 1, freq="B")
+    start_date = bd[0].strftime("%Y-%m-%d")
+    print(f"DATA_START_OFFSET_DAYS={DATA_START_OFFSET_DAYS}，起始日提前至 {start_date}")
+
 end_date = datetime.today().strftime("%Y-%m-%d")
 
 codes = [
@@ -69,11 +92,13 @@ if not data_dict:
     raise RuntimeError("没有成功下载任何股票数据，请检查网络或股票代码")
 
 _run_dir = os.environ.get("REBALANCE_RUN_DIR")
+_price_name = _price_filename()
 if _run_dir:
-    _out_path = os.path.join(_run_dir, "data", "us_top100_daily_2023_present.xlsx")
+    _out_path = os.path.join(_run_dir, "data", _price_name)
     os.makedirs(os.path.dirname(_out_path), exist_ok=True)
 else:
-    _out_path = "data/us_top100_daily_2023_present.xlsx"
+    _out_path = PRICE_FILE
+    os.makedirs(os.path.dirname(_out_path), exist_ok=True)
 
 with pd.ExcelWriter(_out_path, engine="xlsxwriter") as writer:
     for sheet_name, df in data_dict.items():

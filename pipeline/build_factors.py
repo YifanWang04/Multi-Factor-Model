@@ -25,13 +25,15 @@ import pandas as pd
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 
+from data.data_config import PRICE_FILE, _price_filename, FACTOR_RAW_DIR as _DEFAULT_FACTOR_RAW_DIR
+
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
 if _RUN_DIR:
-    EXCEL_PATH = os.path.join(_RUN_DIR, "data", "us_top100_daily_2023_present.xlsx")
+    EXCEL_PATH = os.path.join(_RUN_DIR, "data", _price_filename())
     FACTOR_RAW_DIR = os.path.join(_RUN_DIR, "factor_raw")
 else:
-    EXCEL_PATH = os.path.join(_PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
-    FACTOR_RAW_DIR = os.path.join(_PROJECT_ROOT, "factor_raw")
+    EXCEL_PATH = PRICE_FILE
+    FACTOR_RAW_DIR = _DEFAULT_FACTOR_RAW_DIR
 
 
 def load_ohlcv_data(excel_path):

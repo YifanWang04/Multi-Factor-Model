@@ -48,7 +48,6 @@ def main():
             factor_df.index,
             ret_df.index,
             rp,
-            offset_days=getattr(cfg, "REBALANCE_DATE_OFFSET", 0),
         )
         if len(rb) >= 2:
             first_hold_start = ret_df.index[ret_df.index > rb[0]].min() if (ret_df.index > rb[0]).any() else None
