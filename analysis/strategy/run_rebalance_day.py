@@ -85,7 +85,7 @@ STRATEGY_PARAMS = {
 
 # 调仓日偏移（天数）：正数=提前，负数=延后
 # 例如：REBALANCE_DATE_OFFSET = 6 表示所有调仓日提前6天
-REBALANCE_DATE_OFFSET = 6  # 将下一调仓日从 2026-03-11 提前到 2026-03-05
+REBALANCE_DATE_OFFSET = 0  # 将下一调仓日从 2026-03-11 提前到 2026-03-05
 
 
 def _strategy_name() -> str:
@@ -193,6 +193,9 @@ def get_rebalance_day_status(
     判定调仓日状态。
     rebalance_period: 调仓周期（交易日数）。
     trading_dates: 可选，交易日序列；用于推算未来调仓日（下一调仓日 = 当前 + rebalance_period 个交易日）。
+
+    修复逻辑：因子数据可能落后于今日，历史调仓日序列末尾可能早于 as_of_date。
+    需要从历史末尾向前外推调仓日，合并后重新确定 current 和 next。
     """
     rebalance_dates = sorted(rebalance_dates)
     if not rebalance_dates:
@@ -203,21 +206,14 @@ def get_rebalance_day_status(
             "future_rebalance_dates": [],
         }
 
-    past = [d for d in rebalance_dates if d <= as_of_date]
-    current_rebalance_date = past[-1] if past else None
-    is_rebalance_today = current_rebalance_date is not None and (
-        current_rebalance_date.date() == as_of_date.date()
-    )
-    future_in_data = [d for d in rebalance_dates if d > as_of_date]
-    next_rebalance_date = future_in_data[0] if future_in_data else None
-
-    last_rb = rebalance_dates[-1]
-    future_dates = []
-    d = last_rb
-    # 按交易日推算：下一调仓日 = 当前 + rebalance_period 个交易日
-    for _ in range(12):
-        if trading_dates and len(trading_dates) > 0:
-            sorted_td = sorted(trading_dates)
+    # 推算外推调仓日：从历史最后一个调仓日起，每次 + rebalance_period 个交易日
+    # 外推足够多期，直到覆盖 as_of_date 之后至少 12 个调仓日
+    anchor = rebalance_dates[-1]
+    extrapolated = []
+    d = anchor
+    sorted_td = sorted(trading_dates) if trading_dates else []
+    for _ in range(24):  # 最多外推 24 期，确保覆盖到 as_of_date 之后
+        if sorted_td:
             try:
                 idx = next(i for i, x in enumerate(sorted_td) if x >= d)
             except StopIteration:
@@ -226,35 +222,38 @@ def get_rebalance_day_status(
             if next_idx < len(sorted_td):
                 d = sorted_td[next_idx]
             else:
-                # 超出数据范围，用 bdate_range 推算（仅工作日，不含节假日）
                 bd = pd.bdate_range(start=d, periods=rebalance_period + 1, freq="B")
                 d = pd.Timestamp(bd[-1])
         else:
             bd = pd.bdate_range(start=d, periods=rebalance_period + 1, freq="B")
             d = pd.Timestamp(bd[-1])
-        if d >= as_of_date:
-            future_dates.append(d)
-        if len(future_dates) >= 12:
+        extrapolated.append(d)
+        # 外推到 as_of_date 之后至少 12 个调仓日后停止
+        future_so_far = [x for x in extrapolated if x > as_of_date]
+        if len(future_so_far) >= 12:
             break
 
-    # 数据内无未来调仓日时，用 extrapolated future_dates 推算下一调仓日
-    if next_rebalance_date is None and future_dates:
-        next_rebalance_date = future_dates[0]
+    # 合并历史调仓日 + 外推调仓日，去重排序，得到完整调仓日序列
+    all_dates = sorted(set(rebalance_dates) | set(extrapolated))
 
-    # 当推算出的下一调仓日就是今天时，今日也应视为调仓日（数据尚未包含今日时 current 为上一期）
-    # 注意：仅当 as_of_date 是交易日时才可能为调仓日（周末不会误判）
-    if next_rebalance_date is not None and next_rebalance_date.date() == as_of_date.date():
-        is_rebalance_today = True
-        current_rebalance_date = pd.Timestamp(as_of_date.date())  # 语义上今日即为当前调仓日
+    # 从完整序列中确定 current 和 next
+    past_all = [x for x in all_dates if x <= as_of_date]
+    current_rebalance_date = past_all[-1] if past_all else None
+    future_all = [x for x in all_dates if x > as_of_date]
+    next_rebalance_date = future_all[0] if future_all else None
 
-    # 合并：数据内已有未来调仓日 + 推算的更远日期，去重排序（否则报表会漏掉数据内的未来调仓日）
-    all_future = sorted(set(future_in_data) | set(future_dates))
+    is_rebalance_today = current_rebalance_date is not None and (
+        current_rebalance_date.date() == as_of_date.date()
+    )
+
+    # 未来调仓日列表（仅展示 as_of_date 之后的）
+    future_rebalance_dates = future_all[:12]
 
     return {
         "is_rebalance_today": is_rebalance_today,
         "current_rebalance_date": current_rebalance_date,
         "next_rebalance_date": next_rebalance_date,
-        "future_rebalance_dates": all_future,
+        "future_rebalance_dates": future_rebalance_dates,
         "all_rebalance_dates": rebalance_dates,
     }
 
@@ -508,7 +507,7 @@ def write_rebalance_day_report(
     config_summary = [
         ["Selected_Factors", ", ".join(SELECTED_FACTOR_NAMES)],
         ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
-        ["Composite_Method", "多元回归beta加权 (M=3月, N=10日)"],
+        ["Composite_Method", f"IC加权 {COMPOSITE_FACTOR_SHEET} (M=3月, N=20日)"],
         ["Strategy_Param", STRATEGY_PARAM],
         ["Weight_Method", params.get("weight_method", STRATEGY_PARAMS["weight_method"])],
         ["Group_Num", params.get("group_num", STRATEGY_PARAMS["group_num"])],
@@ -534,6 +533,7 @@ def write_rebalance_day_report(
         ["---", "---"],
         ["Price_Convention", price_conv],
         ["Rebalance_Period_TradingDays", STRATEGY_PARAMS["rebalance_period"]],
+        ["Rebalance_Date_Offset_Days", REBALANCE_DATE_OFFSET],
         ["---", "---"],
         *config_summary,
     ]
@@ -593,10 +593,16 @@ def send_discord_notification(
         next_rb = status["next_rebalance_date"]
 
         # 构建消息
-        # 策略基本信息（因子选择、复合方式）
+        # 策略基本信息（因子选择、复合方式、策略参数）
         factor_info = (
             f"**选定因子：** {', '.join(SELECTED_FACTOR_NAMES)}\n"
-            f"**复合因子：** {COMPOSITE_FACTOR_SHEET}（多元回归beta加权 M3/N10）\n"
+            f"**复合因子：** {COMPOSITE_FACTOR_SHEET}（IC加权 M3/N20）\n"
+            f"**策略参数：** {STRATEGY_PARAM}\n"
+            f"**权重方式：** {STRATEGY_PARAMS['weight_method']}　"
+            f"**分组数：** {STRATEGY_PARAMS['group_num']}　"
+            f"**目标组：** Top{STRATEGY_PARAMS['target_rank']}　"
+            f"**调仓周期：** {STRATEGY_PARAMS['rebalance_period']} 交易日　"
+            f"**日期偏移：** {REBALANCE_DATE_OFFSET} 天\n"
         )
 
         if is_rebalance:
@@ -790,7 +796,7 @@ def main(
         rebalance_period=STRATEGY_PARAMS["rebalance_period"],
         as_of_date=as_of_date,
         last_factor_date=last_factor_date,
-        trading_dates=factor_df.index.tolist(),
+        trading_dates=ret_df.index.tolist(),
     )
 
     current_rebalance_date = status.get("current_rebalance_date")
@@ -810,7 +816,13 @@ def main(
     print("\n" + "-" * 64)
     print("策略概要:")
     print(f"  选定因子: {', '.join(SELECTED_FACTOR_NAMES)}")
-    print(f"  复合因子: {COMPOSITE_FACTOR_SHEET} (多元回归beta加权 M3/N10)")
+    print(f"  复合因子: {COMPOSITE_FACTOR_SHEET} (IC加权 M3/N20)")
+    print(f"  策略参数: {STRATEGY_PARAM}")
+    print(f"    权重方式: {STRATEGY_PARAMS['weight_method']}")
+    print(f"    分组数:   {STRATEGY_PARAMS['group_num']}")
+    print(f"    目标组:   Top{STRATEGY_PARAMS['target_rank']}")
+    print(f"    调仓周期: {STRATEGY_PARAMS['rebalance_period']} 交易日")
+    print(f"    日期偏移: {REBALANCE_DATE_OFFSET} 天")
     print("调仓日判定:")
     print(f"  今日是否调仓日: {'是' if status['is_rebalance_today'] else '否'}")
     print(f"  当前调仓日: {current_rebalance_date}")
