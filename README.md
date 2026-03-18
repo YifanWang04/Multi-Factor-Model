@@ -1,158 +1,158 @@
-# 量化因子研究与策略回测
+# Quantitative Factor Research & Strategy Backtesting
 
-> 项目上下文文档，供 AI 助手与开发者理解代码结构与开发约定。
-
----
-
-## 项目概述
-
-本项目是一个**美股量化因子研究与多因子策略回测**系统，涵盖完整的数据获取 → 因子构建 → 数据处理 → 单因子/多因子/复合因子测试 → 策略构建与回测 全流程。
-
-**技术栈：**
-- Python 3 + pandas、numpy
-- scipy、sklearn（回归、PCA、优化）
-- matplotlib、seaborn（可视化）
-- openpyxl（Excel 读写）
-- yfinance（数据获取）
-
-**数据：** 美股约 100 只标的，日频量价（2023 至今）；输出为 Excel 报表、PDF 报告。
+> Project context document for AI assistants and developers to understand code structure and development conventions.
 
 ---
 
-## 目录结构
+## Project Overview
+
+This project is a **US equity quantitative factor research and multi-factor strategy backtesting** system, covering the full pipeline: data acquisition → factor construction → data processing → single/multi/composite factor testing → strategy construction and backtesting.
+
+**Tech Stack:**
+- Python 3 + pandas, numpy
+- scipy, sklearn (regression, PCA, optimization)
+- matplotlib, seaborn (visualization)
+- openpyxl (Excel read/write)
+- yfinance (data acquisition)
+
+**Data:** ~100 US equity tickers, daily price/volume (2023–present); outputs include Excel reports and PDF reports.
+
+---
+
+## Directory Structure
 
 ```
 qqq/
-├── data/                    # 原始数据
-│   ├── data_config.py      # 数据路径与 DATA_START_OFFSET_DAYS 配置
-│   ├── us_top100_daily_2023_present.xlsx   # 日频量价主数据（offset=0）
-│   ├── us_top100_daily_2023_present_offset{N}d.xlsx  # offset!=0 时，避免覆盖
-│   └── pull_yhfinance_Data.py             # 从 yfinance 拉取数据
-├── pipeline/                # 数据与因子构建流水线
-│   ├── build_factors.py     # 从量价构建原始因子 → factor_raw[_offset{N}d]/
-│   └── data_process.py     # 去极值、标准化 → factor_processed[_offset{N}d]/
+├── data/                    # Raw data
+│   ├── data_config.py      # Data paths and DATA_START_OFFSET_DAYS config
+│   ├── us_top100_daily_2023_present.xlsx   # Main daily price/volume (offset=0)
+│   ├── us_top100_daily_2023_present_offset{N}d.xlsx  # When offset!=0, avoid overwrite
+│   └── pull_yhfinance_Data.py             # Pull data from yfinance
+├── pipeline/                # Data and factor construction pipeline
+│   ├── build_factors.py     # Build raw factors from price/volume → factor_raw[_offset{N}d]/
+│   └── data_process.py     # Winsorization, standardization → factor_processed[_offset{N}d]/
 ├── analysis/
-│   ├── single_factor/      # 单因子测试
-│   ├── multi_factor/       # 多因子与复合因子
-│   ├── strategy/           # 策略构建与网格回测
-│   │   ├── run_strategy.py              # 策略回测主入口
-│   │   ├── run_detailed_backtest_report.py  # 单策略明细报表
-│   │   ├── run_rebalance_day.py         # 调仓日全流程（pull→因子→复合→回测→报表）
-│   │   ├── strategy_config.py           # 策略配置
-│   │   ├── strategy_backtest.py         # 回测引擎
-│   │   ├── strategy_report.py           # 报表生成
-│   │   ├── strategy_metrics.py          # 指标计算
-│   │   └── portfolio_optimizer.py       # 组合优化
-│   └── walk_forward/       # Walk-Forward 验证（防过拟合）
-│       ├── walk_forward_config.py   # 时间窗口、策略网格、复合因子配置
-│       ├── rolling_data_processor.py # 防泄露数据处理（训练期/测试期分离）
-│       ├── walk_forward_engine.py   # 核心验证引擎（多 walk 回测）
-│       ├── walk_forward_analyzer.py # 结果分析（参数稳定性、敏感性）
-│       ├── run_walk_forward.py      # 主入口
-│       ├── test_engine.py           # 快速测试
+│   ├── single_factor/      # Single factor testing
+│   ├── multi_factor/       # Multi-factor and composite factors
+│   ├── strategy/           # Strategy construction and grid backtesting
+│   │   ├── run_strategy.py              # Main strategy backtest entry
+│   │   ├── run_detailed_backtest_report.py  # Single strategy detailed report
+│   │   ├── run_rebalance_day.py         # Rebalance day full pipeline (pull→factors→composite→backtest→report)
+│   │   ├── strategy_config.py           # Strategy config
+│   │   ├── strategy_backtest.py         # Backtest engine
+│   │   ├── strategy_report.py           # Report generation
+│   │   ├── strategy_metrics.py          # Metrics calculation
+│   │   └── portfolio_optimizer.py       # Portfolio optimization
+│   └── walk_forward/       # Walk-Forward validation (anti-overfitting)
+│       ├── walk_forward_config.py   # Time windows, strategy grid, composite factor config
+│       ├── rolling_data_processor.py # Leak-free data processing (train/test split)
+│       ├── walk_forward_engine.py   # Core validation engine (multi-walk backtest)
+│       ├── walk_forward_analyzer.py # Result analysis (parameter stability, sensitivity)
+│       ├── run_walk_forward.py      # Main entry
+│       ├── test_engine.py           # Quick tests
 │       └── README.md
-├── factor_raw/             # 构建后的原始因子（offset=0）
-├── factor_raw_offset{N}d/  # offset!=0 时，按 offset 分子目录
-├── factor_processed/      # 处理后的因子（offset=0）
-├── factor_processed_offset{N}d/  # offset!=0 时
-├── output/                 # 输出目录（均按 offset 分子目录）
+├── factor_raw/             # Built raw factors (offset=0)
+├── factor_raw_offset{N}d/  # When offset!=0, subdirs by offset
+├── factor_processed/       # Processed factors (offset=0)
+├── factor_processed_offset{N}d/  # When offset!=0
+├── output/                 # Output directory (subdirs by offset)
 │   ├── single_factor_reports/
 │   ├── multi_factor_reports/
 │   ├── composite_factor_reports/
 │   ├── strategy_reports/
 │   ├── walk_forward_reports/
-│   ├── *_offset{N}d/      # offset!=0 时对应子目录
-│   └── rebalance_day_YYYY-MM-DD_HHMMSS/  # run_rebalance_day 输出
-├── docs/                   # 文档（notes 对照清单等）
-└── README.md               # 本文件
+│   ├── *_offset{N}d/       # Subdirs when offset!=0
+│   └── rebalance_day_YYYY-MM-DD_HHMMSS/  # run_rebalance_day output
+├── docs/                   # Documentation (notes checklist, etc.)
+└── README.md               # This file
 ```
 
 ---
 
-## 核心流程与入口
+## Core Workflow & Entry Points
 
-| 阶段 | 入口脚本 | 输入 | 输出 |
-|------|----------|------|------|
-| 数据获取 | `data/pull_yhfinance_Data.py` | yfinance API | `data/us_top100_daily_*.xlsx` |
-| 因子构建 | `pipeline/build_factors.py` | 量价 Excel | `factor_raw[_offset{N}d]/*.xlsx` |
-| 数据处理 | `pipeline/data_process.py` | factor_raw | `factor_processed[_offset{N}d]/*.xlsx` |
-| 单因子测试 | `analysis/single_factor/run_single_factor_test.py` | config 指定因子+价格 | PDF 报告 |
-| 批量单因子 | `analysis/single_factor/run_all_factors_backtest.py` | factor_processed 全量 | 多份 PDF |
-| 多因子测试 | `analysis/single_factor/run_multi_factor_test.py` | multi_factor_config | Excel 报表 |
-| 因子共线性分析 | `analysis/single_factor/run_collinearity_analysis.py` | config + 多因子 Excel | 共线性分析报表 Excel |
-| 因子复合 | `analysis/multi_factor/run_composite_factor.py` | composite_config | composite_factors.xlsx + 回测报表 |
-| OLS 权重查看 | `analysis/multi_factor/inspect_ols_weights.py` | composite_config | ols_m3_M5_weights.xlsx |
-| 策略回测 | `analysis/strategy/run_strategy.py` | strategy_config | strategy_backtest_report.xlsx |
-| 单策略明细报表 | `analysis/strategy/run_detailed_backtest_report.py` | 复合因子+策略参数（脚本内配置） | strategy_detailed_backtest_report.xlsx |
-| 调仓日全流程 | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + 固定策略参数 | output/rebalance_day_YYYY-MM-DD_HHMMSS/ |
-| Walk-Forward 验证 | `analysis/walk_forward/run_walk_forward.py` | walk_forward_config | walk_forward_report.xlsx + 可视化 |
+| Stage | Entry Script | Input | Output |
+|-------|--------------|-------|--------|
+| Data acquisition | `data/pull_yhfinance_Data.py` | yfinance API | `data/us_top100_daily_*.xlsx` |
+| Factor construction | `pipeline/build_factors.py` | Price/volume Excel | `factor_raw[_offset{N}d]/*.xlsx` |
+| Data processing | `pipeline/data_process.py` | factor_raw | `factor_processed[_offset{N}d]/*.xlsx` |
+| Single factor test | `analysis/single_factor/run_single_factor_test.py` | config-specified factor + price | PDF report |
+| Batch single factor | `analysis/single_factor/run_all_factors_backtest.py` | factor_processed full set | Multiple PDFs |
+| Multi-factor test | `analysis/single_factor/run_multi_factor_test.py` | multi_factor_config | Excel report |
+| Factor collinearity | `analysis/single_factor/run_collinearity_analysis.py` | config + multi-factor Excel | Collinearity analysis Excel |
+| Factor composition | `analysis/multi_factor/run_composite_factor.py` | composite_config | composite_factors.xlsx + backtest report |
+| OLS weights inspection | `analysis/multi_factor/inspect_ols_weights.py` | composite_config | ols_m3_M5_weights.xlsx |
+| Strategy backtest | `analysis/strategy/run_strategy.py` | strategy_config | strategy_backtest_report.xlsx |
+| Detailed strategy report | `analysis/strategy/run_detailed_backtest_report.py` | Composite factor + strategy params (in-script config) | strategy_detailed_backtest_report.xlsx |
+| Rebalance day pipeline | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + fixed strategy params | output/rebalance_day_YYYY-MM-DD_HHMMSS/ |
+| Walk-Forward validation | `analysis/walk_forward/run_walk_forward.py` | walk_forward_config | walk_forward_report.xlsx + visualizations |
 
-**运行约定：** 从项目根目录执行，例如：
+**Run convention:** Execute from project root, e.g.:
 ```bash
 python analysis/strategy/run_strategy.py
 python analysis/strategy/run_detailed_backtest_report.py
-python analysis/strategy/run_rebalance_day.py                    # 完整 pipeline
-python analysis/strategy/run_rebalance_day.py --skip-pipeline    # 使用已有数据生成报表
-python analysis/strategy/run_rebalance_day.py --skip-pull        # pipeline 跳过拉数
+python analysis/strategy/run_rebalance_day.py                    # Full pipeline
+python analysis/strategy/run_rebalance_day.py --skip-pipeline    # Use existing data to generate report
+python analysis/strategy/run_rebalance_day.py --skip-pull        # Pipeline skips data pull
 python analysis/walk_forward/run_walk_forward.py
 python pipeline/build_factors.py
 ```
 
 ---
 
-## 配置约定
+## Configuration Conventions
 
-- 各模块有独立 config：`config.py`（单因子）、`multi_factor_config.py`、`composite_config.py`、`strategy_config.py`、`walk_forward_config.py`
-- 关键变量 `PROJECT_ROOT`：**务必统一**，项目根路径为 `D:\qqq`
-- 常用路径变量：`PRICE_FILE`、`RETURN_COLUMN`、`FACTOR_FILE`、`OUTPUT_DIR`
-- **DATA_START_OFFSET_DAYS**：数据起始日提前的交易日数
-  - **配置位置**：`data/data_config.py`，支持环境变量 `DATA_START_OFFSET_DAYS` 覆盖
-  - **实现方式**：在 `pull_yhfinance_Data.py` 中将 start_date 向前推 N 个交易日，使因子与调仓日历整体前移、保持对齐
-  - **按 offset 分子目录（不覆盖）**：offset=0 用默认路径；offset!=0 用 `_offset{N}d` 后缀，如 `factor_raw_offset7d/`、`factor_processed_offset7d/`、`output/composite_factor_reports_offset7d/`、`output/strategy_reports_offset7d/` 等
-
----
-
-## 时序与对齐约定
-
-- **因子值：** 调仓日 T 当日截面（EOD，无前瞻）
-- **收益：** (T, T_next] 区间，即 T+1 到下一调仓日（含）
-- **交易：** T 日收盘执行，T 日收益不计入当期持仓
-- **买卖价格：** 均使用 **Adj Close（收盘价）**，T 日收盘执行即按 T 日收盘价成交
-- `RebalancePeriodManager` 与 `strategy_backtest._select_rebalance_dates` 均按**交易日数**间隔选取调仓日（如 P10 = 每 10 个交易日调仓一次）
+- Each module has its own config: `config.py` (single factor), `multi_factor_config.py`, `composite_config.py`, `strategy_config.py`, `walk_forward_config.py`
+- Key variable `PROJECT_ROOT`: **must be consistent**; project root is `D:\qqq`
+- Common path variables: `PRICE_FILE`, `RETURN_COLUMN`, `FACTOR_FILE`, `OUTPUT_DIR`
+- **DATA_START_OFFSET_DAYS**: Number of trading days to shift data start date earlier
+  - **Config location:** `data/data_config.py`; can be overridden by env var `DATA_START_OFFSET_DAYS`
+  - **Implementation:** In `pull_yhfinance_Data.py`, start_date is shifted back N trading days so factors and rebalance calendar stay aligned
+  - **Subdirs by offset (no overwrite):** offset=0 uses default paths; offset!=0 uses `_offset{N}d` suffix, e.g. `factor_raw_offset7d/`, `factor_processed_offset7d/`, `output/composite_factor_reports_offset7d/`, `output/strategy_reports_offset7d/`, etc.
 
 ---
 
-## 命名与编码规范
+## Timing & Alignment Conventions
 
-- 配置类：`SingleFactorConfig`；配置模块：`*_config.py`
-- 因子 Excel：`factor_alpha001_processed.xlsx` 等，sheet 名可为 `N5`、`N10` 等对应观察期 N
-- 分组：升序分组时组 1 最小、组 10 最大；多空：做多 10+9、做空 1+2
-- 资产配置方式：`equal`、`factor_weight`、`min_variance`、`mvo`、`max_return`、`factor_score`
-- 中文注释与文档为主，变量名与 API 保持英文
-
----
-
-## 常见陷阱与注意事项
-
-1. **PROJECT_ROOT：** 已统一为 `D:\qqq`，修改根路径时需同步更新各 config 文件
-2. **Sheet 名与复合因子：** `strategy_config.COMPOSITE_FACTOR_SHEET` 需与 `composite_factors.xlsx` 中实际 sheet 一致
-3. **调仓周期：** 系统按**交易日数**选调仓日（如 P10 = 每 10 个交易日调仓）
-4. **单因子多 sheet：** 默认读第一个 sheet，可配置 `FACTOR_SHEET` 指定 sheet
-5. **收益率列：** 若 Excel 有 `Return` 列则直接使用，否则用 `pct_change()` 计算
-6. **依赖：** 需 `.venv` 或相应虚拟环境，包含 pandas、numpy、scipy、sklearn、matplotlib、openpyxl、yfinance 等
-7. **run_detailed_backtest_report：** 需先运行 `run_composite_factor.py` 确保 `composite_factors.xlsx` 存在且含目标 sheet
-8. **Walk-Forward：** 训练/测试严格分离，因子处理与复合权重仅用训练期数据
-9. **run_rebalance_day 策略名称：** 由 `TARGET_WEIGHT_METHOD`、`TARGET_GROUP_NUM`、`TARGET_RANK`、`TARGET_REBALANCE_DAYS` 动态生成
-10. **数据加载性能：** `load_price_data`、`load_return_data` 使用 `pd.concat` 一次性构建，避免 fragmentation 告警
-11. **DATA_START_OFFSET_DAYS 变更后需重跑 pipeline：** 修改后必须重跑 pull → build_factors → data_process → run_composite_factor
+- **Factor values:** Cross-section on rebalance day T (EOD, no look-ahead)
+- **Returns:** Interval (T, T_next], i.e. T+1 through next rebalance day (inclusive)
+- **Trading:** Executed at T close; T-day return not included in current holding period
+- **Trade prices:** Use **Adj Close**; T-close execution trades at T close price
+- `RebalancePeriodManager` and `strategy_backtest._select_rebalance_dates` select rebalance dates by **trading-day** interval (e.g. P10 = rebalance every 10 trading days)
 
 ---
 
-## 参考文档
+## Naming & Coding Conventions
 
-- `docs/NOTES_VS_CODE_CHECKLIST.md`：与设计 notes 的对照检查清单
-- `analysis/walk_forward/README.md`：Walk-Forward 验证系统说明（时间对齐、防泄露、结果解读）
+- Config classes: `SingleFactorConfig`; config modules: `*_config.py`
+- Factor Excel: `factor_alpha001_processed.xlsx` etc.; sheet names may be `N5`, `N10` for observation period N
+- Grouping: Ascending groups: group 1 = smallest, group 10 = largest; long-short: long 10+9, short 1+2
+- Asset allocation methods: `equal`, `factor_weight`, `min_variance`, `mvo`, `max_return`, `factor_score`
+- Chinese comments and docs; variable names and APIs in English
 
 ---
 
-*本文档随项目演化更新。*
+## Common Pitfalls & Notes
+
+1. **PROJECT_ROOT:** Unified to `D:\qqq`; update all config files when changing root path
+2. **Sheet name & composite factor:** `strategy_config.COMPOSITE_FACTOR_SHEET` must match actual sheet in `composite_factors.xlsx`
+3. **Rebalance period:** System selects rebalance days by **trading days** (e.g. P10 = every 10 trading days)
+4. **Single factor multi-sheet:** Default reads first sheet; can set `FACTOR_SHEET` to specify sheet
+5. **Return column:** Use `Return` column from Excel if present, otherwise compute via `pct_change()`
+6. **Dependencies:** Requires `.venv` or equivalent with pandas, numpy, scipy, sklearn, matplotlib, openpyxl, yfinance, etc.
+7. **run_detailed_backtest_report:** Run `run_composite_factor.py` first so `composite_factors.xlsx` exists with target sheet
+8. **Walk-Forward:** Train/test strictly separated; factor processing and composite weights use training data only
+9. **run_rebalance_day strategy name:** Generated from `TARGET_WEIGHT_METHOD`, `TARGET_GROUP_NUM`, `TARGET_RANK`, `TARGET_REBALANCE_DAYS`
+10. **Data loading performance:** `load_price_data`, `load_return_data` use `pd.concat` once to avoid fragmentation warnings
+11. **After changing DATA_START_OFFSET_DAYS, re-run pipeline:** Must re-run pull → build_factors → data_process → run_composite_factor
+
+---
+
+## Reference Docs
+
+- `docs/NOTES_VS_CODE_CHECKLIST.md`: Checklist vs design notes
+- `analysis/walk_forward/README.md`: Walk-Forward validation system (timing, leak prevention, result interpretation)
+
+---
+
+*This document is updated as the project evolves.*
