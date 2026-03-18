@@ -390,7 +390,7 @@ class WalkForwardEngine:
         Args:
             ret_df: 日频收益率
             rebalance_dates: 调仓日期
-            rebalance_period: 调仓周期（天）
+            rebalance_period: 调仓周期（交易日数）
 
         Returns:
             pd.DataFrame: 期间收益率（index=调仓日, columns=股票）
@@ -421,11 +421,11 @@ class WalkForwardEngine:
         rebalance_period: int
     ) -> List[datetime]:
         """
-        选择调仓日期
+        选择调仓日期（按交易日间隔）
 
         Args:
-            dates: 可用日期
-            rebalance_period: 调仓周期（天）
+            dates: 可用日期（交易日）
+            rebalance_period: 调仓周期（交易日数）
 
         Returns:
             List[datetime]: 选中的调仓日期
@@ -435,9 +435,12 @@ class WalkForwardEngine:
             return []
 
         selected = [dates[0]]
-        for d in dates[1:]:
-            if (d - selected[-1]).days >= rebalance_period:
+        prev_idx = 0
+        for i in range(1, len(dates)):
+            d = dates[i]
+            if i - prev_idx >= rebalance_period:
                 selected.append(d)
+                prev_idx = i
 
         return selected
 

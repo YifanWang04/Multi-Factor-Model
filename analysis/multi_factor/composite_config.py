@@ -2,7 +2,6 @@
 因子复合配置文件 (composite_config.py)
 """
 import os
-import sys
 
 PROJECT_ROOT = r"D:\qqq"
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
@@ -16,20 +15,12 @@ else:
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
 RETURN_COLUMN = "Return"
 
-# 选定因子：从 multi_factor_config.COLLINEARITY_FACTOR_INDICES 派生，确保与共线性分析一致
-# 编号为 factor_library 中的因子编号（如 95 → alpha095）
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANALYSIS_DIR = os.path.dirname(_SCRIPT_DIR)
-_SINGLE_FACTOR_DIR = os.path.join(_ANALYSIS_DIR, "single_factor")
-if _SINGLE_FACTOR_DIR not in sys.path:
-    sys.path.insert(0, _SINGLE_FACTOR_DIR)
-from multi_factor_config import COLLINEARITY_FACTOR_INDICES, get_factor_names_by_indices
+# 选定因子：在 config 中直接写因子编号（factor_library 中的编号，如 95 → alpha095）
+SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]
+SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
 
-SELECTED_FACTOR_NAMES = get_factor_names_by_indices(COLLINEARITY_FACTOR_INDICES)
-
-# 调仓周期（天）
+# 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
 # ⚠️ 重要：此周期决定复合因子的生成频率
-# 如果后续策略回测使用不同周期，需要重新生成复合因子或接受因子更新频率不匹配
 # 建议：策略回测的 REBALANCE_PERIODS 应包含此值，或为此值的整数倍
 REBALANCE_PERIOD = 10
 

@@ -28,7 +28,7 @@ SELECTED_FACTOR_INDICES = [20, 16, 43, 17, 34]
 # 复合因子方法：beta_m3 (beta加权，方法3：滚动窗口)
 COMPOSITE_METHOD = "beta_m3"
 N_WINDOW = 10  # 方法3的滚动窗口大小
-COMPOSITE_REBALANCE_PERIOD = 10  # 复合因子的调仓周期（固定10天）
+COMPOSITE_REBALANCE_PERIOD = 10  # 复合因子的调仓周期（10 个交易日）
 
 # ==================== 策略网格搜索参数 ====================
 # 分组数量
@@ -37,7 +37,7 @@ GROUP_NUMS = [5, 10]
 # 目标组排名（1=因子值最高的组）
 TARGET_GROUP_RANKS = [1, 2, 3]
 
-# 调仓周期（天数）
+# 调仓周期（交易日数）
 REBALANCE_PERIODS = [10, 20, 30, 60]
 
 # 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移

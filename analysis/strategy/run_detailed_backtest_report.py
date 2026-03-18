@@ -137,7 +137,10 @@ def run_detailed_backtest(
     """
     target_group = group_num - (target_rank - 1)
     rebalance_dates = _select_rebalance_dates(
-        factor_df.index, rebalance_period, offset_days=rebalance_date_offset
+        factor_df.index,
+        ret_df.index,
+        rebalance_period,
+        offset_days=rebalance_date_offset,
     )
     if len(rebalance_dates) < 2:
         return {"error": "调仓日不足 2 个"}
@@ -321,7 +324,7 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["Weight_Method", params.get("weight_method", TARGET_WEIGHT_METHOD)],
             ["Group_Num", params.get("group_num", TARGET_GROUP_NUM)],
             ["Target_Rank", params.get("target_rank", TARGET_RANK)],
-            ["Rebalance_Period_Days", params.get("rebalance_period", TARGET_REBALANCE_DAYS)],
+            ["Rebalance_Period_TradingDays", params.get("rebalance_period", TARGET_REBALANCE_DAYS)],
             ["Rebalance_Date_Offset_Days", params.get("rebalance_date_offset", REBALANCE_DATE_OFFSET)],
             ["Transaction_Cost_OneSide", f"{getattr(cfg, 'TRANSACTION_COST', 0.001):.3f}"],
             ["Timing_Convention", "Trade at T close, holding period (T, T_next]"],

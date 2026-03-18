@@ -32,7 +32,7 @@ class SingleFactorConfig:
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "single_factor_reports")
     
     # ==================== 测试参数 ====================
-    # 调仓周期列表（天），单因子回测时会对每个周期分别跑
+    # 调仓周期列表（交易日数），单因子回测时会对每个周期分别跑
     REBALANCE_PERIODS = [1, 5, 10]  # 可以修改为你需要的周期
     
     # 分层数量（固定为10）
@@ -70,9 +70,9 @@ if __name__ == "__main__":
     print(f"价格文件路径: {config.PRICE_FILE}")
     print(f"输出目录: {config.OUTPUT_DIR}")
     
-    print("\n调仓周期:")
+    print("\n调仓周期（交易日）:")
     for period in config.REBALANCE_PERIODS:
-        print(f"  - {period} days")
+        print(f"  - {period} 交易日")
     
     print("\n文件存在性检查:")
     print(f"✓ 因子文件存在: {os.path.exists(config.FACTOR_FILE)}")

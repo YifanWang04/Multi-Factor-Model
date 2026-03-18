@@ -46,7 +46,7 @@ _PARAM_COLS = [
     ("strategy_name",     "策略名称"),
     ("group_num",         "分层数量"),
     ("target_group",      "目标组号"),
-    ("rebalance_period",  "调仓周期(天)"),
+    ("rebalance_period",  "调仓周期(交易日)"),
     ("weight_method",     "资产配置方式"),
 ]
 

@@ -95,7 +95,7 @@ class SingleFactorTesterOptimized:
         
         for period in self.config.REBALANCE_PERIODS:
             print(f"\n{'='*60}")
-            print(f"调仓周期: {period} 天")
+            print(f"调仓周期: {period} 交易日")
             print(f"{'='*60}")
             
             result = self.run_single_period(period)

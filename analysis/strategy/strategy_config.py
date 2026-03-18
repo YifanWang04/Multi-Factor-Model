@@ -6,7 +6,7 @@
 运行前检查：
   COMPOSITE_FACTOR_SHEET  — 与 composite_factors.xlsx 中实际 sheet 名一致
   GROUP_NUMS              — 根据标的池数量设定（88 只股票建议 [5, 10]）
-  REBALANCE_PERIODS       — 日历天数；系统从因子日期序列中取间隔 ≥ 该天数的节点
+  REBALANCE_PERIODS       — 交易日数；系统从因子日期序列中取间隔 ≥ 该交易日数的节点
   TARGET_GROUP_RANKS      — 从最高组向下：1=最高，2=第二高，3=第三高
   WEIGHT_METHODS          — 选择要遍历的资产配置方式
 """
@@ -23,7 +23,7 @@ COMPOSITE_FACTOR_FILE = os.path.join(
 )
 
 # 选定的复合因子方法（Excel sheet 名），对应用户选择的 ols_m3_M5
-COMPOSITE_FACTOR_SHEET = "beta_m1"
+COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
 
 # 日频收益率数据（与单因子/复合因子流程一致）
 PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
@@ -40,13 +40,11 @@ OUTPUT_EXCEL_NAME = "strategy_backtest_report.xlsx"
 GROUP_NUMS = [5, 10]
 
 # 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移
-REBALANCE_DATE_OFFSET = 6
+REBALANCE_DATE_OFFSET = 0
 
-# 调仓周期（日历天数）
-# 注意：系统从复合因子已有的调仓日期序列中取样，实际最小精度 = 因子原生周期
-# 典型因子原生周期为 10 交易日 ≈ 14 日历天，故 <14 的值等效于"每期必换"
+# 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
 # ⚠️ 建议：使用与 composite_config.REBALANCE_PERIOD 一致的值（10），或其整数倍（20, 30）
-# 当前 composite_config.REBALANCE_PERIOD = 10 天
+# 当前 composite_config.REBALANCE_PERIOD = 10 交易日
 REBALANCE_PERIODS = [10, 20, 30, 60]
 
 # 目标组排名（从高到低）：1=买最高分组，2=买第二高分组，3=买第三高分组

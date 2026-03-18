@@ -526,7 +526,7 @@ def run_collinearity_analysis(
     ----------
     factor_files    : list[str] | None  因子 Excel 路径列表；None 时从配置目录自动扫描
     price_file      : str | None        价格/收益 Excel
-    rebalance_period: int               调仓周期（天）
+    rebalance_period: int               调仓周期（交易日数）
     output_dir      : str | None        输出目录
     output_name     : str | None        输出文件名；None 时自动加 period 后缀
     """
@@ -586,7 +586,7 @@ def run_collinearity_analysis(
     factor_dict = {name: factor for name, factor in factor_list}
 
     print(f"因子数量  : {len(factor_dict)}")
-    print(f"调仓周期  : {rebalance_period} 天")
+    print(f"调仓周期  : {rebalance_period} 交易日")
     print(f"输出目录  : {output_dir}")
 
     # ---- 调仓期对齐 ----

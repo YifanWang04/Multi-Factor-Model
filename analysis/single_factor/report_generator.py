@@ -33,7 +33,7 @@ class FactorReportGeneratorOptimized:
         -----------
         output_path: str, 输出PDF路径
         factor_name: str, 因子名称
-        rebalance_periods: list, 调仓周期列表
+        rebalance_periods: list, 调仓周期列表（交易日数）
         """
         self.output_path = output_path
         self.factor_name = factor_name
@@ -224,7 +224,7 @@ class FactorReportGeneratorOptimized:
             d = pdf.infodict()
             d['Title'] = f'{self.factor_name} - Single Factor Test Report'
             d['Author'] = 'Factor Testing System'
-            d['Subject'] = f'Rebalance Periods: {", ".join([str(p) for p in self.rebalance_periods])} days'
+            d['Subject'] = f'Rebalance Periods: {", ".join([str(p) for p in self.rebalance_periods])} trading days'
             d['CreationDate'] = datetime.now()
         
         print(f"Report generated: {self.output_path}")
@@ -237,7 +237,7 @@ class FactorReportGeneratorOptimized:
                 ha='center', va='center', fontsize=32, fontweight='bold')
         fig.text(0.5, 0.6, f'Factor: {self.factor_name}', 
                 ha='center', va='center', fontsize=20)
-        fig.text(0.5, 0.5, f'Rebalance Periods: {", ".join([str(p) for p in self.rebalance_periods])} days', 
+        fig.text(0.5, 0.5, f'Rebalance Periods: {", ".join([str(p) for p in self.rebalance_periods])} trading days', 
                 ha='center', va='center', fontsize=16)
         fig.text(0.5, 0.4, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}', 
                 ha='center', va='center', fontsize=14)

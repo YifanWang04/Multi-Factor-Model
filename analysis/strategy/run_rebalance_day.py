@@ -187,8 +187,13 @@ def get_rebalance_day_status(
     rebalance_period: int,
     as_of_date: pd.Timestamp,
     last_factor_date: pd.Timestamp,
+    trading_dates: list | None = None,
 ) -> dict:
-    """判定调仓日状态。"""
+    """
+    判定调仓日状态。
+    rebalance_period: 调仓周期（交易日数）。
+    trading_dates: 可选，交易日序列；用于推算未来调仓日（下一调仓日 = 当前 + rebalance_period 个交易日）。
+    """
     rebalance_dates = sorted(rebalance_dates)
     if not rebalance_dates:
         return {
@@ -209,9 +214,24 @@ def get_rebalance_day_status(
     last_rb = rebalance_dates[-1]
     future_dates = []
     d = last_rb
-    while d <= as_of_date + timedelta(days=rebalance_period * 5):
-        d = d + timedelta(days=rebalance_period)
-        # >= 确保「下一调仓日恰好是今天」时也能正确显示（不会被跳过到再下一期）
+    # 按交易日推算：下一调仓日 = 当前 + rebalance_period 个交易日
+    for _ in range(12):
+        if trading_dates and len(trading_dates) > 0:
+            sorted_td = sorted(trading_dates)
+            try:
+                idx = next(i for i, x in enumerate(sorted_td) if x >= d)
+            except StopIteration:
+                idx = len(sorted_td)
+            next_idx = idx + rebalance_period
+            if next_idx < len(sorted_td):
+                d = sorted_td[next_idx]
+            else:
+                # 超出数据范围，用 bdate_range 推算（仅工作日，不含节假日）
+                bd = pd.bdate_range(start=d, periods=rebalance_period + 1, freq="B")
+                d = pd.Timestamp(bd[-1])
+        else:
+            bd = pd.bdate_range(start=d, periods=rebalance_period + 1, freq="B")
+            d = pd.Timestamp(bd[-1])
         if d >= as_of_date:
             future_dates.append(d)
         if len(future_dates) >= 12:
@@ -222,6 +242,7 @@ def get_rebalance_day_status(
         next_rebalance_date = future_dates[0]
 
     # 当推算出的下一调仓日就是今天时，今日也应视为调仓日（数据尚未包含今日时 current 为上一期）
+    # 注意：仅当 as_of_date 是交易日时才可能为调仓日（周末不会误判）
     if next_rebalance_date is not None and next_rebalance_date.date() == as_of_date.date():
         is_rebalance_today = True
         current_rebalance_date = pd.Timestamp(as_of_date.date())  # 语义上今日即为当前调仓日
@@ -511,7 +532,7 @@ def write_rebalance_day_report(
         ["Next_Rebalance_Date", str(status["next_rebalance_date"].date()) if status["next_rebalance_date"] else "-"],
         ["---", "---"],
         ["Price_Convention", price_conv],
-        ["Rebalance_Period_Days", STRATEGY_PARAMS["rebalance_period"]],
+        ["Rebalance_Period_TradingDays", STRATEGY_PARAMS["rebalance_period"]],
         ["---", "---"],
         *config_summary,
     ]
@@ -756,6 +777,7 @@ def main(
 
     rebalance_dates = _select_rebalance_dates(
         factor_df.index,
+        ret_df.index,
         TARGET_REBALANCE_DAYS,
         offset_days=REBALANCE_DATE_OFFSET,
     )
@@ -767,6 +789,7 @@ def main(
         rebalance_period=TARGET_REBALANCE_DAYS,
         as_of_date=as_of_date,
         last_factor_date=last_factor_date,
+        trading_dates=factor_df.index.tolist(),
     )
 
     current_rebalance_date = status.get("current_rebalance_date")

@@ -153,6 +153,7 @@ def _empty_factor_record(config):
 def run_one_factor_one_period(factor, ret, rebalance_period, config):
     """
     对单一因子、单一调仓周期跑完整流程，返回指标与时间序列。
+    rebalance_period: 调仓周期（交易日数）。
     返回 dict 含：ic_df, ic_stats, group_ic_stats, ls_stats, short_combined_stats,
     long_excess_annual, long_excess_sharpe, long_excess_returns, benchmark_returns,
     ls_returns, group_returns, ret_periods 等。
@@ -637,7 +638,7 @@ def run_multi_factor_test(
     多因子集中测试主入口。
     factor_files: list of str, 因子 Excel 路径
     price_file: str, 价格/收益 Excel
-    rebalance_period: int
+    rebalance_period: int, 调仓周期（交易日数）
     output_dir / output_name: 输出目录与文件名
     """
     from multi_factor_config import (
@@ -745,7 +746,7 @@ def main():
 
     for period in REBALANCE_PERIODS:
         print(f"\n{'=' * 60}")
-        print(f"调仓周期: {period} 天")
+        print(f"调仓周期: {period} 交易日")
         print("=" * 60)
         output_name = f"multi_factor_test_report_P{period}.xlsx"
         run_multi_factor_test(

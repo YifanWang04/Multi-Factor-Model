@@ -24,14 +24,14 @@ RETURN_COLUMN = "Return"
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "multi_factor_reports")
 OUTPUT_EXCEL_NAME = "multi_factor_test_report.xlsx"  # 可改为 factor_test_report.xlsx 等
 
-# 调仓周期列表（天）：每个周期生成一份独立报表，在此处统一配置
+# 调仓周期列表（交易日数）：每个周期生成一份独立报表，在此处统一配置
 REBALANCE_PERIODS = [5, 10]
 
 # 共线性分析：仅对指定因子运行（编号为 factor_library 中的因子编号，如 95 → alpha095）
 # 例如 [95, 7, 21, 32, 65] 表示 alpha095、alpha007、alpha021、alpha032、alpha065。留空 [] 表示使用全部因子
 ### other factors: 24共线性分析失败
 # COLLINEARITY_FACTOR_INDICES = [95, 32, 42, 20, 64] #3.1
-COLLINEARITY_FACTOR_INDICES = [95, 7, 21, 32, 65]
+COLLINEARITY_FACTOR_INDICES = [95, 101, 62, 65, 32] #3.17
 
 # 共线性分析输出文件名前缀（调仓周期后缀由代码自动追加，如 _P5.xlsx）
 OUTPUT_COLLINEARITY_NAME = "factor_collinearity_report"

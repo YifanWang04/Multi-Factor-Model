@@ -1,12 +1,12 @@
 """
 调仓周期管理 (rebalance_manager.py)
 =====================================
-本模块根据「调仓周期（日历天数）」将日频因子与收益率对齐为调仓期数据，供 IC 分析、分组与回测使用。
+本模块根据「调仓周期（交易日数）」将日频因子与收益率对齐为调仓期数据，供 IC 分析、分组与回测使用。
 
 主要类：RebalancePeriodManager(factor, ret, rebalance_period)
 
 主要方法：
-- get_rebalance_dates()：从因子日期索引中选取日历间隔 ≥ rebalance_period 天的调仓日，
+- get_rebalance_dates()：从因子日期索引中选取交易日间隔 ≥ rebalance_period 的调仓日，
   与 strategy_backtest.py 的 _select_rebalance_dates 逻辑保持一致。
 - align_factor_return_by_period()：对每个调仓期，取「调仓日当天」的因子值（EOD 可得），
   以及「从当前调仓日次日到下一调仓日」的累计收益率；返回 factor_periods 与 ret_periods。
@@ -31,7 +31,7 @@ class RebalancePeriodManager:
         -----------
         factor: DataFrame, 因子数据（日频）
         ret: DataFrame, 收益率数据（日频）
-        rebalance_period: int, 调仓周期（日历天数），与 strategy_backtest 保持一致
+        rebalance_period: int, 调仓周期（交易日数），与 strategy_backtest 保持一致
         """
         self.factor = factor
         self.ret = ret
@@ -39,9 +39,8 @@ class RebalancePeriodManager:
         
     def get_rebalance_dates(self):
         """
-        从因子日期索引中选取日历间隔 ≥ rebalance_period 的调仓日。
-        使用日历天数间隔（与 strategy_backtest._select_rebalance_dates 逻辑一致），
-        而非简单的等间隔下标切片（[::N] 是交易日计数，非日历天数）。
+        从因子日期索引中选取交易日间隔 ≥ rebalance_period 的调仓日。
+        即相邻调仓日之间至少相隔 rebalance_period 个交易日。
 
         Returns:
         --------
@@ -51,9 +50,12 @@ class RebalancePeriodManager:
         if not dates:
             return []
         selected = [dates[0]]
-        for d in dates[1:]:
-            if (d - selected[-1]).days >= self.rebalance_period:
+        prev_idx = 0
+        for i in range(1, len(dates)):
+            d = dates[i]
+            if i - prev_idx >= self.rebalance_period:
                 selected.append(d)
+                prev_idx = i
         return selected
     
     def align_factor_return_by_period(self):

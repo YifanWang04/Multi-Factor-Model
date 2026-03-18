@@ -54,6 +54,7 @@ def load_selected_factors(factor_files):
 def align_to_rebalance_periods(factor_dict, ret, rebalance_period):
     """
     用第一个因子的日期生成调仓期，对所有因子和收益率对齐。
+    rebalance_period: 调仓周期（交易日数）。
     返回 (factor_periods_dict, ret_periods)
       factor_periods_dict: {name: DataFrame(rebalance_date×stock)}
       ret_periods: DataFrame(rebalance_date×stock)

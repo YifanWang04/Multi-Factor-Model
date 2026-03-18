@@ -11,8 +11,8 @@
   - 交易成本：在每个持仓周期首个交易日扣除一次单边成本
 
 调仓日选取逻辑：
-  从复合因子已有日期序列中，按日历天数间隔 ≥ rebalance_period_days 取样。
-  若请求周期短于因子原生间隔，则使用全部因子日期（取样不再稀释）。
+  从复合因子已有日期序列中，按交易日间隔 ≥ rebalance_period_days 取样。
+  即相邻调仓日之间至少相隔 rebalance_period_days 个交易日。
 
 输出结构（每个策略名 → dict）：
   daily_returns     : pd.Series（日期 → 日收益率，覆盖全持仓区间）
@@ -59,37 +59,63 @@ def _build_groups(factor_signal: pd.Series, group_num: int) -> dict:
     return groups
 
 
-def _select_rebalance_dates(factor_index: pd.DatetimeIndex,
-                             rebalance_period_days: int,
-                             offset_days: int = 0) -> list:
+def _select_rebalance_dates(
+    factor_index: pd.DatetimeIndex,
+    ret_index: pd.DatetimeIndex,
+    rebalance_period_days: int,
+    offset_days: int = 0,
+) -> list:
     """
-    从因子日期序列中，选取日历间隔 ≥ rebalance_period_days 的节点，并可选应用偏移。
+    从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点，并可选应用偏移。
+    即相邻调仓日之间至少相隔 rebalance_period_days 个交易日（按 ret_index 计数）。
+    偏移（offset_days）为自然日，偏移后若非交易日会映射到最近交易日。
 
     Parameters
     ----------
     factor_index : pd.DatetimeIndex
-        因子数据的日期索引
+        因子数据的日期索引（可为非日频，如每 10 交易日一次）
+    ret_index : pd.DatetimeIndex
+        日频收益率/交易日的日期索引，用于正确计数交易日间隔
     rebalance_period_days : int
-        调仓周期（日历天数）
+        调仓周期（交易日数），相邻调仓日之间至少相隔该交易日数
     offset_days : int, optional
-        调仓日偏移天数（正数=提前，负数=延后），默认为 0
+        调仓日偏移天数（自然日，正数=提前，负数=延后），默认为 0
 
     Returns
     -------
     list
-        调仓日列表（已应用偏移）
+        调仓日列表（已应用偏移，且均为交易日）
     """
     dates = sorted(factor_index)
     if not dates:
         return []
+    ret_sorted = ret_index.sort_values()
 
+    # 按实际交易日间隔选取：相邻调仓日之间至少 rebalance_period_days 个交易日
     selected = [dates[0]]
+    last_selected = dates[0]
     for d in dates[1:]:
-        if (d - selected[-1]).days >= rebalance_period_days:
+        n_trading_days = ((ret_sorted > last_selected) & (ret_sorted <= d)).sum()
+        if n_trading_days >= rebalance_period_days:
             selected.append(d)
+            last_selected = d
 
     if offset_days != 0:
-        selected = [d - timedelta(days=offset_days) for d in selected]
+        shifted = [d - timedelta(days=offset_days) for d in selected]
+        # 将偏移后的日期映射到交易日：若不在 dates 中，取 >= 该日期的第一个交易日
+        trading_set = set(dates)
+        result = []
+        for d in shifted:
+            if d in trading_set:
+                mapped = d
+            else:
+                # 取 >= d 的第一个交易日（延后执行）；若无则取 <= d 的最后一个
+                later = [x for x in dates if x >= d]
+                mapped = later[0] if later else dates[-1]
+            # 去重：若映射结果与上一项相同则跳过，避免同一天重复调仓
+            if not result or mapped != result[-1]:
+                result.append(mapped)
+        selected = result
 
     return selected
 
@@ -178,7 +204,10 @@ class StrategyBacktester:
         """
         offset_days = getattr(self.config, "REBALANCE_DATE_OFFSET", 0)
         rebalance_dates = _select_rebalance_dates(
-            self.factor_df.index, rebalance_period, offset_days=offset_days
+            self.factor_df.index,
+            self.ret_df.index,
+            rebalance_period,
+            offset_days=offset_days,
         )
         if len(rebalance_dates) < 2:
             return self._empty_result()

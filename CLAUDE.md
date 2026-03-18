@@ -110,7 +110,7 @@ python pipeline/build_factors.py
 - **收益：** (T, T_next] 区间，即 T+1 到下一调仓日（含）
 - **交易：** T 日收盘执行，T 日收益不计入当期持仓
 - **买卖价格：** 均使用 **Adj Close（收盘价）**，T 日收盘执行即按 T 日收盘价成交
-- `RebalancePeriodManager` 与 `strategy_backtest._select_rebalance_dates` 均按**日历天数**间隔选取调仓日
+- `RebalancePeriodManager` 与 `strategy_backtest._select_rebalance_dates` 均按**交易日数**间隔选取调仓日（如 P10 = 每 10 个交易日调仓一次）
 
 ---
 
@@ -128,7 +128,7 @@ python pipeline/build_factors.py
 
 1. **PROJECT_ROOT：** 已统一为 `D:\qqq`，修改根路径时需同步更新各 config 文件及 debug.log 引用
 2. **Sheet 名与复合因子：** `strategy_config.COMPOSITE_FACTOR_SHEET` 需与 `composite_factors.xlsx` 中实际 sheet 一致（如 `rank_mul`）
-3. **调仓周期：** 系统按日历天数选调仓日；因子若为 10 交易日周期，则 <14 天等价于「每期必换」
+3. **调仓周期：** 系统按**交易日数**选调仓日（如 P10 = 每 10 个交易日调仓）；REBALANCE_PERIODS 中的 5/10/30/60 均为交易日数
 4. **单因子多 sheet：** 默认读第一个 sheet，可配置 `FACTOR_SHEET` 指定 sheet
 5. **收益率列：** 若 Excel 有 `Return` 列则直接使用，否则用 `pct_change()` 计算
 6. **依赖：** 需 `.venv` 或相应虚拟环境，包含 pandas、numpy、scipy、sklearn、matplotlib、openpyxl、yfinance 等
