@@ -64,7 +64,7 @@ OUTPUT_EXCEL_NAME = "strategy_detailed_backtest_report.xlsx"
 STRATEGY_PARAM = "max_return_5G_Top1_P10d"
 
 # 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移
-REBALANCE_DATE_OFFSET = 0
+REBALANCE_DATE_OFFSET = 7
 
 # composite_config 中因子索引 [20, 16, 43, 17, 34] 已用于生成 composite_factors.xlsx
 # 需先运行 run_composite_factor.py 确保 composite_factors.xlsx 存在且含 beta_m3_N10
@@ -165,7 +165,7 @@ def run_detailed_backtest(
     Parameters
     ----------
     rebalance_date_offset : int, optional
-        调仓日偏移天数（正数=提前，负数=延后），默认为 0
+        调仓日偏移（交易日数，正数=提前，负数=延后），默认为 0
     """
     target_group = group_num - (target_rank - 1)
     rebalance_dates = _select_rebalance_dates(
@@ -358,7 +358,7 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["Group_Num", params.get("group_num", "")],
             ["Target_Rank", params.get("target_rank", "")],
             ["Rebalance_Period_TradingDays", params.get("rebalance_period", "")],
-            ["Rebalance_Date_Offset_Days", params.get("rebalance_date_offset", REBALANCE_DATE_OFFSET)],
+            ["Rebalance_Date_Offset_TradingDays", params.get("rebalance_date_offset", REBALANCE_DATE_OFFSET)],
             ["Transaction_Cost_OneSide", f"{getattr(cfg, 'TRANSACTION_COST', 0.001):.3f}"],
             ["Timing_Convention", "Trade at T close, holding period (T, T_next]"],
             ["---", "---"],

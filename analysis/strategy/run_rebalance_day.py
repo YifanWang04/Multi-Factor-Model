@@ -83,8 +83,8 @@ STRATEGY_PARAMS = {
     "rebalance_period": _parsed[3],
 }
 
-# 调仓日偏移（天数）：正数=提前，负数=延后
-# 例如：REBALANCE_DATE_OFFSET = 6 表示所有调仓日提前6天
+# 调仓日偏移（交易日数）：正数=提前，负数=延后
+# 例如：REBALANCE_DATE_OFFSET = 6 表示所有调仓日提前 6 个交易日
 REBALANCE_DATE_OFFSET = 0  # 将下一调仓日从 2026-03-11 提前到 2026-03-05
 
 
@@ -533,7 +533,7 @@ def write_rebalance_day_report(
         ["---", "---"],
         ["Price_Convention", price_conv],
         ["Rebalance_Period_TradingDays", STRATEGY_PARAMS["rebalance_period"]],
-        ["Rebalance_Date_Offset_Days", REBALANCE_DATE_OFFSET],
+        ["Rebalance_Date_Offset_TradingDays", REBALANCE_DATE_OFFSET],
         ["---", "---"],
         *config_summary,
     ]
@@ -602,7 +602,7 @@ def send_discord_notification(
             f"**分组数：** {STRATEGY_PARAMS['group_num']}　"
             f"**目标组：** Top{STRATEGY_PARAMS['target_rank']}　"
             f"**调仓周期：** {STRATEGY_PARAMS['rebalance_period']} 交易日　"
-            f"**日期偏移：** {REBALANCE_DATE_OFFSET} 天\n"
+            f"**日期偏移：** {REBALANCE_DATE_OFFSET} 交易日\n"
         )
 
         if is_rebalance:
@@ -822,7 +822,7 @@ def main(
     print(f"    分组数:   {STRATEGY_PARAMS['group_num']}")
     print(f"    目标组:   Top{STRATEGY_PARAMS['target_rank']}")
     print(f"    调仓周期: {STRATEGY_PARAMS['rebalance_period']} 交易日")
-    print(f"    日期偏移: {REBALANCE_DATE_OFFSET} 天")
+    print(f"    日期偏移: {REBALANCE_DATE_OFFSET} 交易日")
     print("调仓日判定:")
     print(f"  今日是否调仓日: {'是' if status['is_rebalance_today'] else '否'}")
     print(f"  当前调仓日: {current_rebalance_date}")

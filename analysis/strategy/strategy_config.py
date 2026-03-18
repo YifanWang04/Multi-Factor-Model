@@ -39,7 +39,7 @@ OUTPUT_EXCEL_NAME = "strategy_backtest_report.xlsx"
 # 分层数量：88 只股票建议 5 / 10 层；如需 15 / 20 层可自行追加
 GROUP_NUMS = [5, 10]
 
-# 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移
+# 调仓日偏移（交易日数）：正数=提前，负数=延后；0=不偏移
 REBALANCE_DATE_OFFSET = 0
 
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
