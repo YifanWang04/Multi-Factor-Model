@@ -51,7 +51,7 @@ for _p in [_HERE, _SF_DIR, _MF_DIR, _ROOT]:
         sys.path.insert(0, _p)
 
 from run_strategy import load_composite_factor, load_return_data
-from run_detailed_backtest_report import run_detailed_backtest
+from run_detailed_backtest_report import run_detailed_backtest, parse_strategy_param
 from strategy_backtest import _build_groups, _select_rebalance_dates
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
@@ -65,32 +65,32 @@ PROJECT_ROOT = r"D:\qqq"
 OUTPUT_BASE = os.path.join(PROJECT_ROOT, "output")
 
 # 复合因子
-COMPOSITE_FACTOR_SHEET = "beta_m1"
+COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
 
 # 选定因子：与 composite_config 一致，由 multi_factor_config.COLLINEARITY_FACTOR_INDICES 派生
-from composite_config import SELECTED_FACTOR_NAMES
+from analysis.multi_factor.composite_config import SELECTED_FACTOR_NAMES
 
-# 策略参数：COMPOSITE_FACTOR_SHEET = "mvo_10G_Top1_P30d"
-TARGET_WEIGHT_METHOD = "mvo"
-TARGET_GROUP_NUM = 10
-TARGET_RANK = 1
-TARGET_REBALANCE_DAYS = 30
+# 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
+# 例：max_return_5G_Top1_P10d、mvo_10G_Top2_P30d、min_variance_5G_Top3_P20d
+STRATEGY_PARAM = "max_return_5G_Top1_P10d"
+
+# 解析后供内部使用
+_parsed = parse_strategy_param(STRATEGY_PARAM)
+STRATEGY_PARAMS = {
+    "weight_method": _parsed[0],
+    "group_num": _parsed[1],
+    "target_rank": _parsed[2],
+    "rebalance_period": _parsed[3],
+}
 
 # 调仓日偏移（天数）：正数=提前，负数=延后
 # 例如：REBALANCE_DATE_OFFSET = 6 表示所有调仓日提前6天
 REBALANCE_DATE_OFFSET = 6  # 将下一调仓日从 2026-03-11 提前到 2026-03-05
 
-STRATEGY_PARAMS = {
-    "weight_method": TARGET_WEIGHT_METHOD,
-    "group_num": TARGET_GROUP_NUM,
-    "target_rank": TARGET_RANK,
-    "rebalance_period": TARGET_REBALANCE_DAYS,
-}
-
 
 def _strategy_name() -> str:
-    """根据配置生成策略名称，如 mvo_10G_Top1_P30d。"""
-    return f"{TARGET_WEIGHT_METHOD}_{TARGET_GROUP_NUM}G_Top{TARGET_RANK}_P{TARGET_REBALANCE_DAYS}d"
+    """返回策略参数字符串，如 mvo_10G_Top1_P30d。"""
+    return STRATEGY_PARAM
 
 
 # Discord Webhook URL
@@ -509,9 +509,10 @@ def write_rebalance_day_report(
         ["Selected_Factors", ", ".join(SELECTED_FACTOR_NAMES)],
         ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
         ["Composite_Method", "多元回归beta加权 (M=3月, N=10日)"],
-        ["Weight_Method", params.get("weight_method", TARGET_WEIGHT_METHOD)],
-        ["Group_Num", params.get("group_num", TARGET_GROUP_NUM)],
-        ["Target_Rank", params.get("target_rank", TARGET_RANK)],
+        ["Strategy_Param", STRATEGY_PARAM],
+        ["Weight_Method", params.get("weight_method", STRATEGY_PARAMS["weight_method"])],
+        ["Group_Num", params.get("group_num", STRATEGY_PARAMS["group_num"])],
+        ["Target_Rank", params.get("target_rank", STRATEGY_PARAMS["target_rank"])],
         ["---", "---"],
         ["Total_Return", f"{total_ret:.4f}" if not np.isnan(total_ret) else "-"],
         ["Annual_Return", f"{ann_ret:.4f}" if not np.isnan(ann_ret) else "-"],
@@ -758,10 +759,10 @@ def main(
         factor_df=factor_df,
         ret_df=ret_df,
         price_df=price_df,
-        group_num=TARGET_GROUP_NUM,
-        target_rank=TARGET_RANK,
-        rebalance_period=TARGET_REBALANCE_DAYS,
-        weight_method=TARGET_WEIGHT_METHOD,
+        group_num=STRATEGY_PARAMS["group_num"],
+        target_rank=STRATEGY_PARAMS["target_rank"],
+        rebalance_period=STRATEGY_PARAMS["rebalance_period"],
+        weight_method=STRATEGY_PARAMS["weight_method"],
         config=cfg,
         rebalance_date_offset=REBALANCE_DATE_OFFSET,
     )
@@ -778,7 +779,7 @@ def main(
     rebalance_dates = _select_rebalance_dates(
         factor_df.index,
         ret_df.index,
-        TARGET_REBALANCE_DAYS,
+        STRATEGY_PARAMS["rebalance_period"],
         offset_days=REBALANCE_DATE_OFFSET,
     )
     last_factor_date = factor_df.index[-1]
@@ -786,7 +787,7 @@ def main(
 
     status = get_rebalance_day_status(
         rebalance_dates=rebalance_dates,
-        rebalance_period=TARGET_REBALANCE_DAYS,
+        rebalance_period=STRATEGY_PARAMS["rebalance_period"],
         as_of_date=as_of_date,
         last_factor_date=last_factor_date,
         trading_dates=factor_df.index.tolist(),

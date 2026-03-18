@@ -6,8 +6,8 @@
 配置：
   - 因子选择：[20, 16, 43, 17, 34]
   - 复合因子方法：beta_m3（即 beta_m3_N10）
-  - 策略参数：mvo_5G_Top2_P10d
-    （MVO 配置、5 分组、目标第 2 高组、10 日调仓周期）
+  - 策略参数：整串配置，如 max_return_5G_Top1_P10d
+    格式 {weight_method}_{N}G_Top{R}_P{D}d
 
 输出 Excel（多 Sheet）：
   - 调仓操作明细：每期调仓的股票、买卖价格、权重、收益率等
@@ -21,6 +21,7 @@
 """
 
 import os
+import re
 import sys
 
 import numpy as np
@@ -53,22 +54,53 @@ PROJECT_ROOT = r"D:\qqq"
 COMPOSITE_FACTOR_FILE = os.path.join(
     PROJECT_ROOT, "output", "composite_factor_reports", "composite_factors.xlsx"
 )
-COMPOSITE_FACTOR_SHEET = "beta_m3_N10"  # beta_m3 方法，N=10 窗口
+COMPOSITE_FACTOR_SHEET = "ic_m3_N20"  # beta_m3 方法，N=10 窗口
 PRICE_FILE = os.path.join(PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output", "strategy_reports")
 OUTPUT_EXCEL_NAME = "strategy_detailed_backtest_report.xlsx"
 
-# 策略参数：mvo_5G_Top2_P10d
-TARGET_WEIGHT_METHOD = "mvo"
-TARGET_GROUP_NUM = 5
-TARGET_RANK = 2        # Top2 = 第 2 高组
-TARGET_REBALANCE_DAYS = 10
+# 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
+# 例：max_return_5G_Top1_P10d、mvo_10G_Top2_P30d、min_variance_5G_Top3_P20d
+STRATEGY_PARAM = "max_return_5G_Top1_P10d"
 
 # 调仓日偏移（天数）：正数=提前，负数=延后；0=不偏移
 REBALANCE_DATE_OFFSET = 0
 
 # composite_config 中因子索引 [20, 16, 43, 17, 34] 已用于生成 composite_factors.xlsx
 # 需先运行 run_composite_factor.py 确保 composite_factors.xlsx 存在且含 beta_m3_N10
+
+
+def parse_strategy_param(param: str) -> tuple:
+    """
+    解析策略参数字符串，格式：{weight_method}_{N}G_Top{R}_P{D}d
+    例：max_return_5G_Top1_P10d -> (weight_method, group_num, target_rank, rebalance_days)
+
+    Returns
+    -------
+    tuple : (weight_method, group_num, target_rank, rebalance_days)
+    """
+    m = re.match(r"^(.+)_(\d+)G_Top(\d+)_P(\d+)d$", param.strip())
+    if not m:
+        raise ValueError(
+            f"策略参数格式错误: '{param}'，应为 {{weight_method}}_{{N}}G_Top{{R}}_P{{D}}d，"
+            "例：max_return_5G_Top1_P10d"
+        )
+    weight_method = m.group(1)
+    group_num = int(m.group(2))
+    target_rank = int(m.group(3))
+    rebalance_days = int(m.group(4))
+    return weight_method, group_num, target_rank, rebalance_days
+
+
+def _strategy_param_from_params(params: dict) -> str:
+    """从 params 字典还原策略参数字符串。"""
+    w = params.get("weight_method", "")
+    g = params.get("group_num", "")
+    r = params.get("target_rank", "")
+    p = params.get("rebalance_period", "")
+    if w != "" and g != "" and r != "" and p != "":
+        return f"{w}_{g}G_Top{r}_P{p}d"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -321,10 +353,11 @@ def write_detailed_report(result: dict, output_path: str) -> None:
         config_rows = [
             ["Factor_Indices", "[20, 16, 43, 17, 34]"],
             ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
-            ["Weight_Method", params.get("weight_method", TARGET_WEIGHT_METHOD)],
-            ["Group_Num", params.get("group_num", TARGET_GROUP_NUM)],
-            ["Target_Rank", params.get("target_rank", TARGET_RANK)],
-            ["Rebalance_Period_TradingDays", params.get("rebalance_period", TARGET_REBALANCE_DAYS)],
+            ["Strategy_Param", _strategy_param_from_params(params)],
+            ["Weight_Method", params.get("weight_method", "")],
+            ["Group_Num", params.get("group_num", "")],
+            ["Target_Rank", params.get("target_rank", "")],
+            ["Rebalance_Period_TradingDays", params.get("rebalance_period", "")],
             ["Rebalance_Date_Offset_Days", params.get("rebalance_date_offset", REBALANCE_DATE_OFFSET)],
             ["Transaction_Cost_OneSide", f"{getattr(cfg, 'TRANSACTION_COST', 0.001):.3f}"],
             ["Timing_Convention", "Trade at T close, holding period (T, T_next]"],
@@ -372,9 +405,11 @@ def write_detailed_report(result: dict, output_path: str) -> None:
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+    weight_method, group_num, target_rank, rebalance_days = parse_strategy_param(STRATEGY_PARAM)
+
     print("=" * 64)
     print("  策略回测详细报表")
-    print("  因子 [20, 16, 43, 17, 34] | 复合 beta_m3 | mvo_5G_Top2_P10d")
+    print(f"  因子 [20, 16, 43, 17, 34] | 复合 beta_m3 | {STRATEGY_PARAM}")
     print("=" * 64)
 
     # 1. 加载复合因子
@@ -394,15 +429,15 @@ def main():
     print(f"      价格区间: {price_df.index[0].date()} ~ {price_df.index[-1].date()}")
 
     # 4. 运行详细回测
-    print(f"\n[4/4] 运行策略回测: mvo_{TARGET_GROUP_NUM}G_Top{TARGET_RANK}_P{TARGET_REBALANCE_DAYS}d")
+    print(f"\n[4/4] 运行策略回测: {STRATEGY_PARAM}")
     result = run_detailed_backtest(
         factor_df=factor_df,
         ret_df=ret_df,
         price_df=price_df,
-        group_num=TARGET_GROUP_NUM,
-        target_rank=TARGET_RANK,
-        rebalance_period=TARGET_REBALANCE_DAYS,
-        weight_method=TARGET_WEIGHT_METHOD,
+        group_num=group_num,
+        target_rank=target_rank,
+        rebalance_period=rebalance_days,
+        weight_method=weight_method,
         config=cfg,
         rebalance_date_offset=REBALANCE_DATE_OFFSET,
     )
