@@ -352,9 +352,11 @@ def apply_live_prices_to_operations(
 def get_current_rebalance_operations(
     result: dict,
     current_rebalance_date: pd.Timestamp,
+    next_rebalance_date: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """
     获取当前调仓日操作：卖出上一期持仓 + 买入本期标的。
+    next_rebalance_date: 外推的下一调仓日，用于填充 Next_Rebalance_Date 字段。
     返回含 Action 列（Sell/Buy）的 DataFrame，先卖后买。
     """
     if "error" in result:
@@ -387,6 +389,7 @@ def get_current_rebalance_operations(
             group_num=STRATEGY_PARAMS["group_num"],
             target_rank=STRATEGY_PARAMS["target_rank"],
             weight_method=STRATEGY_PARAMS["weight_method"],
+            next_rb_date=next_rebalance_date,
         )
         if not buy_ops.empty:
             buy_ops.insert(0, "Action", "Buy")
@@ -410,8 +413,9 @@ def _compute_last_rebalance_ops(
     group_num: int,
     target_rank: int,
     weight_method: str,
+    next_rb_date: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """对最后一个调仓日（无 next_rb）计算买入操作明细。"""
+    """对最后一个调仓日（无 next_rb）计算买入操作明细。next_rb_date 为外推的下一调仓日。"""
     if factor_df is None or ret_df is None or price_df is None or config is None:
         return pd.DataFrame()
     target_group = group_num - (target_rank - 1)
@@ -457,6 +461,9 @@ def _compute_last_rebalance_ops(
         return pd.DataFrame()
     w = w[common] / w[common].sum()
 
+    _next_rb = pd.Timestamp(next_rb_date) if next_rb_date is not None else pd.NaT
+    _holding_days = ((_next_rb - rb_date).days
+                     if next_rb_date is not None else np.nan)
     records = []
     for sym in common:
         bp = float(buy_p[sym])
@@ -466,8 +473,8 @@ def _compute_last_rebalance_ops(
         shares = buy_value / bp if bp > 0 else np.nan
         records.append({
             "Rebalance_Date": rb_date,
-            "Next_Rebalance_Date": pd.NaT,
-            "Holding_Days": np.nan,
+            "Next_Rebalance_Date": _next_rb,
+            "Holding_Days": _holding_days,
             "Symbol": sym,
             "Weight": wt,
             "Buy_Price_Close": bp,
@@ -715,6 +722,54 @@ def send_discord_notification(
 
 
 # ---------------------------------------------------------------------------
+# 同步复合因子至标准路径（供 run_detailed_backtest_report.py 使用）
+# ---------------------------------------------------------------------------
+
+def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
+    """
+    将 Pipeline 生成的复合因子（run_dir/composite_factor_reports/composite_factors.xlsx）
+    中的指定 sheet 同步回标准 COMPOSITE_FACTOR_FILE，使 run_detailed_backtest_report.py
+    始终与 run_rebalance_day.py 使用相同的最新数据。
+    """
+    import openpyxl
+
+    from data.data_config import COMPOSITE_FACTOR_FILE
+    src = os.path.join(run_dir, "composite_factor_reports", "composite_factors.xlsx")
+    dst = COMPOSITE_FACTOR_FILE
+
+    if not os.path.isfile(src):
+        print(f"  [同步跳过] 源文件不存在: {src}")
+        return
+
+    try:
+        # 读取新生成的 sheet 数据
+        src_df = pd.read_excel(src, sheet_name=sheet, index_col=0)
+        src_df.index = pd.to_datetime(src_df.index)
+        src_df = src_df.apply(pd.to_numeric, errors="coerce")
+
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+
+        if os.path.isfile(dst):
+            # 目标文件已存在：只更新/添加目标 sheet，保留其他 sheet
+            wb = openpyxl.load_workbook(dst)
+            if sheet in wb.sheetnames:
+                del wb[sheet]
+            wb.save(dst)
+            # 用 ExcelWriter 追加写入 sheet
+            with pd.ExcelWriter(dst, engine="openpyxl", mode="a") as writer:
+                src_df.to_excel(writer, sheet_name=sheet)
+        else:
+            # 目标文件不存在：直接写入
+            with pd.ExcelWriter(dst, engine="openpyxl") as writer:
+                src_df.to_excel(writer, sheet_name=sheet)
+
+        print(f"  [同步完成] 复合因子 {sheet} 已更新至: {dst}")
+        print(f"             因子日期范围: {src_df.index[0].date()} ~ {src_df.index[-1].date()}")
+    except Exception as e:
+        print(f"  [同步警告] 同步复合因子失败（不影响本次调仓报表）: {e}")
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -755,6 +810,11 @@ def main(
     if not skip_pipeline:
         print("\n[阶段 1] 执行 Pipeline（输出至上述目录）...")
         run_pipeline_subprocess(run_dir, skip_pull=skip_pull)
+        # 将新生成的复合因子同步回标准路径，确保 run_detailed_backtest_report.py 使用最新数据
+        _sync_composite_factor_to_standard(
+            run_dir=run_dir,
+            sheet=COMPOSITE_FACTOR_SHEET,
+        )
     else:
         print("\n[阶段 1] 跳过 Pipeline")
 
@@ -802,9 +862,12 @@ def main(
     )
 
     current_rebalance_date = status.get("current_rebalance_date")
+    next_rebalance_date = status.get("next_rebalance_date")
     current_ops = pd.DataFrame()
     if current_rebalance_date is not None:
-        current_ops = get_current_rebalance_operations(result, current_rebalance_date)
+        current_ops = get_current_rebalance_operations(
+            result, current_rebalance_date, next_rebalance_date=next_rebalance_date
+        )
         # 调仓日且未收盘时：用当日开盘价+现价替代收盘价
         current_ops, used_live_prices = apply_live_prices_to_operations(
             current_ops, price_df, current_rebalance_date, as_of_date

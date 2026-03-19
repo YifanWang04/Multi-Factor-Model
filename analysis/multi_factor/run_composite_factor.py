@@ -113,6 +113,34 @@ def main():
     )
     print(f"调仓期数量: {len(ret_periods)}")
 
+    # 2b. 扩展 factor_periods_dict：将最后一个日频调仓日 r_k 追加进来
+    # 背景：align_factor_return_by_period 对每个调仓日需要下一个调仓日来计算持仓收益，
+    #       因此最后一个调仓日 r_k 被排除（无 next_date）。但 r_k 的因子截面值已经可得，
+    #       用前 N 期 IC 权重即可合成当期复合因子，确保复合因子时序与最新数据同步。
+    _first_daily = next(iter(factor_dict.values()))
+    _mgr_last = RebalancePeriodManager(_first_daily, ret, REBALANCE_PERIOD)
+    _all_daily_rb = _mgr_last.get_rebalance_dates()
+    if _all_daily_rb:
+        _last_rb = pd.Timestamp(_all_daily_rb[-1])
+        _sample_periods = next(iter(factor_periods_dict.values()))
+        if _last_rb not in _sample_periods.index:
+            for _fname, _fdf_daily in factor_dict.items():
+                if _fname not in factor_periods_dict:
+                    continue
+                _avail = _fdf_daily.index[_fdf_daily.index <= _last_rb]
+                if len(_avail) == 0:
+                    _new_row = pd.DataFrame(
+                        [pd.Series(np.nan, index=_fdf_daily.columns)],
+                        index=[_last_rb],
+                    )
+                else:
+                    _sig = _avail[-1]
+                    _new_row = _fdf_daily.loc[[_sig]].rename(index={_sig: _last_rb})
+                factor_periods_dict[_fname] = pd.concat(
+                    [factor_periods_dict[_fname], _new_row]
+                )
+            print(f"  已将最新调仓日 {_last_rb.date()} 追加至复合因子计算范围")
+
     # 3. 计算复合因子（在调仓期截面上）
     selected_composite = os.environ.get("REBALANCE_SELECTED_COMPOSITE")
     if selected_composite:

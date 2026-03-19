@@ -201,40 +201,49 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
 
 def beta_weighted(factor_dict, ret_periods, N_windows):
     """一元回归加权，返回 {name: composite_df}。"""
-    dates = ret_periods.index
-    aligned = _factor_matrix(factor_dict, dates)
+    # IC/beta 计算仅使用有收益数据的日期
+    ic_dates = ret_periods.index
+    aligned = _factor_matrix(factor_dict, ic_dates)
     stats = _compute_betas_ics(aligned, ret_periods)
+    # 复合因子输出覆盖 factor_dict 全部日期（含最新调仓日 r_k）
+    all_dates = _align_dates(factor_dict)
     out = {}
-    out["beta_m1"] = _zscore(_univariate_weighted(aligned, stats, "beta", dates, 1))
-    out["beta_m2"] = _zscore(_univariate_weighted(aligned, stats, "beta", dates, 2))
+    out["beta_m1"] = _zscore(_univariate_weighted(factor_dict, stats, "beta", all_dates, 1))
+    out["beta_m2"] = _zscore(_univariate_weighted(factor_dict, stats, "beta", all_dates, 2))
     for N in N_windows:
-        out[f"beta_m3_N{N}"] = _zscore(_univariate_weighted(aligned, stats, "beta", dates, 3, N))
+        out[f"beta_m3_N{N}"] = _zscore(_univariate_weighted(factor_dict, stats, "beta", all_dates, 3, N))
     return out
 
 
 def ic_weighted(factor_dict, ret_periods, N_windows):
     """IC加权，返回 {name: composite_df}。"""
-    dates = ret_periods.index
-    aligned = _factor_matrix(factor_dict, dates)
+    # IC 计算仅使用有收益数据的日期
+    ic_dates = ret_periods.index
+    aligned = _factor_matrix(factor_dict, ic_dates)
     stats = _compute_betas_ics(aligned, ret_periods)
+    # 复合因子输出覆盖 factor_dict 全部日期（含最新调仓日 r_k）
+    all_dates = _align_dates(factor_dict)
     out = {}
-    out["ic_m1"] = _zscore(_univariate_weighted(aligned, stats, "ic", dates, 1))
-    out["ic_m2"] = _zscore(_univariate_weighted(aligned, stats, "ic", dates, 2))
+    out["ic_m1"] = _zscore(_univariate_weighted(factor_dict, stats, "ic", all_dates, 1))
+    out["ic_m2"] = _zscore(_univariate_weighted(factor_dict, stats, "ic", all_dates, 2))
     for N in N_windows:
-        out[f"ic_m3_N{N}"] = _zscore(_univariate_weighted(aligned, stats, "ic", dates, 3, N))
+        out[f"ic_m3_N{N}"] = _zscore(_univariate_weighted(factor_dict, stats, "ic", all_dates, 3, N))
     return out
 
 
 def rank_ic_weighted(factor_dict, ret_periods, N_windows):
     """Rank_IC加权，返回 {name: composite_df}。"""
-    dates = ret_periods.index
-    aligned = _factor_matrix(factor_dict, dates)
+    # Rank_IC 计算仅使用有收益数据的日期
+    ic_dates = ret_periods.index
+    aligned = _factor_matrix(factor_dict, ic_dates)
     stats = _compute_betas_ics(aligned, ret_periods)
+    # 复合因子输出覆盖 factor_dict 全部日期（含最新调仓日 r_k）
+    all_dates = _align_dates(factor_dict)
     out = {}
-    out["rank_ic_m1"] = _zscore(_univariate_weighted(aligned, stats, "rank_ic", dates, 1))
-    out["rank_ic_m2"] = _zscore(_univariate_weighted(aligned, stats, "rank_ic", dates, 2))
+    out["rank_ic_m1"] = _zscore(_univariate_weighted(factor_dict, stats, "rank_ic", all_dates, 1))
+    out["rank_ic_m2"] = _zscore(_univariate_weighted(factor_dict, stats, "rank_ic", all_dates, 2))
     for N in N_windows:
-        out[f"rank_ic_m3_N{N}"] = _zscore(_univariate_weighted(aligned, stats, "rank_ic", dates, 3, N))
+        out[f"rank_ic_m3_N{N}"] = _zscore(_univariate_weighted(factor_dict, stats, "rank_ic", all_dates, 3, N))
     return out
 
 
@@ -244,20 +253,20 @@ def rank_ic_weighted(factor_dict, ret_periods, N_windows):
 
 def rank_weighted(factor_dict, ret_periods):
     """排序相加 & 排序相乘，返回 {name: composite_df}。"""
-    dates = ret_periods.index
-    aligned = _factor_matrix(factor_dict, dates)
-    names = list(aligned.keys())
-    stocks = next(iter(aligned.values())).columns
+    # 排序加权只需因子值，可覆盖 factor_dict 全部日期（含最新调仓日 r_k）
+    all_dates = _align_dates(factor_dict)
+    names = list(factor_dict.keys())
+    stocks = next(iter(factor_dict.values())).columns
 
-    rank_add = pd.DataFrame(np.nan, index=dates, columns=stocks)
-    rank_mul = pd.DataFrame(np.nan, index=dates, columns=stocks)
+    rank_add = pd.DataFrame(np.nan, index=all_dates, columns=stocks)
+    rank_mul = pd.DataFrame(np.nan, index=all_dates, columns=stocks)
 
-    for d in dates:
+    for d in all_dates:
         rank_frames = []
         for n in names:
-            if d not in aligned[n].index:
+            if d not in factor_dict[n].index:
                 continue
-            row = aligned[n].loc[d]
+            row = factor_dict[n].loc[d]
             ranked = row.rank(method="average", na_option="keep")
             rank_frames.append(ranked)
         if not rank_frames:
@@ -313,26 +322,29 @@ def _ols_betas_per_period(factor_dict, ret_periods):
 
 def multivariate_weighted(factor_dict, ret_periods, M_windows):
     """多元回归加权，返回 {name: composite_df}。"""
-    dates = ret_periods.index
-    aligned = _factor_matrix(factor_dict, dates)
+    # OLS beta 计算仅使用有收益数据的日期
+    ic_dates = ret_periods.index
+    aligned = _factor_matrix(factor_dict, ic_dates)
     beta_df = _ols_betas_per_period(aligned, ret_periods)
-    names = list(aligned.keys())
+    # 复合因子输出覆盖 factor_dict 全部日期（含最新调仓日 r_k）
+    all_dates = _align_dates(factor_dict)
+    names = list(factor_dict.keys())
     out = {}
 
     def _build_weight_df(method, window=None):
         rows = []
-        for d in dates:
+        for d in all_dates:
             # 使用 d 之前的所有 beta（不排除最近一期，因为它已经实现）
             past = beta_df[beta_df.index < d]
             if method == 3:
                 past = past.iloc[-window:]
             rows.append(past.mean().to_dict() if len(past) > 0 else {n: np.nan for n in names})
-        return pd.DataFrame(rows, index=dates)
+        return pd.DataFrame(rows, index=all_dates)
 
-    out["ols_m1"] = _zscore(_composite_from_weight_df(aligned, _build_weight_df(1), dates))
-    out["ols_m2"] = _zscore(_composite_from_weight_df(aligned, _build_weight_df(2), dates))
+    out["ols_m1"] = _zscore(_composite_from_weight_df(factor_dict, _build_weight_df(1), all_dates))
+    out["ols_m2"] = _zscore(_composite_from_weight_df(factor_dict, _build_weight_df(2), all_dates))
     for M in M_windows:
-        out[f"ols_m3_M{M}"] = _zscore(_composite_from_weight_df(aligned, _build_weight_df(3, M), dates))
+        out[f"ols_m3_M{M}"] = _zscore(_composite_from_weight_df(factor_dict, _build_weight_df(3, M), all_dates))
     return out
 
 
@@ -345,16 +357,17 @@ def pca_composite(factor_dict, ret_periods, n_components=3):
     PCA：对每期截面因子矩阵做PCA，取前n_components个主成分作为复合因子。
     返回 {f'pca_pc{i+1}': DataFrame(date×stock)}。
     """
-    dates = ret_periods.index
-    aligned = _factor_matrix(factor_dict, dates)
+    # PCA 只需因子值，可覆盖 factor_dict 全部日期（含最新调仓日 r_k）
+    all_dates = _align_dates(factor_dict)
+    aligned = _factor_matrix(factor_dict, all_dates)
     names = list(aligned.keys())
     stocks = next(iter(aligned.values())).columns
     n_comp = min(n_components, len(names))
 
     # 收集每期截面数据：shape (n_stocks, n_factors)
-    pc_results = {i: pd.DataFrame(np.nan, index=dates, columns=stocks) for i in range(n_comp)}
+    pc_results = {i: pd.DataFrame(np.nan, index=all_dates, columns=stocks) for i in range(n_comp)}
 
-    for d in dates:
+    for d in all_dates:
         rows = {}
         for n in names:
             if d in aligned[n].index:

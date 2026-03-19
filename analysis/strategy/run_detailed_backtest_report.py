@@ -195,6 +195,20 @@ def run_detailed_backtest(
     if len(rebalance_dates) < 2:
         return {"error": "调仓日不足 2 个"}
 
+    # 将最后一期持仓延伸到下一调仓日（按调仓周期外推）。
+    # 使用外推的真实下一调仓日（如 3.27），而非价格数据截止日（如 3.17），
+    # 确保 Next_Rebalance_Date 显示正确的调仓计划，不被当日数据截止日误导。
+    last_rb = pd.Timestamp(rebalance_dates[-1])
+    _after = ret_df.index[ret_df.index > last_rb].sort_values()
+    if len(_after) >= rebalance_period:
+        # 用实际交易日计数外推（与 _select_rebalance_dates 逻辑一致）
+        next_rb_date = pd.Timestamp(_after[rebalance_period - 1])
+    else:
+        # 数据不足时退化为业务日近似
+        _bd = pd.bdate_range(start=last_rb, periods=rebalance_period + 1, freq="B")
+        next_rb_date = pd.Timestamp(_bd[-1])
+    rebalance_dates = list(rebalance_dates) + [next_rb_date]
+
     all_daily_rets = []
     all_dates = []
     period_rets = []

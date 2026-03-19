@@ -41,6 +41,7 @@ class RebalancePeriodManager:
         """
         从因子日期索引中选取交易日间隔 ≥ rebalance_period 的调仓日。
         即相邻调仓日之间至少相隔 rebalance_period 个交易日。
+        与 strategy_backtest._select_rebalance_dates 逻辑一致：按 ret 的交易日计数，而非因子索引位置。
 
         Returns:
         --------
@@ -49,13 +50,14 @@ class RebalancePeriodManager:
         dates = sorted(self.factor.index)
         if not dates:
             return []
+        ret_sorted = self.ret.index.sort_values()
         selected = [dates[0]]
-        prev_idx = 0
-        for i in range(1, len(dates)):
-            d = dates[i]
-            if i - prev_idx >= self.rebalance_period:
+        last_selected = dates[0]
+        for d in dates[1:]:
+            n_trading_days = ((ret_sorted > last_selected) & (ret_sorted <= d)).sum()
+            if n_trading_days >= self.rebalance_period:
                 selected.append(d)
-                prev_idx = i
+                last_selected = d
         return selected
     
     def align_factor_return_by_period(self):
