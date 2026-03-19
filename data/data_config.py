@@ -14,10 +14,9 @@ import os
 # 项目根目录（data 的上级）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 数据起始日提前的交易日数：0=不提前，正数=提前 N 天
-# 支持环境变量 DATA_START_OFFSET_DAYS 覆盖
-_DATA_OFFSET_RAW = os.environ.get("DATA_START_OFFSET_DAYS")
-DATA_START_OFFSET_DAYS = int(_DATA_OFFSET_RAW) if _DATA_OFFSET_RAW is not None else 0
+# 数据起始日提前的交易日数：0=不提前，正数=提前 N 个交易日
+# 注：此值只从配置文件读取（不再支持通过环境变量覆盖）
+DATA_START_OFFSET_DAYS = 0
 
 # 基准起始日（用于 pull 计算实际 start_date）
 DATA_BASE_START_DATE = "2023-01-01"

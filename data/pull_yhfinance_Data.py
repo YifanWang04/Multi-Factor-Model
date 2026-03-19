@@ -6,7 +6,7 @@ Yahoo Finance 行情数据下载脚本 (data/pull_yhfinance_Data.py)
 行为说明：
 - 股票列表：脚本内硬编码为约 100 只美股的 ticker（如 AAPL, MSFT 等）。
 - 时间范围：start_date 至当前日期（end_date 使用 datetime.today()）。
-- DATA_START_OFFSET_DAYS：数据起始日提前的交易日数，0=不提前；正数=提前 N 天，使调仓日历整体前移。
+- DATA_START_OFFSET_DAYS：数据起始日提前的交易日数，0=不提前；正数=提前 N 个交易日，使调仓日历整体前移。
 - 输出：offset=0 时为 us_top100_daily_2023_present.xlsx；offset!=0 时为 us_top100_daily_2023_present_offset{N}d.xlsx，避免覆盖原数据。
 """
 

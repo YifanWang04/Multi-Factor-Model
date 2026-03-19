@@ -106,7 +106,7 @@ python pipeline/build_factors.py
 - Key variable `PROJECT_ROOT`: **must be consistent**; project root is `D:\qqq`
 - Common path variables: `PRICE_FILE`, `RETURN_COLUMN`, `FACTOR_FILE`, `OUTPUT_DIR`
 - **DATA_START_OFFSET_DAYS**: Number of trading days to shift data start date earlier
-  - **Config location:** `data/data_config.py`; can be overridden by env var `DATA_START_OFFSET_DAYS`
+  - **Config location:** `data/data_config.py` (set directly in code; no env var override)
   - **Implementation:** In `pull_yhfinance_Data.py`, start_date is shifted back N trading days so factors and rebalance calendar stay aligned
   - **Subdirs by offset (no overwrite):** offset=0 uses default paths; offset!=0 uses `_offset{N}d` suffix, e.g. `factor_raw_offset7d/`, `factor_processed_offset7d/`, `output/composite_factor_reports_offset7d/`, `output/strategy_reports_offset7d/`, etc.
 

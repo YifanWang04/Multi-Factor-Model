@@ -84,7 +84,7 @@ STRATEGY_PARAMS = {
     "rebalance_period": _parsed[3],
 }
 
-# 数据起始日偏移由 data.data_config.DATA_START_OFFSET_DAYS 控制（或环境变量 DATA_START_OFFSET_DAYS）
+# 数据起始日偏移由 data.data_config.DATA_START_OFFSET_DAYS 配置控制
 
 
 def _strategy_name() -> str:
@@ -141,9 +141,7 @@ def run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
     env["REBALANCE_RUN_DIR"] = run_dir
     env["REBALANCE_SELECTED_FACTORS"] = ",".join(SELECTED_FACTOR_NAMES)
     env["REBALANCE_SELECTED_COMPOSITE"] = COMPOSITE_FACTOR_SHEET
-    # 传递数据起始日偏移，使 pull 与当前配置一致
-    from data.data_config import DATA_START_OFFSET_DAYS
-    env["DATA_START_OFFSET_DAYS"] = str(DATA_START_OFFSET_DAYS)
+    # 传递数据起始日偏移：改为仅由 data/data_config.py 配置控制
 
     data_dir = os.path.join(run_dir, "data")
     os.makedirs(data_dir, exist_ok=True)
@@ -160,7 +158,9 @@ def run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
             shutil.copy2(src, dst)
             print(f"  已复制数据至: {dst}")
         else:
-            raise FileNotFoundError(f"skip_pull 时需存在 {src}，请先运行 pull 或设置 DATA_START_OFFSET_DAYS")
+            raise FileNotFoundError(
+                f"skip_pull 时需存在 {src}，请先运行 pull 或确保已在 data/data_config.py 中设好 DATA_START_OFFSET_DAYS"
+            )
 
     steps = []
     if not skip_pull:
