@@ -4,8 +4,8 @@
 基于 strategy 模块的回测逻辑，生成单策略的明细报表。
 
 配置：
-  - 因子选择：[20, 16, 43, 17, 34]
-  - 复合因子方法：beta_m3（即 beta_m3_N10）
+  - 因子选择：来自 composite_config.SELECTED_FACTOR_INDICES
+  - 复合因子方法：由 COMPOSITE_FACTOR_SHEET 指定（如 ic_m3_N20）
   - 策略参数：整串配置，如 max_return_5G_Top1_P10d
     格式 {weight_method}_{N}G_Top{R}_P{D}d
 
@@ -37,6 +37,7 @@ for _p in [_HERE, _SF_DIR, _ROOT]:
         sys.path.insert(0, _p)
 
 from run_strategy import load_composite_factor, load_return_data
+from analysis.multi_factor.composite_config import SELECTED_FACTOR_INDICES
 from strategy_backtest import (
     StrategyBacktester,
     _build_groups,
@@ -65,8 +66,8 @@ OUTPUT_EXCEL_NAME = "strategy_detailed_backtest_report.xlsx"
 # 例：max_return_5G_Top1_P10d、mvo_10G_Top2_P30d、min_variance_5G_Top3_P20d
 STRATEGY_PARAM = "max_return_5G_Top1_P10d"
 
-# composite_config 中因子索引 [20, 16, 43, 17, 34] 已用于生成 composite_factors.xlsx
-# 需先运行 run_composite_factor.py 确保 composite_factors.xlsx 存在且含 beta_m3_N10
+# 因子索引来自 composite_config.SELECTED_FACTOR_INDICES
+# 需先运行 run_composite_factor.py 确保 composite_factors.xlsx 存在且含指定 sheet
 
 
 def _safe_tag(s: str) -> str:
@@ -383,7 +384,7 @@ def write_detailed_report(result: dict, output_path: str) -> None:
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         # Sheet 0: Config & Performance (merged)
         config_rows = [
-            ["Factor_Indices", "[20, 16, 43, 17, 34]"],
+            ["Factor_Indices", str(SELECTED_FACTOR_INDICES)],
             ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
             ["Strategy_Param", _strategy_param_from_params(params)],
             ["Weight_Method", params.get("weight_method", "")],
@@ -441,7 +442,7 @@ def main():
 
     print("=" * 64)
     print("  策略回测详细报表")
-    print(f"  因子 [20, 16, 43, 17, 34] | 复合 beta_m3 | {STRATEGY_PARAM}")
+    print(f"  因子 {SELECTED_FACTOR_INDICES} | 复合 {COMPOSITE_FACTOR_SHEET} | {STRATEGY_PARAM}")
     print("=" * 64)
 
     # 1. 加载复合因子

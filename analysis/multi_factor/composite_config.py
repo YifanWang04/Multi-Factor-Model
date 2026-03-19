@@ -70,6 +70,12 @@ def get_selected_factor_files():
         # 调仓日流程已通过 REBALANCE_SELECTED_FACTORS 只构建了选定因子
         # factor_processed 中即为全部选定因子，直接返回
         return all_files
+    # 当 offset 子目录（如 factor_processed_offset4d）不存在时，回退到 factor_processed
+    if not all_files and "_offset" in FACTOR_PROCESSED_DIR:
+        _project_root = os.path.dirname(FACTOR_PROCESSED_DIR)
+        _base_factor_dir = os.path.join(_project_root, "factor_processed")
+        if os.path.isdir(_base_factor_dir):
+            all_files = get_all_factor_files(_base_factor_dir)
     name_to_path = {get_factor_display_name(p): p for p in all_files}
     return [name_to_path[n] for n in SELECTED_FACTOR_NAMES if n in name_to_path]
 

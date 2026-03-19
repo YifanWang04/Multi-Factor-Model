@@ -6,8 +6,18 @@
 
 import sys
 import io
+import os
 import requests
 from datetime import datetime
+
+# 路径注册（与 run_rebalance_day 一致）
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(os.path.dirname(_HERE))
+for _p in [_HERE, _ROOT]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+import strategy_config as cfg
 
 # 设置 UTF-8 输出（Windows 兼容）
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -63,7 +73,7 @@ def test_rebalance_day_notification():
             }
         ],
         "footer": {
-            "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 策略：beta_m3_N10"
+            "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 复合因子：{cfg.COMPOSITE_FACTOR_SHEET}"
         }
     }
 
@@ -91,7 +101,7 @@ def test_non_rebalance_day_notification():
         ),
         "color": 0x808080,  # 灰色
         "footer": {
-            "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 策略：beta_m3_N10"
+            "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 复合因子：{cfg.COMPOSITE_FACTOR_SHEET}"
         }
     }
 

@@ -10,6 +10,7 @@
   - factor_processed/        # data_process 输出
   - composite_factor_reports/ # run_composite_factor 输出
   - rebalance_day_report.xlsx # 本脚本报表
+  - strategy_detailed_backtest_report*.xlsx  # 策略详细回测报表（与 run_detailed_backtest_report 同格式）
 
 时序约定（与 README.md 一致）：
   - 交易：T 日收盘执行，买卖价格均使用 Adj Close（收盘价）
@@ -51,7 +52,12 @@ for _p in [_HERE, _SF_DIR, _MF_DIR, _ROOT]:
         sys.path.insert(0, _p)
 
 from run_strategy import load_composite_factor, load_return_data
-from run_detailed_backtest_report import run_detailed_backtest, parse_strategy_param
+from run_detailed_backtest_report import (
+    run_detailed_backtest,
+    parse_strategy_param,
+    write_detailed_report,
+    build_detailed_report_filename,
+)
 from strategy_backtest import _build_groups, _select_rebalance_dates
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
@@ -68,8 +74,8 @@ OUTPUT_BASE = os.path.join(PROJECT_ROOT, "output")
 # 复合因子
 COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
 
-# 选定因子：与 composite_config 一致，由 multi_factor_config.COLLINEARITY_FACTOR_INDICES 派生
-from analysis.multi_factor.composite_config import SELECTED_FACTOR_NAMES
+# 选定因子：与 composite_config 一致，由 composite_config.SELECTED_FACTOR_INDICES 派生
+from analysis.multi_factor.composite_config import SELECTED_FACTOR_NAMES, SELECTED_FACTOR_INDICES
 
 # 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
 # 例：max_return_5G_Top1_P10d、mvo_10G_Top2_P30d、min_variance_5G_Top3_P20d
@@ -515,6 +521,7 @@ def write_rebalance_day_report(
     max_dd = (nv / nv.cummax() - 1).min() * 100 if len(nv) > 0 else np.nan
 
     config_summary = [
+        ["Factor_Indices", str(SELECTED_FACTOR_INDICES)],
         ["Selected_Factors", ", ".join(SELECTED_FACTOR_NAMES)],
         ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
         ["Composite_Method", f"IC加权 {COMPOSITE_FACTOR_SHEET} (M=3月, N=20日)"],
@@ -877,6 +884,16 @@ def main(
 
     output_path = os.path.join(run_dir, "rebalance_day_report.xlsx")
     write_rebalance_day_report(result, status, current_ops, output_path, used_live_prices=used_live_prices)
+
+    # 策略详细回测报表（与 run_detailed_backtest_report.py 同格式）
+    report_name = build_detailed_report_filename(
+        base_name="strategy_detailed_backtest_report.xlsx",
+        composite_sheet=COMPOSITE_FACTOR_SHEET,
+        strategy_param=STRATEGY_PARAM,
+        data_start_offset_days=DATA_START_OFFSET_DAYS,
+    )
+    detailed_report_path = os.path.join(run_dir, report_name)
+    write_detailed_report(result, detailed_report_path)
 
     print("\n" + "-" * 64)
     print("策略概要:")

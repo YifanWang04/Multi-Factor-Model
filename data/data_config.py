@@ -16,7 +16,8 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 数据起始日提前的交易日数：0=不提前，正数=提前 N 个交易日
 # 注：此值只从配置文件读取（不再支持通过环境变量覆盖）
-DATA_START_OFFSET_DAYS = 0
+# 6 = 将调仓日从 3.27 提前至 3.19（约 6 个交易日）
+DATA_START_OFFSET_DAYS = 2
 
 # 基准起始日（用于 pull 计算实际 start_date）
 DATA_BASE_START_DATE = "2023-01-01"
@@ -34,7 +35,10 @@ def _offset_dir_suffix() -> str:
     return f"_offset{DATA_START_OFFSET_DAYS}d"
 
 # 默认价格文件路径（项目 data 目录下）
-PRICE_FILE = os.path.join(_PROJECT_ROOT, "data", _price_filename())
+# 当 offset 文件不存在时，回退到基线文件
+_BASE_PRICE_FILE = os.path.join(_PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
+_OFFSET_PRICE_FILE = os.path.join(_PROJECT_ROOT, "data", _price_filename())
+PRICE_FILE = _OFFSET_PRICE_FILE if os.path.isfile(_OFFSET_PRICE_FILE) else _BASE_PRICE_FILE
 
 # 因子目录（按 offset 分子目录，不覆盖）
 FACTOR_RAW_DIR = os.path.join(_PROJECT_ROOT, f"factor_raw{_offset_dir_suffix()}")
@@ -44,7 +48,10 @@ FACTOR_PROCESSED_DIR = os.path.join(_PROJECT_ROOT, f"factor_processed{_offset_di
 COMPOSITE_FACTOR_OUTPUT_DIR = os.path.join(
     _PROJECT_ROOT, "output", f"composite_factor_reports{_offset_dir_suffix()}"
 )
-COMPOSITE_FACTOR_FILE = os.path.join(COMPOSITE_FACTOR_OUTPUT_DIR, "composite_factors.xlsx")
+# 复合因子文件：当 offset 目录下不存在时，回退到 baseline 目录
+_COMPOSITE_OFFSET_FILE = os.path.join(COMPOSITE_FACTOR_OUTPUT_DIR, "composite_factors.xlsx")
+_BASE_COMPOSITE_FILE = os.path.join(_PROJECT_ROOT, "output", "composite_factor_reports", "composite_factors.xlsx")
+COMPOSITE_FACTOR_FILE = _COMPOSITE_OFFSET_FILE if os.path.isfile(_COMPOSITE_OFFSET_FILE) else _BASE_COMPOSITE_FILE
 
 # 其他输出目录（按 offset 分子目录，不覆盖）
 STRATEGY_REPORTS_DIR = os.path.join(_PROJECT_ROOT, "output", f"strategy_reports{_offset_dir_suffix()}")

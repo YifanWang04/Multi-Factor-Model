@@ -62,7 +62,7 @@ qqq/
 │   ├── strategy_reports/
 │   ├── walk_forward_reports/
 │   ├── *_offset{N}d/       # Subdirs when offset!=0
-│   └── rebalance_day_YYYY-MM-DD_HHMMSS/  # run_rebalance_day output
+│   └── rebalance_day_YYYY-MM-DD_HHMMSS/  # run_rebalance_day output（含 rebalance_day_report.xlsx、strategy_detailed_backtest_report*.xlsx）
 ├── docs/                   # Documentation (notes checklist, etc.)
 └── README.md               # This file
 ```
@@ -84,7 +84,7 @@ qqq/
 | OLS weights inspection | `analysis/multi_factor/inspect_ols_weights.py` | composite_config | ols_m3_M5_weights.xlsx |
 | Strategy backtest | `analysis/strategy/run_strategy.py` | strategy_config | strategy_backtest_report.xlsx |
 | Detailed strategy report | `analysis/strategy/run_detailed_backtest_report.py` | Composite factor + strategy params (in-script config) | strategy_detailed_backtest_report.xlsx |
-| Rebalance day pipeline | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + fixed strategy params | output/rebalance_day_YYYY-MM-DD_HHMMSS/ |
+| Rebalance day pipeline | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + fixed strategy params | output/rebalance_day_YYYY-MM-DD_HHMMSS/（含 rebalance_day_report.xlsx、strategy_detailed_backtest_report*.xlsx） |
 | Walk-Forward validation | `analysis/walk_forward/run_walk_forward.py` | walk_forward_config | walk_forward_report.xlsx + visualizations |
 
 **Run convention:** Execute from project root, e.g.:
