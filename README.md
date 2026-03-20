@@ -37,8 +37,10 @@ qqq/
 │   ├── strategy/           # Strategy construction and grid backtesting
 │   │   ├── run_strategy.py              # Main strategy backtest entry
 │   │   ├── run_detailed_backtest_report.py  # Single strategy detailed report
+│   │   ├── run_strategy_review.py       # Strategy review report (multi-sheet Excel)
 │   │   ├── run_rebalance_day.py         # Rebalance day full pipeline (pull→factors→composite→backtest→report)
 │   │   ├── strategy_config.py           # Strategy config
+│   │   ├── strategy_review_config.py    # Strategy review config
 │   │   ├── strategy_backtest.py         # Backtest engine
 │   │   ├── strategy_report.py           # Report generation
 │   │   ├── strategy_metrics.py          # Metrics calculation
@@ -62,6 +64,7 @@ qqq/
 │   ├── strategy_reports/
 │   ├── walk_forward_reports/
 │   ├── *_offset{N}d/       # Subdirs when offset!=0
+│   ├── strategy_review_YYYY-MM-DD_HHMMSS/  # run_strategy_review output（含 strategy_review.xlsx）
 │   └── rebalance_day_YYYY-MM-DD_HHMMSS/  # run_rebalance_day output（含 rebalance_day_report.xlsx、strategy_detailed_backtest_report*.xlsx）
 ├── docs/                   # Documentation (notes checklist, etc.)
 └── README.md               # This file
@@ -84,6 +87,7 @@ qqq/
 | OLS weights inspection | `analysis/multi_factor/inspect_ols_weights.py` | composite_config | ols_m3_M5_weights.xlsx |
 | Strategy backtest | `analysis/strategy/run_strategy.py` | strategy_config | strategy_backtest_report.xlsx |
 | Detailed strategy report | `analysis/strategy/run_detailed_backtest_report.py` | Composite factor + strategy params (in-script config) | strategy_detailed_backtest_report.xlsx |
+| Strategy review report | `analysis/strategy/run_strategy_review.py` | strategy_review_config + composite_factors + price data | output/strategy_review_YYYY-MM-DD_HHMMSS/strategy_review.xlsx |
 | Rebalance day pipeline | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + fixed strategy params | output/rebalance_day_YYYY-MM-DD_HHMMSS/（含 rebalance_day_report.xlsx、strategy_detailed_backtest_report*.xlsx） |
 | Walk-Forward validation | `analysis/walk_forward/run_walk_forward.py` | walk_forward_config | walk_forward_report.xlsx + visualizations |
 
@@ -91,6 +95,7 @@ qqq/
 ```bash
 python analysis/strategy/run_strategy.py
 python analysis/strategy/run_detailed_backtest_report.py
+python analysis/strategy/run_strategy_review.py                  # Strategy review (edit strategy_review_config first)
 python analysis/strategy/run_rebalance_day.py                    # Full pipeline
 python analysis/strategy/run_rebalance_day.py --skip-pipeline    # Use existing data to generate report
 python analysis/strategy/run_rebalance_day.py --skip-pull        # Pipeline skips data pull
@@ -102,13 +107,53 @@ python pipeline/build_factors.py
 
 ## Configuration Conventions
 
-- Each module has its own config: `config.py` (single factor), `multi_factor_config.py`, `composite_config.py`, `strategy_config.py`, `walk_forward_config.py`
+- Each module has its own config: `config.py` (single factor), `multi_factor_config.py`, `composite_config.py`, `strategy_config.py`, `strategy_review_config.py`, `walk_forward_config.py`
 - Key variable `PROJECT_ROOT`: **must be consistent**; project root is `D:\qqq`
 - Common path variables: `PRICE_FILE`, `RETURN_COLUMN`, `FACTOR_FILE`, `OUTPUT_DIR`
 - **DATA_START_OFFSET_DAYS**: Number of trading days to shift data start date earlier
   - **Config location:** `data/data_config.py` (set directly in code; no env var override)
   - **Implementation:** In `pull_yhfinance_Data.py`, start_date is shifted back N trading days so factors and rebalance calendar stay aligned
   - **Subdirs by offset (no overwrite):** offset=0 uses default paths; offset!=0 uses `_offset{N}d` suffix, e.g. `factor_raw_offset7d/`, `factor_processed_offset7d/`, `output/composite_factor_reports_offset7d/`, `output/strategy_reports_offset7d/`, etc.
+
+---
+
+## Strategy Review (run_strategy_review)
+
+**用途：** 完全自包含的策略复盘，无需前置运行 `run_composite_factor`。根据配置的五个因子、复合方式、策略参数，自动从 `factor_processed` 读取 → 计算复合因子 → 运行策略回测 → 生成复盘报表。
+
+**流程：**
+1. 从 `factor_processed` 加载配置的五个因子（`SELECTED_FACTOR_INDICES`）
+2. 按选定复合方式（`COMPOSITE_FACTOR_SHEET`）计算复合因子
+3. 加载日频收益率与价格数据
+4. 拉取基准数据（如 QQQ）
+5. 运行策略回测（`STRATEGY_PARAM`）
+6. 加载单因子文件（用于因子归因）
+7. 参数敏感度分析（可选）
+8. 券商记录对比（可选）
+9. 写入 Excel 报表
+
+**输出：** `output/strategy_review_YYYY-MM-DD_HHMMSS/strategy_review.xlsx`，含 6 个 Sheet。
+
+**用法：** 修改 `analysis/strategy/strategy_review_config.py` 后运行：
+
+```bash
+python analysis/strategy/run_strategy_review.py
+```
+
+**配置项：**
+
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| `SELECTED_FACTOR_INDICES` | 五个因子编号（从 factor_processed 读取） | `[32, 62, 65, 95, 101]` |
+| `COMPOSITE_FACTOR_SHEET` | 复合方式 | `"ic_m3_N20"`, `"ols_m3_M5"` 等 |
+| `STRATEGY_PARAM` | 策略参数 | `"max_return_5G_Top1_P10d"` |
+| `LIVE_START_DATE` | 实盘开始日期 | `"2025-06-01"` 或 `None` |
+| `BROKER_RECORDS_FILE` | 券商成交记录 | `"path/to/trades.csv"` 或 `None` |
+| `RUN_PARAM_SENSITIVITY` | 是否运行参数敏感度 | `True` / `False` |
+| `FACTOR_DIR` | 单因子目录覆盖 | `None`=默认 |
+| `OUTPUT_DIR` | 输出目录覆盖 | `None`=时间戳子目录 |
+
+**前置条件：** 需先运行 `pipeline/build_factors.py` 和 `pipeline/data_process.py` 生成 `factor_processed` 下的因子文件。
 
 ---
 
@@ -145,6 +190,7 @@ python pipeline/build_factors.py
 9. **run_rebalance_day strategy name:** Generated from `TARGET_WEIGHT_METHOD`, `TARGET_GROUP_NUM`, `TARGET_RANK`, `TARGET_REBALANCE_DAYS`
 10. **Data loading performance:** `load_price_data`, `load_return_data` use `pd.concat` once to avoid fragmentation warnings
 11. **After changing DATA_START_OFFSET_DAYS, re-run pipeline:** Must re-run pull → build_factors → data_process → run_composite_factor
+12. **run_strategy_review:** 完全自包含，无需先运行 `run_composite_factor`；配置五个因子编号、复合方式、策略参数后直接运行，自动从 `factor_processed` 读取并计算复合因子
 
 ---
 
