@@ -216,6 +216,7 @@ def run_detailed_backtest(
     period_dates = []
     operations_records = []
     period_summary_records = []
+    period_cum_ret = 1.0  # 用于计算 period cumulative return
 
     trans_cost = getattr(config, "TRANSACTION_COST", 0.001)
     lookback = getattr(config, "OPTIMIZATION_LOOKBACK", 252)
@@ -301,6 +302,7 @@ def run_detailed_backtest(
         period_cum = float(pd.Series(period_daily).add(1.0).prod() - 1.0)
         period_rets.append(period_cum)
         period_dates.append(rb_date)
+        period_cum_ret *= 1.0 + period_cum
 
         # 操作明细：每只股票一行（组合规模=1 的虚拟资金）
         period_days = (next_rb - rb_date).days
@@ -328,13 +330,22 @@ def run_detailed_backtest(
                 "Factor_Value": factor_val,
             })
 
+        # Symbols: 仅保留 weight > 0.01 的股票，并标注权重（格式：SYM:weight%）
+        symbols_with_weight = [
+            f"{sym}:{w[sym] * 100:.1f}%"
+            for sym in sorted(common)
+            if w[sym] > 0.01
+        ]
+        symbols_str = ", ".join(symbols_with_weight)
+
         period_summary_records.append({
             "Rebalance_Date": rb_date,
             "Next_Rebalance_Date": next_rb,
             "Holding_Days": (next_rb - rb_date).days,
             "Position_Count": len(common),
             "Period_Return": period_cum,
-            "Symbols": ",".join(sorted(common)),
+            "Period_Cumulative_Return": period_cum_ret - 1.0,
+            "Symbols": symbols_str,
         })
 
     if not all_dates:

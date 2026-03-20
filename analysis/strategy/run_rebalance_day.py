@@ -735,14 +735,17 @@ def send_discord_notification(
 def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
     """
     将 Pipeline 生成的复合因子（run_dir/composite_factor_reports/composite_factors.xlsx）
-    中的指定 sheet 同步回标准 COMPOSITE_FACTOR_FILE，使 run_detailed_backtest_report.py
-    始终与 run_rebalance_day.py 使用相同的最新数据。
+    中的指定 sheet 同步回标准路径，使 run_detailed_backtest_report.py 使用最新数据。
+
+    注意：必须同步到当前 offset 的专用目录（COMPOSITE_FACTOR_OUTPUT_DIR），
+    不能使用 COMPOSITE_FACTOR_FILE（它可能因回退逻辑指向 baseline 目录），
+    否则 offset!=0 时会把 offset 数据错误写入 offset=0 的 baseline 文件。
     """
     import openpyxl
 
-    from data.data_config import COMPOSITE_FACTOR_FILE
+    from data.data_config import COMPOSITE_FACTOR_OUTPUT_DIR
     src = os.path.join(run_dir, "composite_factor_reports", "composite_factors.xlsx")
-    dst = COMPOSITE_FACTOR_FILE
+    dst = os.path.join(COMPOSITE_FACTOR_OUTPUT_DIR, "composite_factors.xlsx")
 
     if not os.path.isfile(src):
         print(f"  [同步跳过] 源文件不存在: {src}")

@@ -17,7 +17,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 数据起始日提前的交易日数：0=不提前，正数=提前 N 个交易日
 # 注：此值只从配置文件读取（不再支持通过环境变量覆盖）
 # 6 = 将调仓日从 3.27 提前至 3.19（约 6 个交易日）
-DATA_START_OFFSET_DAYS = 2
+DATA_START_OFFSET_DAYS = 0
 
 # 基准起始日（用于 pull 计算实际 start_date）
 DATA_BASE_START_DATE = "2023-01-01"
