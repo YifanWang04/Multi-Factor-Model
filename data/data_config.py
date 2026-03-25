@@ -1,7 +1,8 @@
 """
 数据路径与起始日配置 (data/data_config.py)
 ============================================
-集中定义数据起始日偏移（DATA_START_OFFSET_DAYS）及所有相关路径。
+集中定义数据起始日偏移（DATA_START_OFFSET_DAYS）、yfinance 拉取标的列表、
+实际拉取起始日计算及所有相关路径。
 按 offset 分子目录，避免切换 offset 时覆盖原数据。
 
 - DATA_START_OFFSET_DAYS: 数据起始日提前的交易日数，0=不提前
@@ -10,6 +11,8 @@
 """
 
 import os
+
+import pandas as pd
 
 # 项目根目录（data 的上级）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +24,38 @@ DATA_START_OFFSET_DAYS = 0
 
 # 基准起始日（用于 pull 计算实际 start_date）
 DATA_BASE_START_DATE = "2023-01-01"
+
+# yfinance 日频拉取标的（约 100 只美股，与 us_top100 命名一致）
+YFINANCE_TICKERS = [
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
+    "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
+    "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
+    "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
+    "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
+    "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
+    "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
+    "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
+    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
+    "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
+    "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
+    "SANM", "ANET", 
+    # 'GENV', 'VRT', 'LRCX', 'AMAT', 'NET'
+]
+
+# yf.download 参数（与历史 Excel 列含义一致时可保持 auto_adjust=False）
+YFINANCE_DOWNLOAD_AUTO_ADJUST = False
+YFINANCE_DOWNLOAD_PROGRESS = False
+
+
+def yfinance_pull_start_date() -> str:
+    """根据 DATA_BASE_START_DATE 与 DATA_START_OFFSET_DAYS 得到 yfinance 的 start 参数（YYYY-MM-DD）。"""
+    if DATA_START_OFFSET_DAYS <= 0:
+        return DATA_BASE_START_DATE
+    base = pd.Timestamp(DATA_BASE_START_DATE)
+    # 用 BDay 回推 N 个交易日；避免 bdate_range(end=非交易日, periods=...) 与预期长度不一致
+    start = base - pd.offsets.BDay(DATA_START_OFFSET_DAYS)
+    return start.strftime("%Y-%m-%d")
+
 
 # 价格文件名（不含路径）
 def _price_filename() -> str:
@@ -48,10 +83,16 @@ FACTOR_PROCESSED_DIR = os.path.join(_PROJECT_ROOT, f"factor_processed{_offset_di
 COMPOSITE_FACTOR_OUTPUT_DIR = os.path.join(
     _PROJECT_ROOT, "output", f"composite_factor_reports{_offset_dir_suffix()}"
 )
-# 复合因子文件：当 offset 目录下不存在时，回退到 baseline 目录
-_COMPOSITE_OFFSET_FILE = os.path.join(COMPOSITE_FACTOR_OUTPUT_DIR, "composite_factors.xlsx")
-_BASE_COMPOSITE_FILE = os.path.join(_PROJECT_ROOT, "output", "composite_factor_reports", "composite_factors.xlsx")
-COMPOSITE_FACTOR_FILE = _COMPOSITE_OFFSET_FILE if os.path.isfile(_COMPOSITE_OFFSET_FILE) else _BASE_COMPOSITE_FILE
+
+# 复合因子文件（不带后缀，仅指向目录；实际文件名由各调用方根据因子索引推导）
+# 保留此变量供向后兼容（如 pipeline 中直接引用），但不从 composite_config 推导后缀
+_COMPOSITE_BASE_FILE = os.path.join(
+    COMPOSITE_FACTOR_OUTPUT_DIR, "composite_factors.xlsx"
+)
+_BASE_DIR_FILE = os.path.join(
+    _PROJECT_ROOT, "output", "composite_factor_reports", "composite_factors.xlsx"
+)
+COMPOSITE_FACTOR_FILE = _COMPOSITE_BASE_FILE if os.path.isfile(_COMPOSITE_BASE_FILE) else _BASE_DIR_FILE
 
 # 其他输出目录（按 offset 分子目录，不覆盖）
 STRATEGY_REPORTS_DIR = os.path.join(_PROJECT_ROOT, "output", f"strategy_reports{_offset_dir_suffix()}")

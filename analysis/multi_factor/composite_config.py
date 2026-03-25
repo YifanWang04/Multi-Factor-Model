@@ -6,12 +6,16 @@ import os
 PROJECT_ROOT = r"D:\qqq"
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
 
+# 内联 offset 目录后缀逻辑（避免从 data_config 导入 _offset_dir_suffix 触发循环导入）
+def _offset_suffix() -> str:
+    from data.data_config import DATA_START_OFFSET_DAYS
+    return f"_offset{DATA_START_OFFSET_DAYS}d" if DATA_START_OFFSET_DAYS != 0 else ""
+
 # 路径：根据 data_config 按 offset 分子目录（不覆盖）
 from data.data_config import (
     PRICE_FILE as _DEFAULT_PRICE_FILE,
     _price_filename,
     FACTOR_PROCESSED_DIR as _DEFAULT_FACTOR_PROCESSED_DIR,
-    COMPOSITE_FACTOR_OUTPUT_DIR as _DEFAULT_COMPOSITE_OUTPUT_DIR,
 )
 
 if _RUN_DIR:
@@ -19,13 +23,16 @@ if _RUN_DIR:
     PRICE_FILE = os.path.join(_RUN_DIR, "data", _price_filename())
     OUTPUT_DIR = os.path.join(_RUN_DIR, "composite_factor_reports")
 else:
-    FACTOR_PROCESSED_DIR = _DEFAULT_FACTOR_PROCESSED_DIR
+    _pfx = _offset_suffix()
+    FACTOR_PROCESSED_DIR = os.path.join(PROJECT_ROOT, f"factor_processed{_pfx}")
     PRICE_FILE = _DEFAULT_PRICE_FILE
-    OUTPUT_DIR = _DEFAULT_COMPOSITE_OUTPUT_DIR
+    _comp_out = os.path.join(PROJECT_ROOT, "output", f"composite_factor_reports{_pfx}")
+    OUTPUT_DIR = _comp_out
 RETURN_COLUMN = "Return"
 
 # 选定因子：在 config 中直接写因子编号（factor_library 中的编号，如 95 → alpha095）
-SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]
+SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32] #3.17
+# SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32] #3.25
 SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
 
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
@@ -87,3 +94,15 @@ def get_factor_display_name(filepath):
     if basename.lower().startswith("factor_"):
         basename = basename[7:]
     return basename.replace("_", " ").strip() or basename
+
+
+def build_factor_suffix(factor_indices: list[int] | None = None) -> str:
+    """
+    基于因子编号列表生成简短后缀，如 f95-24-64-65-32。
+    未提供时使用 SELECTED_FACTOR_INDICES。
+    """
+    import re as _re
+    if factor_indices is None:
+        factor_indices = SELECTED_FACTOR_INDICES
+    nums = [str(int(i)) for i in factor_indices]  # 去前导零
+    return "f" + "-".join(nums)

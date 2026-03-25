@@ -1,8 +1,9 @@
 """
 因子复合+回测主流程 (run_composite_factor.py)
 =============================================
-输出1: composite_factors.xlsx  — 每个sheet为一个复合因子(行=日期, 列=股票)
-输出2: composite_backtest_report.xlsx — 4个sheet的集中回测报表
+输出1: composite_factors_{fXX-XX-...}.xlsx  — 每个sheet为一个复合因子(行=日期, 列=股票)
+输出2: composite_backtest_report_P{REBALANCE_PERIOD}_{fXX-XX-...}.xlsx — 4个sheet的集中回测报表
+文件名由 composite_config.SELECTED_FACTOR_INDICES 自动推导因子后缀。
 """
 import os
 import sys
@@ -20,6 +21,7 @@ from composite_config import (
     PRICE_FILE, RETURN_COLUMN, OUTPUT_DIR, REBALANCE_PERIOD,
     N_WINDOWS, M_WINDOWS, GROUP_NUM, WEIGHT_METHOD, RISK_FREE_RATE,
     TRANSACTION_COST, get_selected_factor_files, get_factor_display_name,
+    SELECTED_FACTOR_INDICES, build_factor_suffix,
 )
 from composite_factor import compute_all_composites, compute_selected_composites
 from rebalance_manager import RebalancePeriodManager
@@ -89,6 +91,12 @@ def write_composite_factors_excel(composite_dict, out_path):
     print(f"复合因子数据已写入: {out_path}")
 
 
+def _build_factor_suffix():
+    """基于 SELECTED_FACTOR_INDICES 生成简短后缀，如 f95-24-64-65-32。"""
+    suffix = build_factor_suffix(SELECTED_FACTOR_INDICES)
+    return suffix if suffix else "fall"
+
+
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
@@ -100,6 +108,8 @@ def main():
     factor_files = get_selected_factor_files()
     if not factor_files:
         raise FileNotFoundError("未找到选定因子文件，请检查 SELECTED_FACTOR_NAMES 配置")
+    # NOTE: 本脚本对“选定因子”的选择粒度是“单因子 Excel 文件”。
+    #       实际的复合因子选择（只算哪些 composite sheet）见环境变量 REBALANCE_SELECTED_COMPOSITE。
     print(f"选定因子文件 ({len(factor_files)} 个):")
     for f in factor_files:
         print(f"  {os.path.basename(f)}")
@@ -157,7 +167,8 @@ def main():
     print(f"复合因子数量: {len(composite_dict)}")
 
     # 4. 输出1：复合因子 Excel
-    out1 = os.path.join(OUTPUT_DIR, "composite_factors.xlsx")
+    factor_suffix = _build_factor_suffix()
+    out1 = os.path.join(OUTPUT_DIR, f"composite_factors_{factor_suffix}.xlsx")
     write_composite_factors_excel(composite_dict, out1)
 
     # 5. 对每个复合因子跑回测（复合因子已在调仓期截面，直接作为 factor_periods 传入）
@@ -200,7 +211,9 @@ def main():
     sheet3_df = build_long_excess_df(records, factor_names)
     sheet4_df = build_long_cumret_df(records, factor_names)
 
-    out2 = os.path.join(OUTPUT_DIR, f"composite_backtest_report_P{REBALANCE_PERIOD}.xlsx")
+    out2 = os.path.join(
+        OUTPUT_DIR, f"composite_backtest_report_P{REBALANCE_PERIOD}_{factor_suffix}.xlsx"
+    )
     write_excel_with_format(
         out2, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
         sheet1_3M_df=sheet1_3M_df, sheet1_6M_df=sheet1_6M_df, sheet1_1Y_df=sheet1_1Y_df,

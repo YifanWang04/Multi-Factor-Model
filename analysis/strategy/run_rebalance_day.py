@@ -65,21 +65,31 @@ from data.data_config import DATA_START_OFFSET_DAYS, _price_filename
 
 
 # ---------------------------------------------------------------------------
-# 配置（本脚本独立配置，不依赖 run_detailed_backtest_report）
+# 配置（本脚本独立配置，策略相关参数从 strategy_config 派生）
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = r"D:\qqq"
 OUTPUT_BASE = os.path.join(PROJECT_ROOT, "output")
 
-# 复合因子
+# 复合因子合成方法（Excel sheet 名）
 COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
 
-# 选定因子：与 composite_config 一致，由 composite_config.SELECTED_FACTOR_INDICES 派生
-from analysis.multi_factor.composite_config import SELECTED_FACTOR_NAMES, SELECTED_FACTOR_INDICES
+# 选定因子：来自 strategy_config（与 composite_config 独立）
+from analysis.strategy.strategy_config import (
+    STRATEGY_SELECTED_FACTOR_NAMES,
+    STRATEGY_SELECTED_FACTOR_INDICES,
+    build_strategy_factor_suffix,
+)
+
+def _composite_factors_path(base_dir: str) -> str:
+    """返回 composite_factor_reports 目录下带因子后缀的文件路径。"""
+    suffix = build_strategy_factor_suffix()
+    name = f"composite_factors_{suffix}.xlsx"
+    return os.path.join(base_dir, "composite_factor_reports", name)
 
 # 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
 # 例：max_return_5G_Top1_P10d、mvo_10G_Top2_P30d、min_variance_5G_Top3_P20d
-STRATEGY_PARAM = "max_return_5G_Top1_P10d"
+STRATEGY_PARAM = "max_return_10G_Top1_P20d"
 
 # 解析后供内部使用
 _parsed = parse_strategy_param(STRATEGY_PARAM)
@@ -145,7 +155,7 @@ def run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
 
     env = os.environ.copy()
     env["REBALANCE_RUN_DIR"] = run_dir
-    env["REBALANCE_SELECTED_FACTORS"] = ",".join(SELECTED_FACTOR_NAMES)
+    env["REBALANCE_SELECTED_FACTORS"] = ",".join(STRATEGY_SELECTED_FACTOR_NAMES)
     env["REBALANCE_SELECTED_COMPOSITE"] = COMPOSITE_FACTOR_SHEET
     # 传递数据起始日偏移：改为仅由 data/data_config.py 配置控制
 
@@ -521,8 +531,8 @@ def write_rebalance_day_report(
     max_dd = (nv / nv.cummax() - 1).min() * 100 if len(nv) > 0 else np.nan
 
     config_summary = [
-        ["Factor_Indices", str(SELECTED_FACTOR_INDICES)],
-        ["Selected_Factors", ", ".join(SELECTED_FACTOR_NAMES)],
+        ["Factor_Indices", str(STRATEGY_SELECTED_FACTOR_INDICES)],
+        ["Selected_Factors", ", ".join(STRATEGY_SELECTED_FACTOR_NAMES)],
         ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
         ["Composite_Method", f"IC加权 {COMPOSITE_FACTOR_SHEET} (M=3月, N=20日)"],
         ["Strategy_Param", STRATEGY_PARAM],
@@ -612,7 +622,7 @@ def send_discord_notification(
         # 构建消息
         # 策略基本信息（因子选择、复合方式、策略参数）
         factor_info = (
-            f"**选定因子：** {', '.join(SELECTED_FACTOR_NAMES)}\n"
+            f"**选定因子：** {', '.join(STRATEGY_SELECTED_FACTOR_NAMES)}\n"
             f"**复合因子：** {COMPOSITE_FACTOR_SHEET}（IC加权 M3/N20）\n"
             f"**策略参数：** {STRATEGY_PARAM}\n"
             f"**权重方式：** {STRATEGY_PARAMS['weight_method']}　"
@@ -712,7 +722,7 @@ def send_discord_notification(
             "color": color,
             "fields": fields,
             "footer": {
-                "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 因子：{', '.join(SELECTED_FACTOR_NAMES)}"
+                "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 因子：{', '.join(STRATEGY_SELECTED_FACTOR_NAMES)}"
             }
         }
 
@@ -734,18 +744,14 @@ def send_discord_notification(
 
 def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
     """
-    将 Pipeline 生成的复合因子（run_dir/composite_factor_reports/composite_factors.xlsx）
-    中的指定 sheet 同步回标准路径，使 run_detailed_backtest_report.py 使用最新数据。
-
-    注意：必须同步到当前 offset 的专用目录（COMPOSITE_FACTOR_OUTPUT_DIR），
-    不能使用 COMPOSITE_FACTOR_FILE（它可能因回退逻辑指向 baseline 目录），
-    否则 offset!=0 时会把 offset 数据错误写入 offset=0 的 baseline 文件。
+    将 Pipeline 生成的复合因子（带因子后缀，如 composite_factors_f95-24-64-65-32.xlsx）
+    同步到标准路径，使 run_detailed_backtest_report.py 使用最新数据。
     """
     import openpyxl
 
     from data.data_config import COMPOSITE_FACTOR_OUTPUT_DIR
-    src = os.path.join(run_dir, "composite_factor_reports", "composite_factors.xlsx")
-    dst = os.path.join(COMPOSITE_FACTOR_OUTPUT_DIR, "composite_factors.xlsx")
+    src = _composite_factors_path(run_dir)
+    dst = _composite_factors_path(COMPOSITE_FACTOR_OUTPUT_DIR)
 
     if not os.path.isfile(src):
         print(f"  [同步跳过] 源文件不存在: {src}")
@@ -801,14 +807,14 @@ def main(
     # 确定数据路径（skip_pipeline 且无 run_dir_arg 时用 data_config 按 offset 分子目录）
     if skip_pipeline:
         if run_dir_arg:
-            composite_file = os.path.join(run_dir, "composite_factor_reports", "composite_factors.xlsx")
+            composite_file = _composite_factors_path(run_dir)
             price_file = os.path.join(run_dir, "data", _price_filename())
         else:
             from data.data_config import COMPOSITE_FACTOR_FILE, PRICE_FILE
             composite_file = COMPOSITE_FACTOR_FILE
             price_file = PRICE_FILE
     else:
-        composite_file = os.path.join(run_dir, "composite_factor_reports", "composite_factors.xlsx")
+        composite_file = _composite_factors_path(run_dir)
         price_file = os.path.join(run_dir, "data", _price_filename())
 
     print("=" * 64)
@@ -900,7 +906,7 @@ def main(
 
     print("\n" + "-" * 64)
     print("策略概要:")
-    print(f"  选定因子: {', '.join(SELECTED_FACTOR_NAMES)}")
+    print(f"  选定因子: {', '.join(STRATEGY_SELECTED_FACTOR_NAMES)}")
     print(f"  复合因子: {COMPOSITE_FACTOR_SHEET} (IC加权 M3/N20)")
     print(f"  策略参数: {STRATEGY_PARAM}")
     print(f"    权重方式: {STRATEGY_PARAMS['weight_method']}")

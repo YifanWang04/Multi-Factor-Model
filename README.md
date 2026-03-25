@@ -83,10 +83,10 @@ qqq/
 | Batch single factor | `analysis/single_factor/run_all_factors_backtest.py` | factor_processed full set | Multiple PDFs |
 | Multi-factor test | `analysis/single_factor/run_multi_factor_test.py` | multi_factor_config | Excel report |
 | Factor collinearity | `analysis/single_factor/run_collinearity_analysis.py` | config + multi-factor Excel | Collinearity analysis Excel |
-| Factor composition | `analysis/multi_factor/run_composite_factor.py` | composite_config | composite_factors.xlsx + backtest report |
+| Factor composition | `analysis/multi_factor/run_composite_factor.py` | composite_config | composite_factors_{fXX-XX-...}.xlsx + backtest report |
 | OLS weights inspection | `analysis/multi_factor/inspect_ols_weights.py` | composite_config | ols_m3_M5_weights.xlsx |
-| Strategy backtest | `analysis/strategy/run_strategy.py` | strategy_config | strategy_backtest_report.xlsx |
-| Detailed strategy report | `analysis/strategy/run_detailed_backtest_report.py` | Composite factor + strategy params (in-script config) | strategy_detailed_backtest_report.xlsx |
+| Strategy backtest | `analysis/strategy/run_strategy.py` | strategy_config（自动从 composite_config 推导因子后缀） | strategy_backtest_report.xlsx |
+| Detailed strategy report | `analysis/strategy/run_detailed_backtest_report.py` | Composite factor + strategy params（自动从 composite_config 推导因子后缀） | strategy_detailed_backtest_report.xlsx |
 | Strategy review report | `analysis/strategy/run_strategy_review.py` | strategy_review_config + composite_factors + price data | output/strategy_review_YYYY-MM-DD_HHMMSS/strategy_review.xlsx |
 | Rebalance day pipeline | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + fixed strategy params | output/rebalance_day_YYYY-MM-DD_HHMMSS/（含 rebalance_day_report.xlsx、strategy_detailed_backtest_report*.xlsx） |
 | Walk-Forward validation | `analysis/walk_forward/run_walk_forward.py` | walk_forward_config | walk_forward_report.xlsx + visualizations |
@@ -185,7 +185,7 @@ python analysis/strategy/run_strategy_review.py
 4. **Single factor multi-sheet:** Default reads first sheet; can set `FACTOR_SHEET` to specify sheet
 5. **Return column:** Use `Return` column from Excel if present, otherwise compute via `pct_change()`
 6. **Dependencies:** Requires `.venv` or equivalent with pandas, numpy, scipy, sklearn, matplotlib, openpyxl, yfinance, etc.
-7. **run_detailed_backtest_report:** Run `run_composite_factor.py` first so `composite_factors.xlsx` exists with target sheet
+7. **run_detailed_backtest_report & run_strategy:** 需先运行 `run_composite_factor.py` 确保 `composite_factors_{fXX-XX-...}.xlsx` 存在且含指定 sheet；文件名中的因子后缀由 `composite_config.SELECTED_FACTOR_INDICES` 自动推导
 8. **Walk-Forward:** Train/test strictly separated; factor processing and composite weights use training data only
 9. **run_rebalance_day strategy name:** Generated from `TARGET_WEIGHT_METHOD`, `TARGET_GROUP_NUM`, `TARGET_RANK`, `TARGET_REBALANCE_DAYS`
 10. **Data loading performance:** `load_price_data`, `load_return_data` use `pd.concat` once to avoid fragmentation warnings

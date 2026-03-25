@@ -4,8 +4,9 @@
 定义复合因子多头策略网格回测的所有输入输出路径与参数。
 
 运行前检查：
-  COMPOSITE_FACTOR_SHEET  — 与 composite_factors.xlsx 中实际 sheet 名一致
-  GROUP_NUMS              — 根据标的池数量设定（88 只股票建议 [5, 10]）
+  STRATEGY_SELECTED_FACTOR_INDICES — 策略使用的因子编号（与 composite_config 独立）
+  COMPOSITE_FACTOR_SHEET         — 复合因子合成方法 sheet 名
+  GROUP_NUMS                     — 根据标的池数量设定（88 只股票建议 [5, 10]）
   REBALANCE_PERIODS       — 交易日数；系统从因子日期序列中取间隔 ≥ 该交易日数的节点
   TARGET_GROUP_RANKS      — 从最高组向下：1=最高，2=第二高，3=第三高
   WEIGHT_METHODS          — 选择要遍历的资产配置方式
@@ -15,18 +16,53 @@ import os
 
 PROJECT_ROOT = r"D:\qqq"
 
-# 日频收益率与复合因子：根据 data_config 按 offset 分子目录
-from data.data_config import PRICE_FILE, COMPOSITE_FACTOR_FILE
+# 日频收益率文件：根据 data_config 按 offset 分子目录
+from data.data_config import PRICE_FILE, STRATEGY_REPORTS_DIR, COMPOSITE_FACTOR_OUTPUT_DIR, _offset_dir_suffix
 
 # ── 输入 ──────────────────────────────────────────────────────────────────────
 
 # 选定的复合因子方法（Excel sheet 名），对应用户选择的 ols_m3_M5
-COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
+COMPOSITE_FACTOR_SHEET = "ic_m3_N20" #3/17
+# COMPOSITE_FACTOR_SHEET = "pca_pc1" #3/25
+
+# 选定因子（策略专用，与 composite_config 独立）
+# ⚠️ 切换因子后需先运行 run_composite_factor.py 生成新的复合因子 Excel
+STRATEGY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 当前策略使用的因子
+# STRATEGY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
+
+# 因子名称列表（由索引推导）
+STRATEGY_SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in STRATEGY_SELECTED_FACTOR_INDICES]
+
+# 复合因子文件名后缀（如 f95-101-62-65-32）
+def build_strategy_factor_suffix(factor_indices=None):
+    """基于因子编号列表生成简短后缀，如 f95-101-62-65-32。"""
+    if factor_indices is None:
+        factor_indices = STRATEGY_SELECTED_FACTOR_INDICES
+    return "f" + "-".join(str(int(i)) for i in factor_indices)
+
+# 复合因子 Excel 文件路径（按 offset 分子目录）
+def get_composite_factor_file() -> str:
+    """
+    根据 STRATEGY_SELECTED_FACTOR_INDICES 构建复合因子文件路径。
+    优先使用 offset 子目录，fallback 到基线目录。
+    """
+    suffix = build_strategy_factor_suffix()
+    fname = f"composite_factors_{suffix}.xlsx"
+    offset_dir = COMPOSITE_FACTOR_OUTPUT_DIR  # 来自 data_config，已按 offset 分子目录
+    offset_path = os.path.join(offset_dir, fname)
+    if os.path.isfile(offset_path):
+        return offset_path
+    base_dir = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
+    base_path = os.path.join(base_dir, fname)
+    if os.path.isfile(base_path):
+        return base_path
+    # 均不存在时返回 offset 路径（让调用方报 FileNotFoundError）
+    return offset_path
+
+COMPOSITE_FACTOR_FILE = get_composite_factor_file()
 
 RETURN_COLUMN = "Return"
 
-# ── 输出（按 offset 分子目录）──────────────────────────────────────────────────
-from data.data_config import STRATEGY_REPORTS_DIR
 OUTPUT_DIR = STRATEGY_REPORTS_DIR
 OUTPUT_EXCEL_NAME = "strategy_backtest_report.xlsx"
 
