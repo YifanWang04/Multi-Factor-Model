@@ -27,8 +27,8 @@ COMPOSITE_FACTOR_SHEET = "ic_m3_N20" #3/17
 
 # 选定因子（策略专用，与 composite_config 独立）
 # ⚠️ 切换因子后需先运行 run_composite_factor.py 生成新的复合因子 Excel
-STRATEGY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 当前策略使用的因子
-# STRATEGY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
+# STRATEGY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
+STRATEGY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
 
 # 因子名称列表（由索引推导）
 STRATEGY_SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in STRATEGY_SELECTED_FACTOR_INDICES]

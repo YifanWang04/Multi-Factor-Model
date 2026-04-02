@@ -1,10 +1,47 @@
 """
 因子复合配置文件 (composite_config.py)
+
+因子选择机制（优先级从高到低）：
+  1. 环境变量 REBALANCE_SELECTED_FACTOR_INDICES
+     —— 由 run_rebalance_day.py 在启动 pipeline 子进程时设置，
+        保证整个流程（build_factors → data_process → run_composite_factor）使用一致的因子
+  2. 本文件中的 MANUALLY_SELECTED_FACTOR_INDICES（手动配置）
+     —— 直接在本文件修改，适合临时测试其他因子组合，不依赖 strategy_config
+  ⚠️ 注意：若需长期换因子，建议同步更新 strategy_config.py 以保持一致性
 """
 import os
 
 PROJECT_ROOT = r"D:\qqq"
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
+
+# ── 手动因子配置区 ─────────────────────────────────────────────────────────────
+# ⚠️ 如需切换因子，直接修改此列表（如 [95, 101, 62, 65, 32]），无需改其他文件
+MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _resolve_selected_factor_indices():
+    """
+    解析选定的因子编号。
+    优先级：
+      1. REBALANCE_SELECTED_FACTOR_INDICES（环境变量，run_rebalance_day.py 设置）
+      2. MANUALLY_SELECTED_FACTOR_INDICES（本文件手动配置）
+      3. 抛出异常（必须配置）
+    """
+    env_val = os.environ.get("REBALANCE_SELECTED_FACTOR_INDICES")
+    if env_val:
+        indices = [int(x.strip()) for x in env_val.split(",") if x.strip()]
+        if indices:
+            return indices
+
+    if MANUALLY_SELECTED_FACTOR_INDICES:
+        return list(MANUALLY_SELECTED_FACTOR_INDICES)
+
+    raise ValueError(
+        "未找到因子配置：请在 composite_config.py 中设置 MANUALLY_SELECTED_FACTOR_INDICES，"
+        "或通过 run_rebalance_day.py 启动以自动设置环境变量。"
+    )
+
 
 # 内联 offset 目录后缀逻辑（避免从 data_config 导入 _offset_dir_suffix 触发循环导入）
 def _offset_suffix() -> str:
@@ -30,9 +67,8 @@ else:
     OUTPUT_DIR = _comp_out
 RETURN_COLUMN = "Return"
 
-# 选定因子：在 config 中直接写因子编号（factor_library 中的编号，如 95 → alpha095）
-SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32] #3.17
-# SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32] #3.25
+# 选定因子编号（自动从环境变量或 strategy_config 解析，勿硬编码）
+SELECTED_FACTOR_INDICES = _resolve_selected_factor_indices()
 SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
 
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
@@ -101,8 +137,7 @@ def build_factor_suffix(factor_indices: list[int] | None = None) -> str:
     基于因子编号列表生成简短后缀，如 f95-24-64-65-32。
     未提供时使用 SELECTED_FACTOR_INDICES。
     """
-    import re as _re
     if factor_indices is None:
         factor_indices = SELECTED_FACTOR_INDICES
-    nums = [str(int(i)) for i in factor_indices]  # 去前导零
+    nums = [str(int(i)) for i in factor_indices]
     return "f" + "-".join(nums)

@@ -114,6 +114,10 @@ python pipeline/build_factors.py
   - **Config location:** `data/data_config.py` (set directly in code; no env var override)
   - **Implementation:** In `pull_yhfinance_Data.py`, start_date is shifted back N trading days so factors and rebalance calendar stay aligned
   - **Subdirs by offset (no overwrite):** offset=0 uses default paths; offset!=0 uses `_offset{N}d` suffix, e.g. `factor_raw_offset7d/`, `factor_processed_offset7d/`, `output/composite_factor_reports_offset7d/`, `output/strategy_reports_offset7d/`, etc.
+- **因子选择机制（composite_config.py）：**
+  - **优先级 1：** 环境变量 `REBALANCE_SELECTED_FACTOR_INDICES`（由 `run_rebalance_day.py` 设置，确保 pipeline 全流程因子一致）
+  - **优先级 2：** `MANUALLY_SELECTED_FACTOR_INDICES`（本文件手动配置，适合临时测试）
+  - **推荐做法：** 长期换因子 → 修改 `MANUALLY_SELECTED_FACTOR_INDICES` + 同步更新 `strategy_config.STRATEGY_SELECTED_FACTOR_INDICES`；临时测试只需改 `MANUALLY_SELECTED_FACTOR_INDICES`
 
 ---
 
@@ -144,7 +148,7 @@ python analysis/strategy/run_strategy_review.py
 
 | 配置项 | 说明 | 示例 |
 |--------|------|------|
-| `SELECTED_FACTOR_INDICES` | 五个因子编号（从 factor_processed 读取） | `[32, 62, 65, 95, 101]` |
+| `SELECTED_FACTOR_INDICES` | 五个因子编号（由 composite_config 自动解析，优先级：1=环境变量 REBALANCE_SELECTED_FACTOR_INDICES，2=MANUALLY_SELECTED_FACTOR_INDICES） | `[32, 62, 65, 95, 101]` |
 | `COMPOSITE_FACTOR_SHEET` | 复合方式 | `"ic_m3_N20"`, `"ols_m3_M5"` 等 |
 | `STRATEGY_PARAM` | 策略参数 | `"max_return_5G_Top1_P10d"` |
 | `LIVE_START_DATE` | 实盘开始日期 | `"2025-06-01"` 或 `None` |
@@ -185,12 +189,12 @@ python analysis/strategy/run_strategy_review.py
 4. **Single factor multi-sheet:** Default reads first sheet; can set `FACTOR_SHEET` to specify sheet
 5. **Return column:** Use `Return` column from Excel if present, otherwise compute via `pct_change()`
 6. **Dependencies:** Requires `.venv` or equivalent with pandas, numpy, scipy, sklearn, matplotlib, openpyxl, yfinance, etc.
-7. **run_detailed_backtest_report & run_strategy:** 需先运行 `run_composite_factor.py` 确保 `composite_factors_{fXX-XX-...}.xlsx` 存在且含指定 sheet；文件名中的因子后缀由 `composite_config.SELECTED_FACTOR_INDICES` 自动推导
+7. **因子选择：** `run_composite_factor.py` / `run_strategy.py` / `run_detailed_backtest_report.py` 的因子来源由 `composite_config._resolve_selected_factor_indices()` 决定（优先级：1=环境变量 REBALANCE_SELECTED_FACTOR_INDICES，2=MANUALLY_SELECTED_FACTOR_INDICES）；文件名中的因子后缀由 `composite_config.SELECTED_FACTOR_INDICES` 自动推导；切换因子需修改 `MANUALLY_SELECTED_FACTOR_INDICES`（临时）或同步改 `strategy_config`（长期）
 8. **Walk-Forward:** Train/test strictly separated; factor processing and composite weights use training data only
 9. **run_rebalance_day strategy name:** Generated from `TARGET_WEIGHT_METHOD`, `TARGET_GROUP_NUM`, `TARGET_RANK`, `TARGET_REBALANCE_DAYS`
 10. **Data loading performance:** `load_price_data`, `load_return_data` use `pd.concat` once to avoid fragmentation warnings
 11. **After changing DATA_START_OFFSET_DAYS, re-run pipeline:** Must re-run pull → build_factors → data_process → run_composite_factor
-12. **run_strategy_review:** 完全自包含，无需先运行 `run_composite_factor`；配置五个因子编号、复合方式、策略参数后直接运行，自动从 `factor_processed` 读取并计算复合因子
+12. **run_strategy_review：** 完全自包含，无需先运行 `run_composite_factor`；因子由 composite_config 解析（见上文"因子选择机制"），配置 `MANUALLY_SELECTED_FACTOR_INDICES` 后直接运行
 
 ---
 

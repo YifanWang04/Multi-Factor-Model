@@ -74,22 +74,33 @@ OUTPUT_BASE = os.path.join(PROJECT_ROOT, "output")
 # 复合因子合成方法（Excel sheet 名）
 COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
 
-# 选定因子：来自 strategy_config（与 composite_config 独立）
-from analysis.strategy.strategy_config import (
-    STRATEGY_SELECTED_FACTOR_NAMES,
-    STRATEGY_SELECTED_FACTOR_INDICES,
-    build_strategy_factor_suffix,
-)
-
-def _composite_factors_path(base_dir: str) -> str:
-    """返回 composite_factor_reports 目录下带因子后缀的文件路径。"""
-    suffix = build_strategy_factor_suffix()
-    name = f"composite_factors_{suffix}.xlsx"
-    return os.path.join(base_dir, "composite_factor_reports", name)
+# ── 手动因子配置区 ─────────────────────────────────────────────────────────────
+# ⚠️ 如需切换因子，直接修改此列表（如 [95, 24, 64, 65, 32]）
+# MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
+MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
+# ─────────────────────────────────────────────────────────────────────────────
 
 # 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
 # 例：max_return_5G_Top1_P10d、mvo_10G_Top2_P30d、min_variance_5G_Top3_P20d
-STRATEGY_PARAM = "max_return_10G_Top1_P20d"
+# STRATEGY_PARAM = "max_return_5G_Top1_P10d" #3/17
+STRATEGY_PARAM = "max_return_10G_Top1_P20d" #3/25
+
+# 选定因子（直接使用手动配置）
+SELECTED_FACTOR_INDICES = MANUALLY_SELECTED_FACTOR_INDICES
+SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
+
+
+def _build_factor_suffix(factor_indices: list[int] | None = None) -> str:
+    """基于因子编号列表生成简短后缀，如 f95-24-64-65-32。"""
+    if factor_indices is None:
+        factor_indices = SELECTED_FACTOR_INDICES
+    return "f" + "-".join(str(int(i)) for i in factor_indices)
+
+def _composite_factors_path(base_dir: str) -> str:
+    """返回 composite_factor_reports 目录下带因子后缀的文件路径。"""
+    suffix = _build_factor_suffix()
+    name = f"composite_factors_{suffix}.xlsx"
+    return os.path.join(base_dir, "composite_factor_reports", name)
 
 # 解析后供内部使用
 _parsed = parse_strategy_param(STRATEGY_PARAM)
@@ -155,7 +166,8 @@ def run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
 
     env = os.environ.copy()
     env["REBALANCE_RUN_DIR"] = run_dir
-    env["REBALANCE_SELECTED_FACTORS"] = ",".join(STRATEGY_SELECTED_FACTOR_NAMES)
+    env["REBALANCE_SELECTED_FACTORS"] = ",".join(SELECTED_FACTOR_NAMES)
+    env["REBALANCE_SELECTED_FACTOR_INDICES"] = ",".join(str(i) for i in SELECTED_FACTOR_INDICES)
     env["REBALANCE_SELECTED_COMPOSITE"] = COMPOSITE_FACTOR_SHEET
     # 传递数据起始日偏移：改为仅由 data/data_config.py 配置控制
 
@@ -531,8 +543,8 @@ def write_rebalance_day_report(
     max_dd = (nv / nv.cummax() - 1).min() * 100 if len(nv) > 0 else np.nan
 
     config_summary = [
-        ["Factor_Indices", str(STRATEGY_SELECTED_FACTOR_INDICES)],
-        ["Selected_Factors", ", ".join(STRATEGY_SELECTED_FACTOR_NAMES)],
+        ["Factor_Indices", str(SELECTED_FACTOR_INDICES)],
+        ["Selected_Factors", ", ".join(SELECTED_FACTOR_NAMES)],
         ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
         ["Composite_Method", f"IC加权 {COMPOSITE_FACTOR_SHEET} (M=3月, N=20日)"],
         ["Strategy_Param", STRATEGY_PARAM],
@@ -622,7 +634,7 @@ def send_discord_notification(
         # 构建消息
         # 策略基本信息（因子选择、复合方式、策略参数）
         factor_info = (
-            f"**选定因子：** {', '.join(STRATEGY_SELECTED_FACTOR_NAMES)}\n"
+            f"**选定因子：** {', '.join(SELECTED_FACTOR_NAMES)}\n"
             f"**复合因子：** {COMPOSITE_FACTOR_SHEET}（IC加权 M3/N20）\n"
             f"**策略参数：** {STRATEGY_PARAM}\n"
             f"**权重方式：** {STRATEGY_PARAMS['weight_method']}　"
@@ -722,7 +734,7 @@ def send_discord_notification(
             "color": color,
             "fields": fields,
             "footer": {
-                "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 因子：{', '.join(STRATEGY_SELECTED_FACTOR_NAMES)}"
+                "text": f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 因子：{', '.join(SELECTED_FACTOR_NAMES)}"
             }
         }
 
@@ -906,7 +918,7 @@ def main(
 
     print("\n" + "-" * 64)
     print("策略概要:")
-    print(f"  选定因子: {', '.join(STRATEGY_SELECTED_FACTOR_NAMES)}")
+    print(f"  选定因子: {', '.join(SELECTED_FACTOR_NAMES)}")
     print(f"  复合因子: {COMPOSITE_FACTOR_SHEET} (IC加权 M3/N20)")
     print(f"  策略参数: {STRATEGY_PARAM}")
     print(f"    权重方式: {STRATEGY_PARAMS['weight_method']}")
