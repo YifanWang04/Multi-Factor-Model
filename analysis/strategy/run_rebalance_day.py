@@ -9,8 +9,7 @@
   - factor_raw/              # build_factors 输出
   - factor_processed/        # data_process 输出
   - composite_factor_reports/ # run_composite_factor 输出
-  - rebalance_day_report.xlsx # 本脚本报表
-  - strategy_detailed_backtest_report*.xlsx  # 策略详细回测报表（与 run_detailed_backtest_report 同格式）
+  - rebalance_day_report.xlsx # 本脚本报表（已合并全部 sheet：Config、Opers、Returns 等）
 
 时序约定（与 README.md 一致）：
   - 交易：T 日收盘执行，买卖价格均使用 Adj Close（收盘价）
@@ -52,12 +51,7 @@ for _p in [_HERE, _SF_DIR, _MF_DIR, _ROOT]:
         sys.path.insert(0, _p)
 
 from run_strategy import load_composite_factor, load_return_data
-from run_detailed_backtest_report import (
-    run_detailed_backtest,
-    parse_strategy_param,
-    write_detailed_report,
-    build_detailed_report_filename,
-)
+from run_detailed_backtest_report import run_detailed_backtest, parse_strategy_param
 from strategy_backtest import _build_groups, _select_rebalance_dates
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
@@ -520,6 +514,17 @@ def _compute_last_rebalance_ops(
 # 写入 Excel 报表
 # ---------------------------------------------------------------------------
 
+def _filter_weight_lt(df: pd.DataFrame, threshold: float = 0.0001) -> pd.DataFrame:
+    """过滤 Weight 列 < threshold 的行（忽略缺失列）。"""
+    if "Weight" not in df.columns:
+        return df
+    before = len(df)
+    df = df[df["Weight"] >= threshold].copy()
+    if before - len(df) > 0:
+        print(f"  过滤 Weight < {threshold}，移除 {before - len(df)} 行")
+    return df
+
+
 def write_rebalance_day_report(
     result: dict,
     status: dict,
@@ -527,7 +532,14 @@ def write_rebalance_day_report(
     output_path: str,
     used_live_prices: bool = False,
 ) -> None:
-    """写入调仓日报表。used_live_prices: 调仓日且未收盘时是否已用实时价（开盘价+现价）替代收盘价。"""
+    """
+    写入合并后的调仓日报表（单文件，含全部 sheet）。
+    - Rebalance_Config_Status（原 Rebalance_Day_Status）
+    - Current_Operations（过滤 Weight < 0.0001）
+    - All_Operations（过滤 Weight < 0.0001）
+    - Daily_Returns、Cumulative_Returns（来自回测）
+    - Future_Rebalance_Dates、Period_Summary
+    """
     if "error" in result:
         raise ValueError(result["error"])
 
@@ -576,18 +588,27 @@ def write_rebalance_day_report(
         ["---", "---"],
         *config_summary,
     ]
+
+    # 过滤低权重操作
+    filtered_ops = _filter_weight_lt(current_ops, threshold=0.0001)
+    df_ops_raw = result["operations_df"]
+    df_ops_filtered = _filter_weight_lt(df_ops_raw, threshold=0.0001)
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        # Sheet 1: Config & Status（含 config 关键字）
         pd.DataFrame(status_rows, columns=["Parameter", "Value"]).to_excel(
-            writer, sheet_name="Rebalance_Day_Status", index=False
+            writer, sheet_name="Rebalance_Config_Status", index=False
         )
 
-        if not current_ops.empty:
-            current_ops.to_excel(writer, sheet_name="Current_Operations", index=False)
+        # Sheet 2: Current Operations
+        if not filtered_ops.empty:
+            filtered_ops.to_excel(writer, sheet_name="Current_Operations", index=False)
         else:
             pd.DataFrame({"Note": ["无当前调仓日操作（今日非调仓日或数据不足）"]}).to_excel(
                 writer, sheet_name="Current_Operations", index=False
             )
 
+        # Sheet 3: Future Rebalance Dates
         future_rb = status.get("future_rebalance_dates", [])
         if future_rb:
             pd.DataFrame({"Future_Rebalance_Date": future_rb}).to_excel(
@@ -598,13 +619,25 @@ def write_rebalance_day_report(
                 writer, sheet_name="Future_Rebalance_Dates", index=False
             )
 
-        df_ops = result["operations_df"]
-        if len(df_ops) > 0:
-            df_ops.to_excel(writer, sheet_name="All_Operations", index=False)
+        # Sheet 4: All Operations（已过滤低权重）
+        if len(df_ops_filtered) > 0:
+            df_ops_filtered.to_excel(writer, sheet_name="All_Operations", index=False)
 
+        # Sheet 5: Period Summary
         df_period = result["period_summary_df"]
         if len(df_period) > 0:
             df_period.to_excel(writer, sheet_name="Period_Summary", index=False)
+
+        # Sheet 6: Daily Returns
+        df_dr = result["daily_returns"].reset_index()
+        df_dr.columns = ["Date", "Daily_Return"]
+        df_dr.to_excel(writer, sheet_name="Daily_Returns", index=False)
+
+        # Sheet 7: Cumulative Returns
+        df_nav = result["nav"].reset_index()
+        df_nav.columns = ["Date", "NAV"]
+        df_nav["Cumulative_Return"] = df_nav["NAV"] - 1.0
+        df_nav.to_excel(writer, sheet_name="Cumulative_Returns", index=False)
 
     print(f"调仓日报表已写入: {output_path}")
 
@@ -905,16 +938,6 @@ def main(
 
     output_path = os.path.join(run_dir, "rebalance_day_report.xlsx")
     write_rebalance_day_report(result, status, current_ops, output_path, used_live_prices=used_live_prices)
-
-    # 策略详细回测报表（与 run_detailed_backtest_report.py 同格式）
-    report_name = build_detailed_report_filename(
-        base_name="strategy_detailed_backtest_report.xlsx",
-        composite_sheet=COMPOSITE_FACTOR_SHEET,
-        strategy_param=STRATEGY_PARAM,
-        data_start_offset_days=DATA_START_OFFSET_DAYS,
-    )
-    detailed_report_path = os.path.join(run_dir, report_name)
-    write_detailed_report(result, detailed_report_path)
 
     print("\n" + "-" * 64)
     print("策略概要:")
