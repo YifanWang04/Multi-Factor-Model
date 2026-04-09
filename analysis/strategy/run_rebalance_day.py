@@ -28,7 +28,7 @@ import os
 import sys
 import io
 import subprocess
-import time—
+import time
 import re
 from datetime import datetime
 from typing import Optional
@@ -791,41 +791,55 @@ def _truncate_text(text: str, max_chars: int) -> str:
 
 def _get_holding_period_info(
     operations_df: pd.DataFrame,
-    rb_date: pd.Timestamp,
+    current_rb: pd.Timestamp,
     price_df: pd.DataFrame,
     current_date: pd.Timestamp,
 ) -> Optional[pd.DataFrame]:
     """
-    获取指定调仓日 rb_date 买入的持仓，在 current_date 时的盈亏情况。
+    获取当前持仓（上一次调仓日买入、至今未卖出的标的）的盈亏情况。
+    传入 current_rb（当前调仓日，即这些仓位的买入日），
     返回含 Symbol / Buy_Price / Current_Price / Change_Pct 的 DataFrame。
-    若 rb_date 非有效调仓日或无持仓，返回 None。
+    若无持仓或数据不足，返回 None。
     """
     if operations_df.empty or "Rebalance_Date" not in operations_df.columns:
         return None
 
-    # 找出 rb_date 当期买入的持仓（在 current_date 尚未卖出）
-    holding = operations_df[
-        (operations_df["Rebalance_Date"] == rb_date)
+    # 转换日期列为 Timestamp（避免类型不一致导致比较失败）
+    ops = operations_df.copy()
+    ops["Rebalance_Date"] = pd.to_datetime(ops["Rebalance_Date"], errors="coerce")
+    ops["Next_Rebalance_Date"] = pd.to_datetime(ops["Next_Rebalance_Date"], errors="coerce")
+    current_rb_ts = pd.Timestamp(current_rb)
+    current_date_ts = pd.Timestamp(current_date)
+
+    # 过滤：属于 current_rb 买入的，且至今未卖出（即 Next_Rebalance_Date > current_date）
+    holding = ops[
+        (ops["Rebalance_Date"] == current_rb_ts)
         & (
-            (operations_df["Next_Rebalance_Date"].isna())
-            | (operations_df["Next_Rebalance_Date"] > current_date)
+            ops["Next_Rebalance_Date"].isna()
+            | (ops["Next_Rebalance_Date"] > current_date_ts)
         )
     ].copy()
+
+    # 去重：同一股票可能有多条记录（保留权重最大的那条）
+    if "Weight" in holding.columns:
+        holding = holding.sort_values("Weight", ascending=False)
+        holding = holding.drop_duplicates(subset=["Symbol"], keep="first")
 
     if holding.empty:
         return None
 
     # 获取 current_date 当日收盘价（缺失则用最近可交易日）
-    if current_date in price_df.index:
-        current_prices = price_df.loc[current_date]
+    if current_date_ts in price_df.index:
+        current_prices = price_df.loc[current_date_ts]
     else:
-        available = price_df.index[price_df.index <= current_date]
+        available = price_df.index[price_df.index <= current_date_ts]
         if len(available) == 0:
             return None
         current_prices = price_df.loc[available[-1]]
 
-    holding = holding.copy()
-    holding["Current_Price"] = holding["Symbol"].map(current_prices.to_dict())
+    holding["Current_Price"] = holding["Symbol"].map(
+        lambda s: float(current_prices[s]) if s in current_prices.index else float("nan")
+    )
     holding["Buy_Price"] = pd.to_numeric(holding["Buy_Price_Close"], errors="coerce")
     holding["Change_Pct"] = (holding["Current_Price"] - holding["Buy_Price"]) / holding["Buy_Price"]
 
@@ -834,7 +848,7 @@ def _get_holding_period_info(
         return None
 
     return holding[["Symbol", "Weight", "Buy_Price", "Current_Price", "Change_Pct"]].sort_values(
-        by="Weight", ascending=False
+        by="Change_Pct", ascending=False
     )
 
 
@@ -855,7 +869,6 @@ def send_discord_notification(
         is_rebalance = status["is_rebalance_today"]
         current_rb = status["current_rebalance_date"]
         next_rb = status["next_rebalance_date"]
-        all_rb_dates = status.get("all_rebalance_dates", [])
 
         factor_info = (
             f"**选定因子：** {', '.join(SELECTED_FACTOR_NAMES)}\n"
@@ -875,57 +888,59 @@ def send_discord_notification(
         ops_df = result.get("operations_df", pd.DataFrame())
         metrics = compute_extended_metrics(dr, nv, rf_rate=cfg.RISK_FREE_RATE)
 
-        # ── 上期持仓盈亏区块（找出上一次调仓日买入的持仓）──────────────
+        # ── 当前持仓盈亏区块（当前调仓日买入、至今未卖出的标的）────
         holding_field: Optional[dict] = None
-        if all_rb_dates and current_rb is not None and not price_df.empty:
-            sorted_rb = sorted(all_rb_dates)
-            prev_rb_list = [d for d in sorted_rb if d < current_rb]
-            prev_rb = prev_rb_list[-1] if prev_rb_list else None
-
-            if prev_rb is not None:
-                holding_info = _get_holding_period_info(
-                    ops_df, prev_rb, price_df, as_of
+        if current_rb is not None and not price_df.empty and not ops_df.empty:
+            holding_info = _get_holding_period_info(
+                ops_df, current_rb, price_df, as_of
+            )
+            if holding_info is not None and not holding_info.empty:
+                total_change = float(
+                    (holding_info["Weight"] * holding_info["Change_Pct"]).sum()
                 )
-                if holding_info is not None and not holding_info.empty:
-                    total_change = (
-                        (holding_info["Weight"] * holding_info["Change_Pct"]).sum()
+                gainers = holding_info[holding_info["Change_Pct"] > 0]
+                losers = holding_info[holding_info["Change_Pct"] < 0]
+
+                lines = []
+                for _, row in holding_info.head(5).iterrows():
+                    pct = float(row["Change_Pct"]) * 100
+                    bp = float(row["Buy_Price"])
+                    cp = float(row["Current_Price"])
+                    lines.append(
+                        f"• {row['Symbol']}: {pct:+.2f}% "
+                        f"(${bp:.2f}→${cp:.2f})"
                     )
-                    gainers = holding_info[holding_info["Change_Pct"] > 0]
-                    losers = holding_info[holding_info["Change_Pct"] < 0]
+                if len(holding_info) > 5:
+                    lines.append(f"  ...另有 {len(holding_info) - 5} 只")
 
-                    lines = []
-                    # 涨跌幅排名前3
-                    sorted_by_change = holding_info.sort_values("Change_Pct", ascending=False)
-                    for _, row in sorted_by_change.head(3).iterrows():
-                        pct = row["Change_Pct"] * 100
-                        lines.append(
-                            f"• {row['Symbol']}: {pct:+.2f}% "
-                            f"(${float(row['Buy_Price']):.2f}→${float(row['Current_Price']):.2f})"
-                        )
-                    if len(holding_info) > 3:
-                        lines.append(f"  ...另有 {len(holding_info) - 3} 只")
-
-                    gainer_info = ""
-                    if not gainers.empty:
-                        gainer_info = f"  ↑ {len(gainers)} 只，平均 +{(gainers['Change_Pct'].mean()*100):.1f}%"
-                    loser_info = ""
-                    if not losers.empty:
-                        loser_info = f"  ↓ {len(losers)} 只，平均 {(losers['Change_Pct'].mean()*100):.1f}%"
-
-                    holding_lines = _truncate_text(
-                        "\n".join(lines), DISCORD_FIELD_MAX_CHARS
+                gainer_info = ""
+                if not gainers.empty:
+                    gainer_info = (
+                        f"\n  ↑ {len(gainers)} 只，"
+                        f"平均 +{(gainers['Change_Pct'].mean()*100):.1f}%"
                     )
-                    holding_field = {
-                        "name": (
-                            f"📊 上期持仓（{prev_rb.date()}，{total_change*100:+.2f}%）"
-                        ),
-                        "value": (
-                            f"整体区间涨跌：{total_change*100:+.2f}%\n"
-                            f"{gainer_info}{loser_info}\n"
-                            f"**详情：**\n{holding_lines}"
-                        ),
-                        "inline": False,
-                    }
+                loser_info = ""
+                if not losers.empty:
+                    loser_info = (
+                        f"\n  ↓ {len(losers)} 只，"
+                        f"平均 {(losers['Change_Pct'].mean()*100):.1f}%"
+                    )
+
+                holding_text = _truncate_text(
+                    "\n".join(lines), DISCORD_FIELD_MAX_CHARS
+                )
+                holding_field = {
+                    "name": (
+                        f"📊 当前持仓（买入日 {current_rb.date()}，"
+                        f"区间 {total_change*100:+.2f}%）"
+                    ),
+                    "value": (
+                        f"整体区间涨跌：{total_change*100:+.2f}%\n"
+                        f"{gainer_info}{loser_info}\n"
+                        f"**详情：**\n{holding_text}"
+                    ),
+                    "inline": False,
+                }
 
         # ── 构造 embed 主体 ───────────────────────────────────────────
         if is_rebalance:
@@ -1012,9 +1027,9 @@ def send_discord_notification(
                     "inline": False,
                 })
 
-            # 上期持仓盈亏（插入操作明细之后）
+            # 当前持仓盈亏
             if holding_field:
-                fields.insert(len(fields) - (1 if next_rb else 0), holding_field)
+                fields.append(holding_field)
 
         else:
             title = "ℹ️ 非调仓日 - 无需操作"
