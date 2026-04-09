@@ -197,18 +197,23 @@ def run_detailed_backtest(
     if len(rebalance_dates) < 2:
         return {"error": "调仓日不足 2 个"}
 
-    # 将最后一期持仓延伸到下一调仓日（按调仓周期外推）。
-    # 使用外推的真实下一调仓日（如 3.27），而非价格数据截止日（如 3.17），
-    # 确保 Next_Rebalance_Date 显示正确的调仓计划，不被当日数据截止日误导。
+    # 将最后一期持仓延伸到数据截止日或下一调仓日（取较早者）。
+    # 如果 next_rb 晚于价格数据截止日，则：
+    #   1. 使用价格截止日作为"假设卖出日期"
+    #   2. 延续日收益计算到价格截止日
+    #   3. 操作记录中 Next_Rebalance_Date 保持外推值，但 Sell_Price_Close 使用实际可用价格
     last_rb = pd.Timestamp(rebalance_dates[-1])
+    price_end_date = ret_df.index.max()  # 价格数据截止日
     _after = ret_df.index[ret_df.index > last_rb].sort_values()
+
     if len(_after) >= rebalance_period:
-        # 用实际交易日计数外推（与 _select_rebalance_dates 逻辑一致）
         next_rb_date = pd.Timestamp(_after[rebalance_period - 1])
     else:
-        # 数据不足时退化为业务日近似
         _bd = pd.bdate_range(start=last_rb, periods=rebalance_period + 1, freq="B")
         next_rb_date = pd.Timestamp(_bd[-1])
+
+    # 如果 next_rb_date 晚于价格截止日，则使用价格截止日
+    actual_sell_date = min(next_rb_date, price_end_date)
     rebalance_dates = list(rebalance_dates) + [next_rb_date]
 
     all_daily_rets = []
@@ -224,9 +229,19 @@ def run_detailed_backtest(
     rf = getattr(config, "RISK_FREE_RATE", 0.02)
     max_weight = getattr(config, "MAX_WEIGHT", 0.4)
 
+    # 判断是否为最后一期调仓（需要特殊处理）
+    last_rb_index = len(rebalance_dates) - 2  # -2 因为延伸后的 rebalance_dates 最后一个是 next_rb_date
+
     for i in range(len(rebalance_dates) - 1):
         rb_date = rebalance_dates[i]
         next_rb = rebalance_dates[i + 1]
+        is_last_period = (i == last_rb_index)
+
+        # 对于最后一期：如果 next_rb 晚于价格截止日，使用价格截止日作为实际卖出日期
+        if is_last_period and next_rb > price_end_date:
+            actual_sell_rb = price_end_date  # 用于计算持仓期和获取卖出价格
+        else:
+            actual_sell_rb = next_rb
 
         # 因子信号
         if rb_date in factor_df.index:
@@ -257,31 +272,33 @@ def run_detailed_backtest(
             max_weight=max_weight,
         )
 
-        # 买卖价格
+        # 买卖价格：最后一期使用 actual_sell_rb
         buy_prices = _get_price_on_date(price_df, rb_date, group_stocks)
-        sell_prices = _get_price_on_date(price_df, next_rb, group_stocks)
+        sell_prices = _get_price_on_date(price_df, actual_sell_rb, group_stocks)
 
-        # 持仓期收益
-        holding_mask = (ret_df.index > rb_date) & (ret_df.index <= next_rb)
+        # 持仓期收益：最后一期使用 actual_sell_rb
+        holding_mask = (ret_df.index > rb_date) & (ret_df.index <= actual_sell_rb)
         period_df = ret_df.loc[holding_mask, :]
         if len(period_df) == 0:
             continue
 
-        # 有效标的（有买卖价的）
-        valid_stocks = list(
-            set(weights.index) & set(buy_prices.index) & set(sell_prices.index)
-        )
+        # 有效标的：至少需要有买入价格
+        valid_stocks = list(set(weights.index) & set(buy_prices.index))
         if len(valid_stocks) == 0:
             continue
 
         w = weights.reindex(valid_stocks).fillna(0)
         w = w / w.sum()
         buy_p = buy_prices.reindex(valid_stocks).dropna()
+        # 对于最后一期，可能没有完全有效的卖出价格，但仍需处理
         sell_p = sell_prices.reindex(valid_stocks).dropna()
-        common = w.index.intersection(buy_p.index).intersection(sell_p.index)
+
+        # 交集：有买入价的股票（有卖出价更好）
+        common = w.index.intersection(buy_p.index)
         if len(common) == 0:
             continue
         w = w[common] / w[common].sum()
+        # 卖出价格需要单独处理（最后一期可能为空）
 
         period_daily = []
         for j, (date, row) in enumerate(period_df.iterrows()):
@@ -306,7 +323,8 @@ def run_detailed_backtest(
         period_cum_ret *= 1.0 + period_cum
 
         # 操作明细：每只股票一行（组合规模=1 的虚拟资金）
-        period_days = (next_rb - rb_date).days
+        # 持仓天数使用 actual_sell_rb（最后一期使用价格截止日）
+        period_days = (actual_sell_rb - rb_date).days
         for sym in common:
             bp = buy_prices[sym] if sym in buy_prices.index else np.nan
             sp = sell_prices[sym] if sym in sell_prices.index else np.nan
@@ -342,7 +360,7 @@ def run_detailed_backtest(
         period_summary_records.append({
             "Rebalance_Date": rb_date,
             "Next_Rebalance_Date": next_rb,
-            "Holding_Days": (next_rb - rb_date).days,
+            "Holding_Days": period_days,  # 使用 actual_sell_rb 计算的天数
             "Position_Count": len(common),
             "Period_Return": period_cum,
             "Period_Cumulative_Return": period_cum_ret - 1.0,

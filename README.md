@@ -186,8 +186,8 @@ Weighting method meaning:
 **Discord notification content:**
 - Factor selection, composite method, strategy parameters
 - Performance metrics: total return, annualized return, Sharpe ratio, max drawdown, Calmar ratio, win rate, profit/loss ratio
-- Current holding P&L: buy price → current price for each position since last rebalance, period return, win/loss statistics
-- Today's operations (buy/sell list, filtering Weight < 0.0001 low-weight trades)
+- Current holding P&L: aligned with MTM in Excel — weight, assumed sell (As_Of close or live), `Period_Return`, `Sell_Value` (position notionals)
+- Today's operations (buy/sell list, Weight ≥ 0.0001): shows weight, prices, optional MTM interval return and position
 - Next rebalance date
 
 **Pipeline execution modes:**
@@ -293,8 +293,16 @@ python analysis/strategy/run_strategy_review.py
 14. **run_rebalance_day Discord holding P&L block not showing:** `operations_df` only contains records with completed holding periods (Next_Rebalance_Date confirmed); current holdings have an extrapolated Next_Rebalance_Date and are written normally during backtesting; `_get_holding_period_info` forces `pd.to_datetime` conversion on date columns to avoid type mismatches.
 15. **Pipeline subprocess output buffering:** Default subprocess mode buffers child process stdout/stderr; use `--inline` to observe real-time progress in-line.
 16. **inspect_ols_weights.py:** Only effective when the composite factor sheet name is in the `ols_*` series; if beta/IC/Rank_IC composite methods are selected, this script produces no output.
+17. **run_rebalance_day mark-to-market (MTM):** For any holding whose `Next_Rebalance_Date` is still in the future (or `Sell_Price_Close` is missing), the report fills **assumed** `Sell_Price_Close` using the As_Of date’s **Adj Close** (last available ≤ As_Of) or **yfinance live price** when the bar is missing. `Period_Return`, `Sell_Value`, and `Shares` are recomputed; see column **`Sell_Price_Source`** (`假设市价(未到期)` vs `到期收盘`). `Period_Summary` for open periods is updated from MTM line items. Completed periods (next rebalance ≤ As_Of with a backtest sell price) keep historical exit prices.
 
 ---
+
+18. **pull_yhfinance_Data.py close price Backfill logic:** `_backfill_close_fast_info` only backfills missing Close/Adj Close for "yesterday" (most recent closed trading day). The decision is driven by `_is_target_date_session_closed` — it uses a "target_date + 1 day 00:00 UTC" cutoff to confirm the historical bar is closed, instead of checking the current wall-clock time. **Pre-fix bug:** original code used `_is_market_closed_now()` (UTC 21:00 threshold), causing backfill to be skipped during intraday runs (e.g., UTC 06:35) even for yesterday's already-closed bars with missing Close. **Post-fix behavior:**
+    - Yesterday closed + yfinance returned OHL but missing Close → triggers backfill
+    - Yesterday closed + yfinance already has complete Close → skips
+    - Yesterday still in-session (UTC 04:00-21:00 intraday) → skips (safety guard)
+    - Yesterday is a non-trading day → automatically rolls back to prior trading day, same logic applies
+    - Today intraday → skips (`target_date >= today` returns False immediately; today's bar is never polluted)
 
 ## Reference Docs
 

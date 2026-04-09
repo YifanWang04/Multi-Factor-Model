@@ -293,6 +293,19 @@ python analysis/strategy/run_strategy_review.py
 14. **run_rebalance_day Discord 持仓盈亏区块不显示：** `operations_df` 中只有完整持仓期结束的记录（Next_Rebalance_Date 已确定）；当前持仓因尚未卖出、Next_Rebalance_Date 为外推日期，在回测阶段会被正常写入；`_get_holding_period_info` 对日期列强制 `pd.to_datetime` 转换以避免类型不匹配。
 15. **Pipeline subprocess 输出延迟：** 默认 subprocess 模式会缓冲子进程输出；使用 `--inline` 可在内联进程中实时观察各步骤进度。
 16. **inspect_ols_weights.py：** 仅在复合因子 sheet 名为 `ols_*` 系列时生效；若选择 beta/IC/Rank_IC 等非 OLS 复合方式，该脚本无输出。
+17. **pull_yhfinance_Data.py 收盘价 Backfill 逻辑：** `_backfill_close_fast_info` 仅对"昨天"（最近已收盘交易日）的缺失 Close 做补全，补全判断由 `_is_target_date_session_closed` 驱动——通过"目标日期+1 天 00:00 UTC"判断线确认历史日收盘已确认，而非判断脚本运行时的当前时间。**修复前 bug：** 原代码用 `_is_market_closed_now()`（UTC 21:00 阈值）判断，导致盘中运行（如 UTC 06:35）时对昨天已收盘 bar 的缺失 Close 跳过补全。**修复后行为：**
+   - 昨天已收盘 + yfinance 返回 OHL 但缺 Close → ✅ 触发回填
+   - 昨天已收盘 + yfinance 已有完整 Close → ❌ 跳过
+   - 昨天收盘前（UTC 04:00–21:00 盘中）→ ❌ 跳过（安全保护）
+   - 昨天是非交易日 → 自动回溯到前一个交易日，判断同上
+   - 今天盘中 → ❌ 跳过（`target_date >= today` 直接返回 False，今天数据不被污染）
+
+18. **pull_yhfinance_Data.py 收盘价 Backfill 逻辑：** `_backfill_close_fast_info` 仅对"昨天"（最近已收盘交易日）的缺失 Close 做补全，补全判断由 `_is_target_date_session_closed` 驱动——通过"目标日期+1 天 00:00 UTC"判断线确认历史日收盘已确认，而非判断脚本运行时的当前时间。**修复前 bug：** 原代码用 `_is_market_closed_now()`（UTC 21:00 阈值）判断，导致盘中运行（如 UTC 06:35）时对昨天已收盘 bar 的缺失 Close 跳过补全。**修复后行为：**
+   - 昨天已收盘 + yfinance 返回 OHL 但缺 Close → ✅ 触发回填
+   - 昨天已收盘 + yfinance 已有完整 Close → ❌ 跳过
+   - 昨天收盘前（UTC 04:00–21:00 盘中）→ ❌ 跳过（安全保护）
+   - 昨天是非交易日 → 自动回溯到前一个交易日，判断同上
+   - 今天盘中 → ❌ 跳过（`target_date >= today` 直接返回 False，今天数据不被污染）
 
 ---
 

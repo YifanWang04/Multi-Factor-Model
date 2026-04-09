@@ -13,8 +13,10 @@
 
 时序约定（与 README.md 一致）：
   - 交易：T 日收盘执行，买卖价格均使用 Adj Close（收盘价）
-  - 调仓日且未收盘时：用当日开盘价（Today_Open）与现价（收盘价估计）替代
+  - 调仓日且未收盘时：用当日开盘价（Today_Open）与现价（收盘价估计）替代买入价
   - 持仓区间：(T, T_next]，T 日收益不计入当期持仓
+  - 报表/Discord：若下一调仓日尚未到（或卖出价缺失），用 As_Of 日收盘价或实时价作假设卖出价，
+    重算 Period_Return / Sell_Value（列 Sell_Price_Source 标明来源）
 
 用法（项目根目录）：
   python analysis/strategy/run_rebalance_day.py
@@ -368,6 +370,138 @@ def _get_price_on_date(
     return price_df.loc[date].reindex(stocks).dropna()
 
 
+def _mark_price_for_symbol(
+    price_df: pd.DataFrame,
+    symbol: str,
+    as_of: pd.Timestamp,
+    live_prices: Optional[dict[str, dict[str, float]]],
+) -> float:
+    """
+    取 as_of 及之前最近可用的 Adj Close；若无列或全缺失，则用 live_prices[sym]['current']。
+    """
+    live_prices = live_prices or {}
+    if symbol not in price_df.columns:
+        lp = live_prices.get(symbol, {})
+        cur = lp.get("current", np.nan)
+        return float(cur) if cur is not None else float("nan")
+    series = price_df[symbol].dropna()
+    if len(series) == 0:
+        lp = live_prices.get(symbol, {})
+        cur = lp.get("current", np.nan)
+        return float(cur) if cur is not None else float("nan")
+    valid = series[series.index <= as_of]
+    if len(valid) > 0:
+        return float(valid.iloc[-1])
+    lp = live_prices.get(symbol, {})
+    cur = lp.get("current", np.nan)
+    return float(cur) if cur is not None else float("nan")
+
+
+def apply_mark_to_market_operations_df(
+    ops_df: pd.DataFrame,
+    price_df: pd.DataFrame,
+    as_of_date: pd.Timestamp,
+    live_prices: Optional[dict[str, dict[str, float]]] = None,
+) -> pd.DataFrame:
+    """
+    对「下一调仓日尚未到」或卖出价缺失的持仓，用 As_Of 日收盘价（或实时价）假设为卖出价，
+    重算 Period_Return、Sell_Value、Shares，并标注 Sell_Price_Source。
+    已到期且回测中已有有效 Sell_Price_Close 的行保持不变。
+    """
+    if ops_df.empty:
+        return ops_df
+    out = ops_df.copy()
+    live_prices = live_prices or {}
+    as_of = pd.Timestamp(as_of_date).normalize()
+
+    if "Next_Rebalance_Date" not in out.columns:
+        return out
+
+    out["Next_Rebalance_Date"] = pd.to_datetime(out["Next_Rebalance_Date"], errors="coerce")
+    out["Rebalance_Date"] = pd.to_datetime(out["Rebalance_Date"], errors="coerce")
+
+    if "Sell_Price_Source" not in out.columns:
+        out["Sell_Price_Source"] = ""
+
+    for idx, row in out.iterrows():
+        next_rb = row["Next_Rebalance_Date"]
+        if pd.isna(next_rb):
+            continue
+        next_rb = pd.Timestamp(next_rb)
+        sell_was = row.get("Sell_Price_Close", np.nan)
+        sell_was = float(sell_was) if pd.notna(sell_was) else np.nan
+        # 下一调仓日未到，或卖出价仍缺失：按市值计价
+        need_mtm = (next_rb > as_of) or (pd.isna(sell_was))
+        if not need_mtm:
+            if str(out.at[idx, "Sell_Price_Source"] or "").strip() == "":
+                out.at[idx, "Sell_Price_Source"] = "到期收盘"
+            continue
+
+        sym = row["Symbol"]
+        mark = _mark_price_for_symbol(price_df, sym, as_of, live_prices)
+        if pd.isna(mark) or mark <= 0:
+            continue
+
+        bp = pd.to_numeric(row.get("Buy_Price_Close"), errors="coerce")
+        if pd.isna(bp) or bp <= 0:
+            continue
+
+        wt = pd.to_numeric(row.get("Weight"), errors="coerce")
+        buy_value = pd.to_numeric(row.get("Buy_Value"), errors="coerce")
+        if pd.isna(buy_value) and pd.notna(wt):
+            buy_value = float(wt)
+        if pd.isna(buy_value):
+            buy_value = 0.0
+
+        stk_ret = mark / bp - 1.0
+        out.at[idx, "Sell_Price_Close"] = mark
+        out.at[idx, "Period_Return"] = stk_ret
+        out.at[idx, "Sell_Value"] = float(buy_value) * (1.0 + stk_ret)
+        out.at[idx, "Shares"] = float(buy_value) / bp if buy_value > 0 else np.nan
+        out.at[idx, "Sell_Price_Source"] = (
+            "假设市价(未到期)" if next_rb > as_of else "假设市价(补全)"
+        )
+
+    return out
+
+
+def patch_period_summary_mtm(result: dict, as_of_date: pd.Timestamp) -> None:
+    """对尚未到期的持仓期，用 MTM 后的个股收益加权更新 Period_Summary 中的 Period_Return 与 Holding_Days。"""
+    ps = result.get("period_summary_df")
+    ops = result.get("operations_df")
+    if ps is None or ps.empty or ops is None or ops.empty:
+        return
+
+    ps = ps.copy()
+    ops = ops.copy()
+    ops["Rebalance_Date"] = pd.to_datetime(ops["Rebalance_Date"], errors="coerce")
+    ops["Next_Rebalance_Date"] = pd.to_datetime(ops["Next_Rebalance_Date"], errors="coerce")
+    as_of = pd.Timestamp(as_of_date).normalize()
+
+    ps["Rebalance_Date"] = pd.to_datetime(ps["Rebalance_Date"], errors="coerce")
+    ps["Next_Rebalance_Date"] = pd.to_datetime(ps["Next_Rebalance_Date"], errors="coerce")
+
+    for i, prow in ps.iterrows():
+        nr = prow["Next_Rebalance_Date"]
+        if pd.isna(nr):
+            continue
+        nr = pd.Timestamp(nr)
+        if nr <= as_of:
+            continue
+        rb = pd.Timestamp(prow["Rebalance_Date"])
+        sub = ops[(ops["Rebalance_Date"] == rb) & (ops["Next_Rebalance_Date"] == nr)]
+        if sub.empty:
+            continue
+        w = pd.to_numeric(sub["Weight"], errors="coerce").fillna(0.0)
+        r = pd.to_numeric(sub["Period_Return"], errors="coerce")
+        if w.sum() > 0 and r.notna().any():
+            port_ret = float((w * r.fillna(0)).sum() / w.sum())
+            ps.at[i, "Period_Return"] = port_ret
+        ps.at[i, "Holding_Days"] = max(0, (as_of - rb).days)
+
+    result["period_summary_df"] = ps
+
+
 def fetch_live_prices(symbols: list[str]) -> dict[str, dict[str, float]]:
     """
     通过 yfinance 获取当日开盘价和现价（带重试机制）。
@@ -401,6 +535,42 @@ def fetch_live_prices(symbols: list[str]) -> dict[str, dict[str, float]]:
     return result
 
 
+def collect_live_prices_for_mtm(
+    ops_df: pd.DataFrame,
+    price_df: pd.DataFrame,
+    as_of_date: pd.Timestamp,
+) -> dict[str, dict[str, float]]:
+    """
+    对需要按市值计价、且本地行情表在 as_of 仍无有效价的标的，批量拉取 yfinance 实时价。
+    """
+    if ops_df.empty:
+        return {}
+    as_of = pd.Timestamp(as_of_date).normalize()
+    need_syms: list[str] = []
+    ops = ops_df.copy()
+    if "Next_Rebalance_Date" not in ops.columns:
+        return {}
+    ops["Next_Rebalance_Date"] = pd.to_datetime(ops["Next_Rebalance_Date"], errors="coerce")
+    for _, row in ops.iterrows():
+        next_rb = row["Next_Rebalance_Date"]
+        if pd.isna(next_rb):
+            continue
+        next_rb = pd.Timestamp(next_rb)
+        sell_was = row.get("Sell_Price_Close", np.nan)
+        sell_was = float(sell_was) if pd.notna(sell_was) else np.nan
+        if not ((next_rb > as_of) or pd.isna(sell_was)):
+            continue
+        sym = row["Symbol"]
+        m = _mark_price_for_symbol(price_df, sym, as_of, {})
+        if pd.isna(m) or m <= 0:
+            need_syms.append(sym)
+    need_syms = list(dict.fromkeys(need_syms))
+    if not need_syms:
+        return {}
+    print(f"  MTM：对 {len(need_syms)} 只标的拉取实时价（本地无 as_of 收盘价）")
+    return fetch_live_prices(need_syms)
+
+
 def apply_live_prices_to_operations(
     current_ops: pd.DataFrame,
     price_df: pd.DataFrame,
@@ -409,7 +579,8 @@ def apply_live_prices_to_operations(
 ) -> tuple[pd.DataFrame, bool]:
     """
     当调仓日且数据中无当日收盘价时，用 yfinance 获取当日开盘价和现价，
-    以开盘价作为 Today_Open，以现价作为收盘价替代（Buy_Price_Close / Sell_Price_Close）。
+    以开盘价作为 Today_Open，以现价作为收盘价替代（仅 Buy_Price_Close）。
+    未到期持仓的假设卖出价由 apply_mark_to_market_operations_df 单独处理（不在此覆盖）。
     返回 (更新后的 current_ops, 是否使用了实时价)。
     """
     if current_ops.empty:
@@ -439,16 +610,13 @@ def apply_live_prices_to_operations(
             continue
         o, c = live_prices[sym]["open"], live_prices[sym]["current"]
         ops.at[idx, "Today_Open"] = o
+        # 仅对 Buy 操作更新 Buy_Price_Close；Sell 操作保持原值（调仓日收盘价）
         if row["Action"] == "Buy":
             ops.at[idx, "Buy_Price_Close"] = c
             bv = row.get("Buy_Value", np.nan)
             if not (np.isnan(bv) if isinstance(bv, float) else False) and bv is not None and c > 0:
                 ops.at[idx, "Shares"] = float(bv) / c
-        elif row["Action"] == "Sell":
-            ops.at[idx, "Sell_Price_Close"] = c
-            sh = row.get("Shares", np.nan)
-            if not (np.isnan(sh) if isinstance(sh, float) else False) and sh is not None:
-                ops.at[idx, "Sell_Value"] = float(sh) * c
+        # Sell 操作的 Sell_Price_Close 不修改（已在回测中使用调仓日收盘价）
 
     return ops, True
 
@@ -461,10 +629,18 @@ def get_current_rebalance_operations(
     result: dict,
     current_rebalance_date: pd.Timestamp,
     next_rebalance_date: Optional[pd.Timestamp] = None,
+    rebalance_dates: Optional[list] = None,
 ) -> pd.DataFrame:
     """
     获取当前调仓日操作：卖出上一期持仓 + 买入本期标的。
     next_rebalance_date: 外推的下一调仓日，用于填充 Next_Rebalance_Date 字段。
+    rebalance_dates: 历史调仓日列表，用于在无卖出记录时回退到前一个调仓日的卖出。
+
+    卖出逻辑：
+    - 取 Rebalance_Date < current_rebalance_date 且 Next_Rebalance_Date == current_rebalance_date 的记录
+    - 若无匹配（current_rebalance_date 还未发生），回退到前一调仓日的卖出记录
+    - 过滤掉 Next_Rebalance_Date 为空的记录（最后一期持仓，无实际卖出）
+
     返回含 Action 列（Sell/Buy）的 DataFrame，先卖后买。
     """
     if "error" in result:
@@ -474,17 +650,47 @@ def get_current_rebalance_operations(
     sell_ops = pd.DataFrame()
     buy_ops = pd.DataFrame()
 
-    # 1. 卖出操作：上一调仓日买入、今日卖出的持仓
+    rb_ts = pd.Timestamp(current_rebalance_date)
+
+    # 1. 卖出操作：买入日在 current_rb 之前、卖出日在 current_rb 当日
     if not ops_df.empty and "Next_Rebalance_Date" in ops_df.columns:
-        mask_sell = ops_df["Next_Rebalance_Date"] == current_rebalance_date
-        sell_ops = ops_df.loc[mask_sell].copy()
+        ops = ops_df.copy()
+        ops["Rebalance_Date"] = pd.to_datetime(ops["Rebalance_Date"], errors="coerce")
+        ops["Next_Rebalance_Date"] = pd.to_datetime(ops["Next_Rebalance_Date"], errors="coerce")
+
+        # 过滤条件：上一期买入，卖出日在 current_rb，且有实际卖出价格
+        mask_sell = (
+            (ops["Rebalance_Date"] < rb_ts)
+            & (ops["Next_Rebalance_Date"] == rb_ts)
+            & (ops["Sell_Price_Close"].notna())
+        )
+        sell_ops = ops.loc[mask_sell].copy()
+
+        # 若无卖出记录（current_rb 还未发生），回退到前一调仓日的卖出
+        if sell_ops.empty and rebalance_dates:
+            sorted_rb = sorted([pd.Timestamp(d) for d in rebalance_dates if pd.notna(d)])
+            prev_rb = None
+            for d in reversed(sorted_rb):
+                if d < rb_ts:
+                    prev_rb = d
+                    break
+            if prev_rb is not None:
+                mask_prev = (
+                    (ops["Rebalance_Date"] < prev_rb)
+                    & (ops["Next_Rebalance_Date"] == prev_rb)
+                    & (ops["Sell_Price_Close"].notna())
+                )
+                sell_ops = ops.loc[mask_prev].copy()
+
         if not sell_ops.empty:
             sell_ops.insert(0, "Action", "Sell")
 
     # 2. 买入操作：今日买入的标的
     if not ops_df.empty and "Rebalance_Date" in ops_df.columns:
-        mask_buy = ops_df["Rebalance_Date"] == current_rebalance_date
-        buy_ops = ops_df.loc[mask_buy].copy()
+        ops = ops_df.copy()
+        ops["Rebalance_Date"] = pd.to_datetime(ops["Rebalance_Date"], errors="coerce")
+        mask_buy = ops["Rebalance_Date"] == rb_ts
+        buy_ops = ops.loc[mask_buy].copy()
         if not buy_ops.empty:
             buy_ops.insert(0, "Action", "Buy")
 
@@ -675,6 +881,7 @@ def write_rebalance_day_report(
     current_ops: pd.DataFrame,
     output_path: str,
     used_live_prices: bool = False,
+    mtm_applied: bool = False,
 ) -> None:
     """
     写入合并后的调仓日报表（单文件，含全部 sheet）。
@@ -689,11 +896,19 @@ def write_rebalance_day_report(
     nav = result["nav"]
     metrics = compute_extended_metrics(daily_returns, nav, rf_rate=cfg.RISK_FREE_RATE)
 
-    price_conv = (
-        "调仓日且未收盘：Today_Open=当日开盘价，Buy/Sell_Price=现价（收盘价估计）"
-        if used_live_prices
-        else "Adj Close（收盘价）；T 日收盘执行，买卖均用当日收盘价"
-    )
+    price_conv_parts = []
+    if mtm_applied:
+        price_conv_parts.append(
+            "未到期持仓：Sell_Price_Close 为 As_Of 日收盘或实时价（假设卖出），见 Sell_Price_Source 列"
+        )
+    if used_live_prices:
+        price_conv_parts.append(
+            "调仓日且未收盘：Today_Open=开盘价，Buy_Price_Close=现价（买入估计）"
+        )
+    if not price_conv_parts:
+        price_conv = "Adj Close（收盘价）；T 日收盘执行；未到期持仓已按市值计价列示"
+    else:
+        price_conv = "；".join(price_conv_parts)
 
     # 统一状态行（消除 config_summary / status_rows 重复）
     status_rows = [
@@ -730,13 +945,21 @@ def write_rebalance_day_report(
     df_ops_raw = result["operations_df"]
     df_ops_filtered = _filter_weight_lt(df_ops_raw, WEIGHT_FILTER_THRESHOLD)
 
+    # 将 NaN 替换为 "-" 以便 Excel 显示更友好
+    def _nan_to_dash(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        for col in df.columns:
+            if df[col].dtype in (np.float64, float) and df[col].isna().any():
+                df[col] = df[col].apply(lambda x: "-" if (isinstance(x, float) and np.isnan(x)) else x)
+        return df
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         pd.DataFrame(status_rows[1:], columns=status_rows[0]).to_excel(
             writer, sheet_name="Rebalance_Config_Status", index=False
         )
 
         if not filtered_ops.empty:
-            filtered_ops.to_excel(writer, sheet_name="Current_Operations", index=False)
+            _nan_to_dash(filtered_ops).to_excel(writer, sheet_name="Current_Operations", index=False)
         else:
             pd.DataFrame({"Note": ["无当前调仓日操作（今日非调仓日或数据不足）"]}).to_excel(
                 writer, sheet_name="Current_Operations", index=False
@@ -800,6 +1023,9 @@ def _get_holding_period_info(
     传入 current_rb（当前调仓日，即这些仓位的买入日），
     返回含 Symbol / Buy_Price / Current_Price / Change_Pct 的 DataFrame。
     若无持仓或数据不足，返回 None。
+
+    容错逻辑：当 current_rb 对应的记录不存在时，
+    尝试使用 operations_df 中最新一期的持仓记录。
     """
     if operations_df.empty or "Rebalance_Date" not in operations_df.columns:
         return None
@@ -819,6 +1045,12 @@ def _get_holding_period_info(
             | (ops["Next_Rebalance_Date"] > current_date_ts)
         )
     ].copy()
+
+    # 容错：如果 current_rb 对应的记录为空，尝试使用最新一期（最大 Rebalance_Date）的持仓记录
+    if holding.empty:
+        # 获取 operations_df 中最新一期（最大 Rebalance_Date）的未卖出持仓
+        latest_rb = ops["Rebalance_Date"].max()
+        holding = ops[ops["Rebalance_Date"] == latest_rb].copy()
 
     # 去重：同一股票可能有多条记录（保留权重最大的那条）
     if "Weight" in holding.columns:
@@ -847,7 +1079,8 @@ def _get_holding_period_info(
     if holding.empty:
         return None
 
-    return holding[["Symbol", "Weight", "Buy_Price", "Current_Price", "Change_Pct"]].sort_values(
+    # 返回结果包含 Rebalance_Date（实际使用的调仓日，可能与传入的 current_rb 不同）
+    return holding[["Symbol", "Weight", "Buy_Price", "Current_Price", "Change_Pct", "Rebalance_Date"]].sort_values(
         by="Change_Pct", ascending=False
     )
 
@@ -888,59 +1121,131 @@ def send_discord_notification(
         ops_df = result.get("operations_df", pd.DataFrame())
         metrics = compute_extended_metrics(dr, nv, rf_rate=cfg.RISK_FREE_RATE)
 
-        # ── 当前持仓盈亏区块（当前调仓日买入、至今未卖出的标的）────
+        # ── 当前持仓盈亏区块（当期调仓买入的标的至今的盈亏）────
+        # 使用 filtered_ops（已过滤低权重）计算持仓盈亏
+        # 注意：operations_df 可能缺少最后一期（因无法获取未来卖出价格），
+        # 因此直接使用 current_ops 中 Action=="Buy" 的记录
+        # 持仓盈亏使用与实际操作一致的阈值（>= 0.0001）
         holding_field: Optional[dict] = None
-        if current_rb is not None and not price_df.empty and not ops_df.empty:
-            holding_info = _get_holding_period_info(
-                ops_df, current_rb, price_df, as_of
-            )
-            if holding_info is not None and not holding_info.empty:
-                total_change = float(
-                    (holding_info["Weight"] * holding_info["Change_Pct"]).sum()
+        if current_rb is not None and not price_df.empty and not current_ops.empty:
+            # 先过滤低权重操作（与实际操作一致）
+            ops_for_holding = _filter_weight_lt(current_ops, WEIGHT_FILTER_THRESHOLD)
+
+            # 筛选当期买入的标的（用于当前持仓）
+            if "Action" in ops_for_holding.columns:
+                buy_ops = ops_for_holding[ops_for_holding["Action"] == "Buy"].copy()
+            else:
+                buy_ops = ops_for_holding.copy()
+
+            if not buy_ops.empty:
+                buy_ops = buy_ops.copy()
+                # 与 Excel 一致：若已做 MTM，直接用 Period_Return / Sell_Price_Close / Sell_Value
+                use_mtm = (
+                    "Period_Return" in buy_ops.columns
+                    and buy_ops["Period_Return"].notna().any()
+                    and "Sell_Price_Close" in buy_ops.columns
                 )
-                gainers = holding_info[holding_info["Change_Pct"] > 0]
-                losers = holding_info[holding_info["Change_Pct"] < 0]
+                if "Weight" in buy_ops.columns:
+                    buy_ops = buy_ops.sort_values("Weight", ascending=False)
+                    buy_ops = buy_ops.drop_duplicates(subset=["Symbol"], keep="first")
 
-                lines = []
-                for _, row in holding_info.head(5).iterrows():
-                    pct = float(row["Change_Pct"]) * 100
-                    bp = float(row["Buy_Price"])
-                    cp = float(row["Current_Price"])
-                    lines.append(
-                        f"• {row['Symbol']}: {pct:+.2f}% "
-                        f"(${bp:.2f}→${cp:.2f})"
-                    )
-                if len(holding_info) > 5:
-                    lines.append(f"  ...另有 {len(holding_info) - 5} 只")
+                if use_mtm:
+                    holding_info = buy_ops[
+                        buy_ops["Period_Return"].notna()
+                        & buy_ops["Buy_Price_Close"].notna()
+                        & buy_ops["Sell_Price_Close"].notna()
+                    ].copy()
+                    if not holding_info.empty:
+                        w = pd.to_numeric(holding_info["Weight"], errors="coerce").fillna(0.0)
+                        r = pd.to_numeric(holding_info["Period_Return"], errors="coerce").fillna(0.0)
+                        total_change = float((w * r).sum())
+                        lines = []
+                        for _, row in holding_info.iterrows():
+                            wt = float(row.get("Weight", 0)) * 100
+                            pr = float(row["Period_Return"])
+                            bp = float(row["Buy_Price_Close"])
+                            sp = float(row["Sell_Price_Close"])
+                            sv = pd.to_numeric(row.get("Sell_Value"), errors="coerce")
+                            pos_s = f"${float(sv):.2f}" if pd.notna(sv) else "-"
+                            lines.append(
+                                f"• {row['Symbol']}: 权重 {wt:.1f}% | 区间 {pr*100:+.2f}% | "
+                                f"买 ${bp:.2f} → 假设卖 ${sp:.2f} | 头寸 {pos_s}"
+                            )
+                        if len(lines) > DISCORD_OPS_MAX_LINES:
+                            lines = lines[:DISCORD_OPS_MAX_LINES]
+                            lines.append(f"  ...另有 {len(holding_info) - DISCORD_OPS_MAX_LINES} 只")
+                        holding_text = _truncate_text(
+                            "\n".join(lines), DISCORD_FIELD_MAX_CHARS
+                        )
+                        holding_field = {
+                            "name": (
+                                f"📊 当前持仓（买入日 {current_rb.date()}，"
+                                f"加权区间 {total_change*100:+.2f}%）"
+                            ),
+                            "value": (
+                                f"假设卖出价=As_Of 收盘或现价（与报表 MTM 一致）\n"
+                                f"**详情（共 {len(holding_info)} 只）：**\n{holding_text}"
+                            ),
+                            "inline": False,
+                        }
+                else:
+                    # 回退：用行情表最新价估算
+                    buy_ops["Buy_Price"] = pd.to_numeric(buy_ops["Buy_Price_Close"], errors="coerce")
 
-                gainer_info = ""
-                if not gainers.empty:
-                    gainer_info = (
-                        f"\n  ↑ {len(gainers)} 只，"
-                        f"平均 +{(gainers['Change_Pct'].mean()*100):.1f}%"
-                    )
-                loser_info = ""
-                if not losers.empty:
-                    loser_info = (
-                        f"\n  ↓ {len(losers)} 只，"
-                        f"平均 {(losers['Change_Pct'].mean()*100):.1f}%"
-                    )
+                    def _get_latest_price(sym: str) -> float:
+                        if sym not in price_df.columns:
+                            return float("nan")
+                        series = price_df[sym].dropna()
+                        if len(series) == 0:
+                            return float("nan")
+                        valid = series[series.index <= as_of]
+                        if len(valid) > 0:
+                            return float(valid.iloc[-1])
+                        return float(series.iloc[-1])
 
-                holding_text = _truncate_text(
-                    "\n".join(lines), DISCORD_FIELD_MAX_CHARS
-                )
-                holding_field = {
-                    "name": (
-                        f"📊 当前持仓（买入日 {current_rb.date()}，"
-                        f"区间 {total_change*100:+.2f}%）"
-                    ),
-                    "value": (
-                        f"整体区间涨跌：{total_change*100:+.2f}%\n"
-                        f"{gainer_info}{loser_info}\n"
-                        f"**详情：**\n{holding_text}"
-                    ),
-                    "inline": False,
-                }
+                    buy_ops["Current_Price"] = buy_ops["Symbol"].map(_get_latest_price)
+                    buy_ops["Change_Pct"] = (
+                        buy_ops["Current_Price"] - buy_ops["Buy_Price"]
+                    ) / buy_ops["Buy_Price"]
+
+                    holding_info = buy_ops[
+                        buy_ops["Buy_Price"].notna() & buy_ops["Current_Price"].notna()
+                    ].copy()
+
+                    if not holding_info.empty:
+                        total_change = float(
+                            (holding_info["Weight"] * holding_info["Change_Pct"]).sum()
+                        )
+
+                        lines = []
+                        for _, row in holding_info.iterrows():
+                            pct = float(row["Change_Pct"]) * 100
+                            bp = float(row["Buy_Price"])
+                            cp = float(row["Current_Price"])
+                            wt = float(row.get("Weight", 0)) * 100
+                            pos_value = wt * 100.0
+                            lines.append(
+                                f"• {row['Symbol']}: {pct:+.2f}% | 权重 {wt:.1f}% | "
+                                f"买入 ${bp:.2f} → 当前 ${cp:.2f} | 约 ${pos_value:.0f}"
+                            )
+                        if len(lines) > DISCORD_OPS_MAX_LINES:
+                            lines = lines[:DISCORD_OPS_MAX_LINES]
+                            lines.append(f"  ...另有 {len(holding_info) - DISCORD_OPS_MAX_LINES} 只")
+
+                        holding_text = _truncate_text(
+                            "\n".join(lines), DISCORD_FIELD_MAX_CHARS
+                        )
+                        holding_field = {
+                            "name": (
+                                f"📊 当前持仓（买入日 {current_rb.date()}，"
+                                f"区间 {total_change*100:+.2f}%）"
+                            ),
+                            "value": (
+                                f"整体区间涨跌：{total_change*100:+.2f}%\n"
+                                f"**详情（共 {len(holding_info)} 只）：**\n{holding_text}"
+                            ),
+                            "inline": False,
+                        }
 
         # ── 构造 embed 主体 ───────────────────────────────────────────
         if is_rebalance:
@@ -987,7 +1292,13 @@ def send_discord_notification(
                         sym = row["Symbol"]
                         weight = row.get("Weight", 0) * 100
                         sell_price = row.get("Sell_Price_Close", 0)
-                        lines.append(f"• {sym}: {weight:.1f}% @ ${sell_price:.2f}")
+                        pr = row.get("Period_Return", np.nan)
+                        sv = row.get("Sell_Value", np.nan)
+                        pr_s = f" 区间 {float(pr)*100:+.2f}%" if pd.notna(pr) else ""
+                        sv_s = f" | 卖出头寸 ${float(sv):.2f}" if pd.notna(sv) else ""
+                        lines.append(
+                            f"• {sym}: 权重 {weight:.1f}% | 卖价 ${float(sell_price):.2f}{pr_s}{sv_s}"
+                        )
                     sell_text = _truncate_text(
                         "\n".join(lines), DISCORD_FIELD_MAX_CHARS
                     )
@@ -1003,7 +1314,16 @@ def send_discord_notification(
                         sym = row["Symbol"]
                         weight = row.get("Weight", 0) * 100
                         buy_price = row.get("Buy_Price_Close", 0)
-                        lines.append(f"• {sym}: {weight:.1f}% @ ${buy_price:.2f}")
+                        sp = row.get("Sell_Price_Close", np.nan)
+                        pr = row.get("Period_Return", np.nan)
+                        sv = row.get("Sell_Value", np.nan)
+                        mtm = ""
+                        if pd.notna(sp) and pd.notna(pr):
+                            mtm = f" | 假设卖 ${float(sp):.2f} | 区间 {float(pr)*100:+.2f}%"
+                        sv_s = f" | 头寸 ${float(sv):.2f}" if pd.notna(sv) else ""
+                        lines.append(
+                            f"• {sym}: 权重 {weight:.1f}% | 买 ${float(buy_price):.2f}{mtm}{sv_s}"
+                        )
                     buy_text = _truncate_text(
                         "\n".join(lines[:DISCORD_OPS_MAX_LINES]),
                         DISCORD_FIELD_MAX_CHARS,
@@ -1212,13 +1532,26 @@ def main(
     result["_price_df"] = price_df
     result["_config"] = cfg
 
+    as_of_date = pd.Timestamp(datetime.now().date())
+
+    # 未到期持仓按市值计价：假设卖出价 = As_Of 收盘或实时价，重算收益（All_Operations / Period_Summary）
+    mtm_live = collect_live_prices_for_mtm(result["operations_df"], price_df, as_of_date)
+    result["operations_df"] = apply_mark_to_market_operations_df(
+        result["operations_df"], price_df, as_of_date, mtm_live
+    )
+    patch_period_summary_mtm(result, as_of_date)
+    _odf = result["operations_df"]
+    mtm_applied = False
+    if not _odf.empty and "Sell_Price_Source" in _odf.columns:
+        _ss = _odf["Sell_Price_Source"].astype(str)
+        mtm_applied = _ss.isin(["假设市价(未到期)", "假设市价(补全)"]).any()
+
     rebalance_dates = _select_rebalance_dates(
         factor_df.index,
         ret_df.index,
         STRATEGY_PARAMS["rebalance_period"],
     )
     last_factor_date = factor_df.index[-1]
-    as_of_date = pd.Timestamp(datetime.now().date())
 
     status = get_rebalance_day_status(
         rebalance_dates=rebalance_dates,
@@ -1232,18 +1565,38 @@ def main(
     next_rb_date = status.get("next_rebalance_date")
     current_ops = pd.DataFrame()
     used_live_prices = False
+    # mtm_applied 已在上方根据 operations_df 初算；Current_Operations 可能再置 True
 
     if current_rb_date is not None:
         current_ops = get_current_rebalance_operations(
-            result, current_rb_date, next_rebalance_date=next_rb_date
+            result, current_rb_date, next_rebalance_date=next_rb_date,
+            rebalance_dates=rebalance_dates,
         )
         current_ops, used_live_prices = apply_live_prices_to_operations(
             current_ops, price_df, current_rb_date, as_of_date
         )
+        # 调仓日盘中更新买入价后，对 Current_Operations 再跑一次 MTM
+        if not current_ops.empty:
+            live_co = collect_live_prices_for_mtm(current_ops, price_df, as_of_date)
+            current_ops = apply_mark_to_market_operations_df(
+                current_ops, price_df, as_of_date, live_co
+            )
+            mtm_applied = mtm_applied or bool(
+                "Sell_Price_Source" in current_ops.columns
+                and (
+                    (current_ops["Sell_Price_Source"] == "假设市价(未到期)").any()
+                    or (current_ops["Sell_Price_Source"] == "假设市价(补全)").any()
+                )
+            )
 
     output_path = os.path.join(run_dir, "rebalance_day_report.xlsx")
     write_rebalance_day_report(
-        result, status, current_ops, output_path, used_live_prices=used_live_prices
+        result,
+        status,
+        current_ops,
+        output_path,
+        used_live_prices=used_live_prices,
+        mtm_applied=mtm_applied,
     )
 
     print("\n" + "-" * 64)
