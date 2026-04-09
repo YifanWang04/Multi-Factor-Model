@@ -55,12 +55,30 @@ for _p in (_HERE, _SF_DIR, _MF_DIR, _ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from run_strategy import load_composite_factor, load_return_data as _load_ret_data
+from run_strategy import load_composite_factor as _load_composite_factor_from_run_strategy, load_return_data as _load_ret_data
 from run_detailed_backtest_report import run_detailed_backtest, parse_strategy_param
 from strategy_backtest import _build_groups, _select_rebalance_dates
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
-from data.data_config import DATA_START_OFFSET_DAYS, _price_filename
+from data.data_config import DATA_START_OFFSET_DAYS, _price_filename, COMPOSITE_FACTOR_OUTPUT_DIR, COMPOSITE_FACTOR_FILE as _COMPOSITE_FACTOR_FILE
+from strategy_utils import (
+    # 价格/复合因子加载
+    load_price_data as _load_price_data,
+    _get_price_on_date as _get_price_util,
+    load_composite_factor_with_fallback,
+    load_composite_factor as _load_composite_factor,
+    # 因子后缀
+    build_factor_suffix,
+    composite_factors_path,
+    # 操作过滤
+    filter_weight_lt,
+    # Discord 格式化工具
+    format_metric as _fmt_metric,
+    truncate_text as _trunc_text,
+    # MarkToMarket 重估封装
+    MarkToMarket,
+    patch_period_summary_from_mtm,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +105,10 @@ LIVE_PRICE_TIMEOUT: float = 10.0
 # Pipeline subprocess：超时时间（秒）
 PIPELINE_SUBPROCESS_TIMEOUT: int = 600
 
+# ---------------------------------------------------------------------------
 # 优化器回看天数（用于 _compute_last_rebalance_ops）
-DEFAULT_OPTIMIZATION_LOOKBACK: int = 252
+# ⚠️ 优先从 strategy_config 读取；本地值仅作 fallback，避免魔法数字泄漏
+DEFAULT_OPTIMIZATION_LOOKBACK: int = getattr(cfg, "OPTIMIZATION_LOOKBACK", 252)
 
 # Discord embed：单字段最大字符数
 DISCORD_FIELD_MAX_CHARS: int = 1024
@@ -108,31 +128,17 @@ COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
 
 # ── 手动因子配置区 ─────────────────────────────────────────────────────────────
 # ⚠️ 如需切换因子，直接修改此列表
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
+MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
+# MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
-STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
+# STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
+STRATEGY_PARAM = "max_return_5G_Top1_P10d"  # 3/17
 
 # 选定因子（直接使用手动配置）
 SELECTED_FACTOR_INDICES = MANUALLY_SELECTED_FACTOR_INDICES
 SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
-
-
-def _build_factor_suffix(factor_indices: Optional[list[int]] = None) -> str:
-    """基于因子编号列表生成简短后缀，如 f95-24-64-65-32。"""
-    if factor_indices is None:
-        factor_indices = SELECTED_FACTOR_INDICES
-    return "f" + "-".join(str(int(i)) for i in factor_indices)
-
-
-def _composite_factors_path(base_dir: str) -> str:
-    """返回 composite_factor_reports 目录下带因子后缀的文件路径。"""
-    suffix = _build_factor_suffix()
-    name = f"composite_factors_{suffix}.xlsx"
-    return os.path.join(base_dir, "composite_factor_reports", name)
-
 
 # 解析后供内部使用
 _parsed = parse_strategy_param(STRATEGY_PARAM)
@@ -144,10 +150,16 @@ STRATEGY_PARAMS = {
 }
 
 
-# Discord Webhook URL
-DISCORD_WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/1478641216659652709/TRe7zHYv0x5AbYJMngnJbi1TbjUwXiOhIct-rze0wHFFYgi-Yqt320iGOCY4J1NUbq68"
+# Discord Webhook URL（优先从环境变量读取，硬编码兜底）
+DISCORD_WEBHOOK_URL = os.environ.get(
+    "REBALANCE_DISCORD_WEBHOOK_URL",
+    "https://discord.com/api/webhooks/1478641216659652709/TRe7zHYv0x5AbYJMngnJbi1TbjUwXiOhIct-rze0wHFFYgi-Yqt320iGOCY4J1NUbq68",
 )
+
+
+def _composite_factors_path(base_dir: str) -> str:
+    """返回 composite_factor_reports 目录下带因子后缀的文件路径。"""
+    return composite_factors_path(base_dir, SELECTED_FACTOR_INDICES)
 
 
 def _get_run_dir(run_dir_arg: Optional[str], skip_pipeline: bool) -> str:
@@ -159,28 +171,9 @@ def _get_run_dir(run_dir_arg: Optional[str], skip_pipeline: bool) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 数据加载（本脚本自有实现）
+# 数据加载（来自 strategy_utils）
 # ---------------------------------------------------------------------------
-
-def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.DataFrame:
-    """加载日频价格数据，返回宽表 DataFrame(index=日期, columns=股票代码)。"""
-    if not os.path.isfile(price_file):
-        raise FileNotFoundError(f"价格文件不存在: {price_file}")
-    price_data = pd.read_excel(price_file, sheet_name=None)
-    columns_dict = {}
-    for ticker, df in price_data.items():
-        if "Date" not in df.columns or price_column not in df.columns:
-            continue
-        df = df.copy()
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date")
-        columns_dict[ticker] = df[price_column]
-    if not columns_dict:
-        return pd.DataFrame()
-    price_df = pd.concat(columns_dict, axis=1)
-    price_df = price_df.apply(pd.to_numeric, errors="coerce")
-    price_df.sort_index(inplace=True)
-    return price_df
+# load_price_data: 见 strategy_utils（从 strategy_utils 导入为 _load_price_data）
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +288,8 @@ def get_rebalance_day_status(
     判定调仓日状态。
     rebalance_period: 调仓周期（交易日数）。
     trading_dates: 可选，交易日序列；用于推算未来调仓日。
+    有 trading_dates 时优先用实际交易日序列外推（保持与回测日历一致），
+    无 trading_dates 时用 pd.bdate_range 工作日序列兜底。
     """
     rebalance_dates = sorted(rebalance_dates)
     if not rebalance_dates:
@@ -314,6 +309,7 @@ def get_rebalance_day_status(
 
     for _ in range(REBALANCE_EXTRAPOLATE_MAX_PERIODS):
         if sorted_td:
+            # 优先使用实际交易日序列外推（与回测日历完全一致）
             try:
                 idx = next(i for i, x in enumerate(sorted_td) if x >= current_date)
             except StopIteration:
@@ -322,9 +318,11 @@ def get_rebalance_day_status(
             if next_idx < len(sorted_td):
                 current_date = sorted_td[next_idx]
             else:
+                # sorted_td 已用尽：用 pd.bdate_range 工作日兜底
                 bdate_range = pd.bdate_range(start=current_date, periods=rebalance_period + 1, freq="B")
                 current_date = pd.Timestamp(bdate_range[-1])
         else:
+            # 无 trading_dates：用 pd.bdate_range 工作日序列
             bdate_range = pd.bdate_range(start=current_date, periods=rebalance_period + 1, freq="B")
             current_date = pd.Timestamp(bdate_range[-1])
         extrapolated.append(current_date)
@@ -356,18 +354,80 @@ def get_rebalance_day_status(
     }
 
 
-def _get_price_on_date(
+def _get_price_on_date_local(
     price_df: pd.DataFrame,
     date: pd.Timestamp,
     stocks: list,
 ) -> pd.Series:
-    """获取指定日期各标的收盘价，缺失则前向填充。"""
+    """获取指定日期各标的收盘价，缺失则取最近可交易日。"""
     if date not in price_df.index:
         idx = price_df.index[price_df.index <= date]
         if len(idx) == 0:
             return pd.Series(dtype=float)
         date = idx[-1]
     return price_df.loc[date].reindex(stocks).dropna()
+
+
+def _get_price_on_date(
+    price_df: pd.DataFrame,
+    date: pd.Timestamp,
+    stocks: list,
+) -> pd.Series:
+    """兼容性别名：指向 _get_price_on_date_local。"""
+    return _get_price_on_date_local(price_df, date, stocks)
+
+
+def fetch_live_prices(symbols: list[str]) -> dict[str, dict[str, float]]:
+    """
+    通过 yfinance 获取当日开盘价和现价（带重试机制）。
+    返回 {symbol: {"open": float, "current": float}}，失败的标的不包含在结果中。
+    异常处理：捕获网络错误（HTTPError）、API 属性变化（AttributeError）等，
+    重试失败后打印错误信息（不再静默吞掉）。
+    """
+    import requests as _req  # requests 在文件顶部已导入，但这里局部导入便于类型细分
+
+    result: dict[str, dict[str, float]] = {}
+    delay = LIVE_PRICE_RETRY_DELAY_BASE
+
+    for sym in symbols:
+        success = False
+        last_error = ""
+        for attempt in range(LIVE_PRICE_MAX_RETRIES):
+            err_kind = "未知"
+            try:
+                ticker = yf.Ticker(sym)
+                fi = ticker.fast_info
+                open_p = getattr(fi, "open", None)
+                current_p = getattr(fi, "last_price", None)
+                if open_p is not None and current_p is not None:
+                    result[sym] = {"open": float(open_p), "current": float(current_p)}
+                    success = True
+                    break
+            except _req.HTTPError as e:
+                err_kind = "HTTPError"
+                last_error = f"[{err_kind}] {e}"
+            except AttributeError as e:
+                # yfinance API 字段名变化（如 last_price → price）
+                err_kind = "AttributeError"
+                last_error = f"[{err_kind}] 字段不存在: {e}"
+            except (ValueError, KeyError) as e:
+                err_kind = type(e).__name__
+                last_error = f"[{err_kind}] 解析错误: {e}"
+            except _req.RequestException as e:
+                err_kind = "RequestException"
+                last_error = f"[{err_kind}] 网络错误: {e}"
+            except Exception as e:
+                err_kind = type(e).__name__
+                last_error = f"[{err_kind}] {e}"
+
+            if attempt < LIVE_PRICE_MAX_RETRIES - 1:
+                time.sleep(delay)
+                delay *= LIVE_PRICE_RETRY_DELAY_MULT
+
+        if not success:
+            print(f"  ⚠️ 获取 {sym} 实时价失败（已重试 {LIVE_PRICE_MAX_RETRIES} 次）: {last_error}")
+
+    return result
 
 
 def _mark_price_for_symbol(
@@ -378,6 +438,7 @@ def _mark_price_for_symbol(
 ) -> float:
     """
     取 as_of 及之前最近可用的 Adj Close；若无列或全缺失，则用 live_prices[sym]['current']。
+    供 collect_live_prices_for_mtm 使用。
     """
     live_prices = live_prices or {}
     if symbol not in price_df.columns:
@@ -397,141 +458,36 @@ def _mark_price_for_symbol(
     return float(cur) if cur is not None else float("nan")
 
 
-def apply_mark_to_market_operations_df(
-    ops_df: pd.DataFrame,
+def _get_price_for_symbols_vectorized(
     price_df: pd.DataFrame,
-    as_of_date: pd.Timestamp,
-    live_prices: Optional[dict[str, dict[str, float]]] = None,
-) -> pd.DataFrame:
+    as_of: pd.Timestamp,
+    symbols: list[str],
+) -> dict[str, float]:
     """
-    对「下一调仓日尚未到」或卖出价缺失的持仓，用 As_Of 日收盘价（或实时价）假设为卖出价，
-    重算 Period_Return、Sell_Value、Shares，并标注 Sell_Price_Source。
-    已到期且回测中已有有效 Sell_Price_Close 的行保持不变。
+    向量化获取指定日期各标的收盘价（返回 dict，替代逐行查 price_df）。
+
+    取 as_of 及之前最近可用的 Adj Close；若无列或全缺失则返回 NaN。
     """
-    if ops_df.empty:
-        return ops_df
-    out = ops_df.copy()
-    live_prices = live_prices or {}
-    as_of = pd.Timestamp(as_of_date).normalize()
+    result: dict[str, float] = {}
+    if price_df.empty or not symbols:
+        return result
 
-    if "Next_Rebalance_Date" not in out.columns:
-        return out
+    valid_syms = [s for s in symbols if s in price_df.columns]
+    if not valid_syms:
+        return result
 
-    out["Next_Rebalance_Date"] = pd.to_datetime(out["Next_Rebalance_Date"], errors="coerce")
-    out["Rebalance_Date"] = pd.to_datetime(out["Rebalance_Date"], errors="coerce")
+    # 取 as_of 及之前的最新收盘价
+    available_idx = price_df.index[price_df.index <= as_of]
+    if len(available_idx) == 0:
+        return result
 
-    if "Sell_Price_Source" not in out.columns:
-        out["Sell_Price_Source"] = ""
-
-    for idx, row in out.iterrows():
-        next_rb = row["Next_Rebalance_Date"]
-        if pd.isna(next_rb):
-            continue
-        next_rb = pd.Timestamp(next_rb)
-        sell_was = row.get("Sell_Price_Close", np.nan)
-        sell_was = float(sell_was) if pd.notna(sell_was) else np.nan
-        # 下一调仓日未到，或卖出价仍缺失：按市值计价
-        need_mtm = (next_rb > as_of) or (pd.isna(sell_was))
-        if not need_mtm:
-            if str(out.at[idx, "Sell_Price_Source"] or "").strip() == "":
-                out.at[idx, "Sell_Price_Source"] = "到期收盘"
-            continue
-
-        sym = row["Symbol"]
-        mark = _mark_price_for_symbol(price_df, sym, as_of, live_prices)
-        if pd.isna(mark) or mark <= 0:
-            continue
-
-        bp = pd.to_numeric(row.get("Buy_Price_Close"), errors="coerce")
-        if pd.isna(bp) or bp <= 0:
-            continue
-
-        wt = pd.to_numeric(row.get("Weight"), errors="coerce")
-        buy_value = pd.to_numeric(row.get("Buy_Value"), errors="coerce")
-        if pd.isna(buy_value) and pd.notna(wt):
-            buy_value = float(wt)
-        if pd.isna(buy_value):
-            buy_value = 0.0
-
-        stk_ret = mark / bp - 1.0
-        out.at[idx, "Sell_Price_Close"] = mark
-        out.at[idx, "Period_Return"] = stk_ret
-        out.at[idx, "Sell_Value"] = float(buy_value) * (1.0 + stk_ret)
-        out.at[idx, "Shares"] = float(buy_value) / bp if buy_value > 0 else np.nan
-        out.at[idx, "Sell_Price_Source"] = (
-            "假设市价(未到期)" if next_rb > as_of else "假设市价(补全)"
-        )
-
-    return out
-
-
-def patch_period_summary_mtm(result: dict, as_of_date: pd.Timestamp) -> None:
-    """对尚未到期的持仓期，用 MTM 后的个股收益加权更新 Period_Summary 中的 Period_Return 与 Holding_Days。"""
-    ps = result.get("period_summary_df")
-    ops = result.get("operations_df")
-    if ps is None or ps.empty or ops is None or ops.empty:
-        return
-
-    ps = ps.copy()
-    ops = ops.copy()
-    ops["Rebalance_Date"] = pd.to_datetime(ops["Rebalance_Date"], errors="coerce")
-    ops["Next_Rebalance_Date"] = pd.to_datetime(ops["Next_Rebalance_Date"], errors="coerce")
-    as_of = pd.Timestamp(as_of_date).normalize()
-
-    ps["Rebalance_Date"] = pd.to_datetime(ps["Rebalance_Date"], errors="coerce")
-    ps["Next_Rebalance_Date"] = pd.to_datetime(ps["Next_Rebalance_Date"], errors="coerce")
-
-    for i, prow in ps.iterrows():
-        nr = prow["Next_Rebalance_Date"]
-        if pd.isna(nr):
-            continue
-        nr = pd.Timestamp(nr)
-        if nr <= as_of:
-            continue
-        rb = pd.Timestamp(prow["Rebalance_Date"])
-        sub = ops[(ops["Rebalance_Date"] == rb) & (ops["Next_Rebalance_Date"] == nr)]
-        if sub.empty:
-            continue
-        w = pd.to_numeric(sub["Weight"], errors="coerce").fillna(0.0)
-        r = pd.to_numeric(sub["Period_Return"], errors="coerce")
-        if w.sum() > 0 and r.notna().any():
-            port_ret = float((w * r.fillna(0)).sum() / w.sum())
-            ps.at[i, "Period_Return"] = port_ret
-        ps.at[i, "Holding_Days"] = max(0, (as_of - rb).days)
-
-    result["period_summary_df"] = ps
-
-
-def fetch_live_prices(symbols: list[str]) -> dict[str, dict[str, float]]:
-    """
-    通过 yfinance 获取当日开盘价和现价（带重试机制）。
-    返回 {symbol: {"open": float, "current": float}}，失败的标的不包含在结果中。
-    """
-    result: dict[str, dict[str, float]] = {}
-    delay = LIVE_PRICE_RETRY_DELAY_BASE
-
-    for sym in symbols:
-        success = False
-        last_error = ""
-        for attempt in range(LIVE_PRICE_MAX_RETRIES):
-            try:
-                ticker = yf.Ticker(sym)
-                fi = ticker.fast_info
-                open_p = getattr(fi, "open", None)
-                current_p = getattr(fi, "last_price", None)
-                if open_p is not None and current_p is not None:
-                    result[sym] = {"open": float(open_p), "current": float(current_p)}
-                    success = True
-                    break
-            except Exception as e:  # pragma: no cover
-                last_error = str(e)
-            if attempt < LIVE_PRICE_MAX_RETRIES - 1:
-                time.sleep(delay)
-                delay *= LIVE_PRICE_RETRY_DELAY_MULT
-
-        if not success:
-            print(f"  ⚠️ 获取 {sym} 实时价失败（已重试 {LIVE_PRICE_MAX_RETRIES} 次）: {last_error}")
-
+    prices = price_df.loc[available_idx[-1], valid_syms].dropna()
+    for sym in valid_syms:
+        if sym in prices.index:
+            v = prices[sym]
+            result[sym] = float(v) if pd.notna(v) else float("nan")
+        else:
+            result[sym] = float("nan")
     return result
 
 
@@ -542,33 +498,37 @@ def collect_live_prices_for_mtm(
 ) -> dict[str, dict[str, float]]:
     """
     对需要按市值计价、且本地行情表在 as_of 仍无有效价的标的，批量拉取 yfinance 实时价。
+
+    向量化实现（替代逐行 iterrows）：先用条件过滤，再用 price_df 向量查本地价格。
     """
     if ops_df.empty:
         return {}
+    if "Next_Rebalance_Date" not in ops_df.columns:
+        return {}
+
     as_of = pd.Timestamp(as_of_date).normalize()
-    need_syms: list[str] = []
     ops = ops_df.copy()
-    if "Next_Rebalance_Date" not in ops.columns:
-        return {}
     ops["Next_Rebalance_Date"] = pd.to_datetime(ops["Next_Rebalance_Date"], errors="coerce")
-    for _, row in ops.iterrows():
-        next_rb = row["Next_Rebalance_Date"]
-        if pd.isna(next_rb):
-            continue
-        next_rb = pd.Timestamp(next_rb)
-        sell_was = row.get("Sell_Price_Close", np.nan)
-        sell_was = float(sell_was) if pd.notna(sell_was) else np.nan
-        if not ((next_rb > as_of) or pd.isna(sell_was)):
-            continue
-        sym = row["Symbol"]
-        m = _mark_price_for_symbol(price_df, sym, as_of, {})
-        if pd.isna(m) or m <= 0:
-            need_syms.append(sym)
-    need_syms = list(dict.fromkeys(need_syms))
-    if not need_syms:
+
+    # 过滤条件：Next_Rebalance_Date 非空且（未到期 OR 卖出价缺失）
+    valid_next = ops["Next_Rebalance_Date"].notna()
+    open_period = ops["Next_Rebalance_Date"] > as_of
+    missing_sell = ops["Sell_Price_Close"].isna()
+    need_mask = valid_next & (open_period | missing_sell)
+    need_ops = ops[need_mask]
+
+    if need_ops.empty:
         return {}
-    print(f"  MTM：对 {len(need_syms)} 只标的拉取实时价（本地无 as_of 收盘价）")
-    return fetch_live_prices(need_syms)
+
+    # 向量化查本地价格：取 as_of 及之前的最新收盘价
+    syms = need_ops["Symbol"].unique().tolist()
+    local_prices = _get_price_for_symbols_vectorized(price_df, as_of, syms)
+    missing_syms = [s for s in syms if pd.isna(local_prices.get(s))]
+    if not missing_syms:
+        return {}
+
+    print(f"  MTM：对 {len(missing_syms)} 只标的拉取实时价（本地无 as_of 收盘价）")
+    return fetch_live_prices(missing_syms)
 
 
 def apply_live_prices_to_operations(
@@ -727,6 +687,7 @@ def _compute_last_rebalance_ops(
 ) -> pd.DataFrame:
     """对最后一个调仓日（无 next_rb）计算买入操作明细。next_rb_date 为外推的下一调仓日。"""
     if factor_df is None or ret_df is None or price_df is None or config is None:
+        print(f"  ⚠️ _compute_last_rebalance_ops：缺少必要数据，跳过")
         return pd.DataFrame()
 
     group_num = STRATEGY_PARAMS["group_num"]
@@ -742,12 +703,14 @@ def _compute_last_rebalance_ops(
     else:
         avail = factor_df.index[factor_df.index <= rb_date]
         if len(avail) == 0:
+            print(f"  ⚠️ _compute_last_rebalance_ops：调仓日 {rb_date.date()} 前无可用因子，跳过")
             return pd.DataFrame()
         signal_date = avail[-1]
 
     factor_signal = factor_df.loc[signal_date]
     groups = _build_groups(factor_signal, group_num)
     if target_group not in groups or len(groups[target_group]) == 0:
+        print(f"  ⚠️ _compute_last_rebalance_ops：目标分组 {target_group} 为空，跳过")
         return pd.DataFrame()
     group_stocks = groups[target_group]
 
@@ -765,6 +728,7 @@ def _compute_last_rebalance_ops(
     buy_prices = _get_price_on_date(price_df, rb_date, group_stocks)
     valid_stocks = list(set(weights.index) & set(buy_prices.index))
     if len(valid_stocks) == 0:
+        print(f"  ⚠️ _compute_last_rebalance_ops：权重标的与买入价格标的无交集，跳过")
         return pd.DataFrame()
 
     w = weights.reindex(valid_stocks).fillna(0)
@@ -865,14 +829,8 @@ def compute_extended_metrics(
 # ---------------------------------------------------------------------------
 
 def _filter_weight_lt(ops: pd.DataFrame, threshold: float = WEIGHT_FILTER_THRESHOLD) -> pd.DataFrame:
-    """过滤 Weight 列 < threshold 的行。"""
-    if "Weight" not in ops.columns:
-        return ops
-    before = len(ops)
-    ops = ops[ops["Weight"] >= threshold].copy()
-    if before - len(ops) > 0:
-        print(f"  过滤 Weight < {threshold}，移除 {before - len(ops)} 行")
-    return ops
+    """过滤 Weight 列 < threshold 的行（使用 utils 中的统一实现）。"""
+    return filter_weight_lt(ops, threshold, logger=print)
 
 
 def write_rebalance_day_report(
@@ -948,10 +906,8 @@ def write_rebalance_day_report(
     # 将 NaN 替换为 "-" 以便 Excel 显示更友好
     def _nan_to_dash(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        for col in df.columns:
-            if df[col].dtype in (np.float64, float) and df[col].isna().any():
-                df[col] = df[col].apply(lambda x: "-" if (isinstance(x, float) and np.isnan(x)) else x)
-        return df
+        # 使用 pandas replace 而非逐列 apply，避免类型变化警告
+        return df.replace({np.nan: "-"}, inplace=False)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         pd.DataFrame(status_rows[1:], columns=status_rows[0]).to_excel(
@@ -999,17 +955,13 @@ def write_rebalance_day_report(
 # ---------------------------------------------------------------------------
 
 def _format_metric(value: float, fmt: str, is_pct: bool = False) -> str:
-    """安全格式化指标值，NaN 时返回 '-'。"""
-    if isinstance(value, float) and np.isnan(value):
-        return "-"
-    return fmt.format(value)
+    """安全格式化指标值（使用 utils 中的统一实现，is_pct 参数已废弃）。"""
+    return _fmt_metric(value, fmt)
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
-    """截断文本并加省略号。"""
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - 3] + "..."
+    """截断文本并加省略号（使用 utils 中的统一实现）。"""
+    return _trunc_text(text, max_chars)
 
 
 def _get_holding_period_info(
@@ -1395,6 +1347,9 @@ def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
     """
     将 Pipeline 生成的复合因子同步到标准路径，
     使 run_detailed_backtest_report.py 使用最新数据。
+
+    原子写保护：先写临时文件，再 os.replace() 原子替换，
+    避免写入过程中崩溃导致目标文件损坏。
     """
     import openpyxl
 
@@ -1413,16 +1368,12 @@ def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
         src_df = src_df.apply(pd.to_numeric, errors="coerce")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
 
-        if os.path.isfile(dst):
-            wb = openpyxl.load_workbook(dst)
-            if sheet in wb.sheetnames:
-                del wb[sheet]
-            wb.save(dst)
-            with pd.ExcelWriter(dst, engine="openpyxl", mode="a") as writer:
-                src_df.to_excel(writer, sheet_name=sheet)
-        else:
-            with pd.ExcelWriter(dst, engine="openpyxl") as writer:
-                src_df.to_excel(writer, sheet_name=sheet)
+        # 原子写：先写入临时文件，再 os.replace() 原子替换
+        tmp_path = dst + ".tmp"
+        with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+            src_df.to_excel(writer, sheet_name=sheet)
+
+        os.replace(tmp_path, dst)  # 原子替换
 
         print(f"  [同步完成] 复合因子 {sheet} 已更新至: {dst}")
         print(f"             因子日期范围: {src_df.index[0].date()} ~ {src_df.index[-1].date()}")
@@ -1432,29 +1383,6 @@ def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
 
 # ---------------------------------------------------------------------------
 # 加载复合因子（含回退逻辑）
-# ---------------------------------------------------------------------------
-
-def _load_composite_factor_with_fallback(
-    primary_path: str,
-    sheet: str,
-) -> pd.DataFrame:
-    """加载复合因子，主路径失败时尝试标准路径回退。"""
-    from data.data_config import COMPOSITE_FACTOR_FILE as _std_file
-
-    for path in (primary_path, _std_file):
-        if os.path.isfile(path):
-            try:
-                df = load_composite_factor(path, sheet)
-                if not df.empty:
-                    print(f"  已加载复合因子: {path}（sheet: {sheet}）")
-                    return df
-            except Exception as e:
-                print(f"  加载 {path} 失败: {e}，尝试回退...")
-    raise FileNotFoundError(
-        f"无法加载复合因子（已尝试: {primary_path}, {_std_file}）"
-    )
-
-
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
@@ -1506,10 +1434,10 @@ def main(
         print("\n[阶段 1] 跳过 Pipeline")
 
     print("\n[阶段 2] 加载复合因子与收益率...")
-    factor_df = _load_composite_factor_with_fallback(composite_file, COMPOSITE_FACTOR_SHEET)
+    factor_df = load_composite_factor_with_fallback(composite_file, COMPOSITE_FACTOR_SHEET, _COMPOSITE_FACTOR_FILE)
     ret_df = _load_ret_data(price_file, cfg.RETURN_COLUMN)
     ret_df.sort_index(inplace=True)
-    price_df = load_price_data(price_file, "Adj Close")
+    price_df = _load_price_data(price_file, "Adj Close")
 
     print(f"\n[阶段 3] 运行策略回测（{STRATEGY_PARAM}）...")
     result = run_detailed_backtest(
@@ -1534,17 +1462,14 @@ def main(
 
     as_of_date = pd.Timestamp(datetime.now().date())
 
-    # 未到期持仓按市值计价：假设卖出价 = As_Of 收盘或实时价，重算收益（All_Operations / Period_Summary）
+    # 未到期持仓按市值计价（MTM Round 1）：
+    # 使用 MarkToMarket 统一封装，重算 Period_Return / Sell_Value / Shares，同步 period_summary_df
     mtm_live = collect_live_prices_for_mtm(result["operations_df"], price_df, as_of_date)
-    result["operations_df"] = apply_mark_to_market_operations_df(
-        result["operations_df"], price_df, as_of_date, mtm_live
-    )
-    patch_period_summary_mtm(result, as_of_date)
-    _odf = result["operations_df"]
-    mtm_applied = False
-    if not _odf.empty and "Sell_Price_Source" in _odf.columns:
-        _ss = _odf["Sell_Price_Source"].astype(str)
-        mtm_applied = _ss.isin(["假设市价(未到期)", "假设市价(补全)"]).any()
+    mtm = MarkToMarket(result["operations_df"], price_df, as_of_date)
+    mtm.apply(live_prices=mtm_live)
+    result["operations_df"] = mtm.operations_df
+    patch_period_summary_from_mtm(result, mtm.operations_df, as_of_date)
+    mtm_applied = mtm.was_applied()
 
     rebalance_dates = _select_rebalance_dates(
         factor_df.index,
@@ -1575,19 +1500,15 @@ def main(
         current_ops, used_live_prices = apply_live_prices_to_operations(
             current_ops, price_df, current_rb_date, as_of_date
         )
-        # 调仓日盘中更新买入价后，对 Current_Operations 再跑一次 MTM
+        # 调仓日盘中更新买入价后，对 Current_Operations 再跑一次 MTM（MTM Round 2）
         if not current_ops.empty:
             live_co = collect_live_prices_for_mtm(current_ops, price_df, as_of_date)
-            current_ops = apply_mark_to_market_operations_df(
-                current_ops, price_df, as_of_date, live_co
-            )
-            mtm_applied = mtm_applied or bool(
-                "Sell_Price_Source" in current_ops.columns
-                and (
-                    (current_ops["Sell_Price_Source"] == "假设市价(未到期)").any()
-                    or (current_ops["Sell_Price_Source"] == "假设市价(补全)").any()
-                )
-            )
+            mtm_co = MarkToMarket(current_ops, price_df, as_of_date)
+            mtm_co.apply(live_prices=live_co)
+            current_ops = mtm_co.operations_df
+            # 同步更新 period_summary_df（用 MTM Round 2 的 current_ops）
+            patch_period_summary_from_mtm(result, current_ops, as_of_date)
+            mtm_applied = mtm_applied or mtm_co.was_applied()
 
     output_path = os.path.join(run_dir, "rebalance_day_report.xlsx")
     write_rebalance_day_report(

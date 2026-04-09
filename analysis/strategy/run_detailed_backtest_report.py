@@ -43,11 +43,17 @@ from analysis.strategy.strategy_config import (
 )
 from strategy_backtest import (
     StrategyBacktester,
-    _build_groups,
     _select_rebalance_dates,
 )
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
+from strategy_utils import (
+    load_price_data,
+    _get_price_on_date,
+    _build_groups,
+    parse_strategy_param,
+    strategy_param_from_params as _strategy_param_from_params,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -70,104 +76,6 @@ STRATEGY_PARAM = "max_return_5G_Top1_P10d"
 # 因子索引来自 strategy_config.STRATEGY_SELECTED_FACTOR_INDICES
 # ⚠️ 切换因子后需先运行 run_composite_factor.py 确保 composite_factors.xlsx 存在且含指定 sheet
 
-
-def _safe_tag(s: str) -> str:
-    """将字符串转成适合文件名的 tag（尽量保持可读性）。"""
-    s = str(s)
-    s = s.strip().replace(" ", "")
-    return "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in s)
-
-
-def build_detailed_report_filename(
-    base_name: str,
-    composite_sheet: str,
-    strategy_param: str,
-    data_start_offset_days: int = 0,
-) -> str:
-    """
-    在文件名里追加：复合因子方法（sheet）+ 策略参数 + 数据起始日偏移。
-    例：strategy_detailed_backtest_report__ic_m3_N20__max_return_5G_Top1_P10d__dataoffset0.xlsx
-    """
-    root, ext = os.path.splitext(base_name)
-    ext = ext or ".xlsx"
-    sheet_tag = _safe_tag(composite_sheet)
-    strat_tag = _safe_tag(strategy_param)
-    offset_tag = f"dataoffset{int(data_start_offset_days)}"
-    return f"{root}__{sheet_tag}__{strat_tag}__{offset_tag}{ext}"
-
-
-def parse_strategy_param(param: str) -> tuple:
-    """
-    解析策略参数字符串，格式：{weight_method}_{N}G_Top{R}_P{D}d
-    例：max_return_5G_Top1_P10d -> (weight_method, group_num, target_rank, rebalance_days)
-
-    Returns
-    -------
-    tuple : (weight_method, group_num, target_rank, rebalance_days)
-    """
-    m = re.match(r"^(.+)_(\d+)G_Top(\d+)_P(\d+)d$", param.strip())
-    if not m:
-        raise ValueError(
-            f"策略参数格式错误: '{param}'，应为 {{weight_method}}_{{N}}G_Top{{R}}_P{{D}}d，"
-            "例：max_return_5G_Top1_P10d"
-        )
-    weight_method = m.group(1)
-    group_num = int(m.group(2))
-    target_rank = int(m.group(3))
-    rebalance_days = int(m.group(4))
-    return weight_method, group_num, target_rank, rebalance_days
-
-
-def _strategy_param_from_params(params: dict) -> str:
-    """从 params 字典还原策略参数字符串。"""
-    w = params.get("weight_method", "")
-    g = params.get("group_num", "")
-    r = params.get("target_rank", "")
-    p = params.get("rebalance_period", "")
-    if w != "" and g != "" and r != "" and p != "":
-        return f"{w}_{g}G_Top{r}_P{p}d"
-    return ""
-
-
-# ---------------------------------------------------------------------------
-# 数据加载
-# ---------------------------------------------------------------------------
-
-def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.DataFrame:
-    """
-    加载日频价格数据，返回宽表 DataFrame(index=日期, columns=股票代码)。
-    使用 pd.concat 一次性构建，避免 frame.insert 循环导致的 fragmentation 告警。
-    """
-    if not os.path.isfile(price_file):
-        raise FileNotFoundError(f"价格文件不存在: {price_file}")
-
-    price_data = pd.read_excel(price_file, sheet_name=None)
-    columns_dict = {}
-    for ticker, df in price_data.items():
-        if "Date" not in df.columns or price_column not in df.columns:
-            continue
-        df = df.copy()
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date")
-        columns_dict[ticker] = df[price_column]
-    if not columns_dict:
-        return pd.DataFrame()
-    price_df = pd.concat(columns_dict, axis=1)
-    price_df = price_df.apply(pd.to_numeric, errors="coerce")
-    price_df.sort_index(inplace=True)
-    return price_df
-
-
-def _get_price_on_date(price_df: pd.DataFrame, date: pd.Timestamp, stocks: list) -> pd.Series:
-    """获取指定日期各标的收盘价，缺失则前向填充。"""
-    if date not in price_df.index:
-        # 取不超过该日期的最近一天
-        idx = price_df.index[price_df.index <= date]
-        if len(idx) == 0:
-            return pd.Series(dtype=float)
-        date = idx[-1]
-    row = price_df.loc[date]
-    return row.reindex(stocks).dropna()
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +367,31 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             df_period.to_excel(writer, sheet_name="Period_Summary", index=False)
 
     print(f"Report written: {output_path}")
+
+
+def _safe_tag(s: str) -> str:
+    """将字符串转成适合文件名的 tag（尽量保持可读性）。"""
+    s = str(s)
+    s = s.strip().replace(" ", "")
+    return "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in s)
+
+
+def build_detailed_report_filename(
+    base_name: str,
+    composite_sheet: str,
+    strategy_param: str,
+    data_start_offset_days: int = 0,
+) -> str:
+    """
+    在文件名里追加：复合因子方法（sheet）+ 策略参数 + 数据起始日偏移。
+    例：strategy_detailed_backtest_report__ic_m3_N20__max_return_5G_Top1_P10d__dataoffset0.xlsx
+    """
+    root, ext = os.path.splitext(base_name)
+    ext = ext or ".xlsx"
+    sheet_tag = _safe_tag(composite_sheet)
+    strat_tag = _safe_tag(strategy_param)
+    offset_tag = f"dataoffset{int(data_start_offset_days)}"
+    return f"{root}__{sheet_tag}__{strat_tag}__{offset_tag}{ext}"
 
 
 # ---------------------------------------------------------------------------

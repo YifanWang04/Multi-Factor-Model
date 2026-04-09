@@ -59,6 +59,7 @@ qqq/
 │   ├── strategy/           # Strategy construction and grid backtesting
 │   │   ├── strategy_config.py              # Strategy config
 │   │   ├── strategy_backtest.py            # Strategy backtest engine
+│   │   ├── strategy_utils.py               # 共享工具（价格/因子加载、MTM、Discord 格式化等）
 │   │   ├── strategy_report.py              # Strategy Excel report generation
 │   │   ├── strategy_metrics.py              # Strategy performance metrics
 │   │   ├── strategy_review_config.py        # Strategy review config
@@ -297,7 +298,9 @@ python analysis/strategy/run_strategy_review.py
 
 ---
 
-18. **pull_yhfinance_Data.py close price Backfill logic:** `_backfill_close_fast_info` only backfills missing Close/Adj Close for "yesterday" (most recent closed trading day). The decision is driven by `_is_target_date_session_closed` — it uses a "target_date + 1 day 00:00 UTC" cutoff to confirm the historical bar is closed, instead of checking the current wall-clock time. **Pre-fix bug:** original code used `_is_market_closed_now()` (UTC 21:00 threshold), causing backfill to be skipped during intraday runs (e.g., UTC 06:35) even for yesterday's already-closed bars with missing Close. **Post-fix behavior:**
+19. **run_rebalance_day mark-to-market (MTM):** For any holding whose Next_Rebalance_Date is still in the future (or Sell_Price_Close is missing), the report fills assumed Sell_Price_Close using the As_Of date's Adj Close (last available before As_Of) or yfinance live price when the bar is missing. Period_Return, Sell_Value, and Shares are recomputed; see column Sell_Price_Source (假设市价(未到期) vs 到期收盘). Period_Summary for open periods is updated from MTM line items. Completed periods (next rebalance less than or equal to As_Of with a backtest sell price) keep historical exit prices. MTM runs in two rounds - round 2 (for current_ops after live price update) also patches period_summary_df via patch_period_summary_from_mtm.
+20. **Shared utility module (strategy_utils.py):** Centralized reusable functions - load_price_data, load_composite_factor, parse_strategy_param, build_factor_suffix, filter_weight_lt, MarkToMarket class, patch_period_summary_from_mtm. Avoids code duplication across run_rebalance_day.py, run_strategy.py, run_detailed_backtest_report.py, etc.
+21. **collect_live_prices_for_mtm vectorized:** No longer uses iterrows; uses vectorized masking to filter open-period rows, then _get_price_for_symbols_vectorized for bulk local price lookup. Only symbols with missing local prices trigger yfinance API calls, reducing redundant network requests. The decision is driven by `_is_target_date_session_closed` — it uses a "target_date + 1 day 00:00 UTC" cutoff to confirm the historical bar is closed, instead of checking the current wall-clock time. **Pre-fix bug:** original code used `_is_market_closed_now()` (UTC 21:00 threshold), causing backfill to be skipped during intraday runs (e.g., UTC 06:35) even for yesterday's already-closed bars with missing Close. **Post-fix behavior:**
     - Yesterday closed + yfinance returned OHL but missing Close → triggers backfill
     - Yesterday closed + yfinance already has complete Close → skips
     - Yesterday still in-session (UTC 04:00-21:00 intraday) → skips (safety guard)

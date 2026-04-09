@@ -69,27 +69,7 @@ def build_strategy_report_filename(base_name: str, composite_sheet: str, data_st
 # 数据加载
 # ---------------------------------------------------------------------------
 
-def load_composite_factor(file_path: str, sheet_name: str) -> pd.DataFrame:
-    """
-    从 composite_factors.xlsx 加载指定 sheet 的复合因子数据。
-    index = 调仓日（DatetimeIndex），columns = 股票代码。
-    """
-    if not os.path.isfile(file_path):
-        raise FileNotFoundError(f"复合因子文件不存在: {file_path}")
-
-    xl = pd.ExcelFile(file_path)
-    available = xl.sheet_names
-    if sheet_name not in available:
-        raise ValueError(
-            f"Sheet '{sheet_name}' 不存在于 {os.path.basename(file_path)}。\n"
-            f"可用 sheet: {available}"
-        )
-
-    df = pd.read_excel(file_path, sheet_name=sheet_name, index_col=0)
-    df.index = pd.to_datetime(df.index)
-    df = df.apply(pd.to_numeric, errors="coerce")
-    df.sort_index(inplace=True)
-    return df
+from strategy_utils import load_composite_factor
 
 
 # ---------------------------------------------------------------------------

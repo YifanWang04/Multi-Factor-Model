@@ -33,31 +33,14 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+# 从共享工具模块导入（保持 _build_groups 独立定义以兼容已有调用）
+from strategy_utils import _build_groups
 from portfolio_optimizer import compute_weights
 
 
 # ---------------------------------------------------------------------------
 # 分组工具（独立函数，与 GrouperEnhanced 逻辑一致）
 # ---------------------------------------------------------------------------
-
-def _build_groups(factor_signal: pd.Series, group_num: int) -> dict:
-    """
-    按因子值升序排序后均分为 group_num 组；最后一组包含余数。
-    返回 {group_id(1-based): [stocks]}，group_num = 最高因子值组。
-    """
-    f = factor_signal.dropna().sort_values(ascending=True)
-    n = len(f)
-    if n < group_num:
-        return {}
-
-    group_size = n // group_num
-    groups = {}
-    for i in range(group_num):
-        start = i * group_size
-        end = n if i == group_num - 1 else (i + 1) * group_size
-        groups[i + 1] = f.index[start:end].tolist()
-    return groups
-
 
 def _select_rebalance_dates(
     factor_index: pd.DatetimeIndex,
