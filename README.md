@@ -195,6 +195,7 @@ python analysis/strategy/run_strategy_review.py
 10. **Data loading performance:** `load_price_data`, `load_return_data` use `pd.concat` once to avoid fragmentation warnings
 11. **After changing DATA_START_OFFSET_DAYS, re-run pipeline:** Must re-run pull → build_factors → data_process → run_composite_factor
 12. **run_strategy_review：** 完全自包含，无需先运行 `run_composite_factor`；因子由 composite_config 解析（见上文"因子选择机制"），配置 `MANUALLY_SELECTED_FACTOR_INDICES` 后直接运行
+13. **BKNG 拆股导致历史价格不一致：** yfinance 对已发生拆股的股票，每次拉取时的历史复权基准可能不同（如 BKNG 2026-04-06 发生1:25拆股，4月1日和4月8日两次拉取的历史价格可能相差精确的25倍）。这会导致 `factor_raw` → `factor_processed` 阶段的 Z-score 标准化截面被 BKNG 主导拉偏，进而使 IC 复合因子、持仓组合和回测结果在两次独立运行间产生差异。解决方法：固定使用同一版价格数据文件，或在 `data_config.py` 中将 `DATA_START_OFFSET_DAYS` 设为固定值确保两次运行引用同一 offset 子目录。
 
 ---
 
