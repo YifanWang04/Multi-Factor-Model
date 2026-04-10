@@ -292,17 +292,23 @@ def apply_live_prices_to_operations(
     if "Today_Open" not in ops.columns:
         ops.insert(ops.columns.get_loc("Symbol") + 1, "Today_Open", np.nan)
 
-    for idx, row in ops.iterrows():
-        sym = row["Symbol"]
-        if sym not in live_prices:
-            continue
-        o, c = live_prices[sym]["open"], live_prices[sym]["current"]
-        ops.at[idx, "Today_Open"] = o
-        if row["Action"] == "Buy":
-            ops.at[idx, "Buy_Price_Close"] = c
-            bv = row.get("Buy_Value", np.nan)
-            if not (np.isnan(bv) if isinstance(bv, float) else False) and bv is not None and c > 0:
-                ops.at[idx, "Shares"] = float(bv) / c
+    # 向量化实现：用 symbol 列直接索引 live_prices，避免逐行 iterrows
+    sym_to_price = {sym: live_prices[sym] for sym in live_prices}
+    mask_syms = ops["Symbol"].isin(sym_to_price.keys())
+
+    if mask_syms.any():
+        ops.loc[mask_syms, "Today_Open"] = ops.loc[mask_syms, "Symbol"].map(
+            lambda s: sym_to_price[s]["open"]
+        )
+        buy_mask = mask_syms & (ops["Action"] == "Buy")
+        if buy_mask.any():
+            ops.loc[buy_mask, "Buy_Price_Close"] = ops.loc[buy_mask, "Symbol"].map(
+                lambda s: sym_to_price[s]["current"]
+            )
+            bv = ops.loc[buy_mask, "Buy_Value"]
+            bp = ops.loc[buy_mask, "Buy_Price_Close"]
+            valid = bv.notna() & (bv != 0) & (bp > 0)
+            ops.loc[buy_mask & valid, "Shares"] = bv.loc[valid] / bp.loc[valid]
 
     return ops, True
 

@@ -37,7 +37,9 @@ def mad_winsorize(df, n=3):
         upper = median + bound
         lower = median - bound
         return row.clip(lower=lower, upper=upper)
-    return df.apply(winsorize_row, axis=1)
+    result = df.apply(winsorize_row, axis=1)
+    # 统一将 inf 替换为 nan，避免后续统计计算异常
+    return result.replace([np.inf, -np.inf], np.nan)
 
 def zscore_standardize(df):
     """
@@ -48,7 +50,8 @@ def zscore_standardize(df):
         if std == 0 or np.isnan(std):
             return row * 0.0
         return (row - row.mean()) / std
-    return df.apply(zscore_row, axis=1)
+    result = df.apply(zscore_row, axis=1)
+    return result.replace([np.inf, -np.inf], np.nan)
 
 def process_factor_df(df):
     """

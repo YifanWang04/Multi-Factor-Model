@@ -85,6 +85,10 @@ class MarkToMarket:
         执行市值重估。传入 live_prices: {symbol: {"current": float}}，
         用于 price_df 在 as_of 无有效价时的实时回退。
         返回 self（支持链式调用）。
+
+        向量化实现（替代逐行 iterrows）：
+          Phase 1: 批量获取所有标的的 mark 价格（本地向量查 + yfinance 补缺）
+          Phase 2: 向量条件过滤 + 批量赋值
         """
         if self._ops_df.empty:
             return self
@@ -92,51 +96,70 @@ class MarkToMarket:
         if live_prices:
             self._live_prices = live_prices
 
-        for idx, row in self._ops_df.iterrows():
-            next_rb = row["Next_Rebalance_Date"]
-            if pd.isna(next_rb):
-                continue
-            next_rb = pd.Timestamp(next_rb)
+        # ── Phase 1: 批量获取所有标的的 mark 价格 ──────────────────────
+        syms = self._ops_df["Symbol"].unique().tolist()
+        mark_prices = {
+            sym: self._mark_price_for_symbol(sym)
+            for sym in syms
+        }
 
-            sell_was_raw = row.get("Sell_Price_Close", np.nan)
-            sell_was = float(sell_was_raw) if pd.notna(sell_was_raw) else np.nan
+        # ── Phase 2: 向量条件过滤 + 批量赋值 ───────────────────────────
+        ops = self._ops_df
+        next_rb_col = ops["Next_Rebalance_Date"]
+        nr_ts = pd.to_datetime(next_rb_col, errors="coerce")
+        sell_was = pd.to_numeric(ops["Sell_Price_Close"], errors="coerce")
+        need_mtm = nr_ts.notna() & (
+            (nr_ts > self._as_of) | sell_was.isna()
+        )
 
-            # 条件：下一调仓日未到，或卖出价仍缺失
-            need_mtm = (next_rb > self._as_of) or (pd.isna(sell_was))
-            if not need_mtm:
-                if str(self._ops_df.at[idx, self._source_col] or "").strip() == "":
-                    self._ops_df.at[idx, self._source_col] = self.SOURCE_MATURED
-                continue
+        if not need_mtm.any():
+            # 全部到期且有卖出价：仅补填 SOURCE_MATURED
+            empty_src = ops[self._source_col].replace("", np.nan).isna()
+            if empty_src.any():
+                ops.loc[empty_src, self._source_col] = self.SOURCE_MATURED
+            return self
 
-            mark = self._mark_price_for_symbol(row["Symbol"])
-            if pd.isna(mark) or mark <= 0:
-                continue
+        target = ops[need_mtm].copy()
+        sym_col = target["Symbol"]
+        marks = sym_col.map(mark_prices)          # Series: idx → mark_price
+        valid_mark = marks.notna() & (marks > 0)
 
-            bp_raw = pd.to_numeric(row.get("Buy_Price_Close"), errors="coerce")
-            bp = float(bp_raw) if pd.notna(bp_raw) else np.nan
-            if pd.isna(bp) or bp <= 0:
-                continue
+        bp = pd.to_numeric(target["Buy_Price_Close"], errors="coerce")
+        valid_bp = bp.notna() & (bp > 0)
 
-            wt = pd.to_numeric(row.get("Weight"), errors="coerce")
-            buy_value_raw = pd.to_numeric(row.get("Buy_Value"), errors="coerce")
-            if pd.isna(buy_value_raw) and pd.notna(wt):
-                buy_value = float(wt)  # 虚拟资金基准：组合规模=1
-            elif pd.notna(buy_value_raw):
-                buy_value = float(buy_value_raw)
-            else:
-                continue  # Buy_Value 与 Weight 均为 NaN，跳过
+        wt = pd.to_numeric(target["Weight"], errors="coerce")
+        buy_value_raw = pd.to_numeric(target["Buy_Value"], errors="coerce")
+        buy_value = buy_value_raw.copy()
+        use_weight = buy_value_raw.isna() & wt.notna()
+        buy_value.loc[use_weight] = wt.loc[use_weight]
 
-            stk_ret = mark / bp - 1.0
-            self._ops_df.at[idx, "Sell_Price_Close"] = mark
-            self._ops_df.at[idx, "Period_Return"] = stk_ret
-            self._ops_df.at[idx, "Sell_Value"] = buy_value * (1.0 + stk_ret)
-            self._ops_df.at[idx, "Shares"] = (
-                buy_value / bp if buy_value > 0 else np.nan
+        valid_buy = buy_value.notna() & (buy_value > 0)
+        final_mask = valid_mark & valid_bp & valid_buy
+
+        idx_final = target.index[final_mask]
+
+        if len(idx_final) > 0:
+            bp_v = bp.loc[idx_final]
+            mk_v = marks.loc[idx_final]
+            bv_v = buy_value.loc[idx_final]
+            nr_v = nr_ts.loc[idx_final]
+
+            ops.loc[idx_final, "Sell_Price_Close"] = mk_v
+            ops.loc[idx_final, "Period_Return"] = mk_v / bp_v - 1.0
+            ops.loc[idx_final, "Sell_Value"] = bv_v * (1.0 + (mk_v / bp_v - 1.0))
+            ops.loc[idx_final, "Shares"] = bv_v / bp_v
+            ops.loc[idx_final, self._source_col] = np.where(
+                nr_v > self._as_of,
+                self.SOURCE_OPEN_PERIOD,
+                self.SOURCE_FILL_MISSING,
             )
-            self._ops_df.at[idx, self._source_col] = (
-                self.SOURCE_OPEN_PERIOD if next_rb > self._as_of
-                else self.SOURCE_FILL_MISSING
-            )
+
+        # 补填不需要 MTM 但无来源标注的行
+        already_filled = ops[self._source_col].replace("", np.nan).notna()
+        still_empty = ops[self._source_col].replace("", np.nan).isna()
+        has_sell_price = sell_was.notna()
+        matured_mask = need_mtm & ~need_mtm & still_empty & has_sell_price
+        ops.loc[still_empty & ~need_mtm, self._source_col] = self.SOURCE_MATURED
 
         return self
 
@@ -157,6 +180,8 @@ def patch_period_summary_from_mtm(
     """
     用 MTM 后的 ops 数据同步更新 result["period_summary_df"]。
     对尚未到期的持仓期，用 MTM 后的个股收益加权更新 Period_Return 与 Holding_Days。
+
+    向量化实现（替代逐行 iterrows）。
     """
     ps = result.get("period_summary_df")
     if ps is None or ps.empty:
@@ -171,27 +196,42 @@ def patch_period_summary_from_mtm(
     mtm_ops["Rebalance_Date"] = pd.to_datetime(mtm_ops["Rebalance_Date"], errors="coerce")
     mtm_ops["Next_Rebalance_Date"] = pd.to_datetime(mtm_ops["Next_Rebalance_Date"], errors="coerce")
 
-    for i, prow in ps.iterrows():
-        nr = prow["Next_Rebalance_Date"]
-        if pd.isna(nr):
-            continue
-        nr = pd.Timestamp(nr)
-        if nr <= as_of:
-            continue
+    # 筛选未到期的持仓期
+    nr_col = ps["Next_Rebalance_Date"]
+    future = nr_col.notna() & (nr_col > as_of)
+    if not future.any():
+        result["period_summary_df"] = ps
+        return
 
-        rb = pd.Timestamp(prow["Rebalance_Date"])
+    future_idx = ps.index[future]
+    rb_col = ps["Rebalance_Date"]
+
+    w = pd.to_numeric(mtm_ops["Weight"], errors="coerce").fillna(0.0)
+    r = pd.to_numeric(mtm_ops["Period_Return"], errors="coerce")
+
+    new_rets = []
+    new_days = []
+    for i in future_idx:
+        rb = pd.Timestamp(rb_col[i])
+        nr = pd.Timestamp(nr_col[i])
         sub = mtm_ops[
             (mtm_ops["Rebalance_Date"] == rb)
             & (mtm_ops["Next_Rebalance_Date"] == nr)
         ]
         if sub.empty:
+            new_rets.append(np.nan)
+            new_days.append(ps.at[i, "Holding_Days"])
             continue
+        sub_w = w.loc[sub.index]
+        sub_r = r.loc[sub.index]
+        ws = sub_w.sum()
+        if ws > 0 and sub_r.notna().any():
+            port_ret = float((sub_w * sub_r.fillna(0)).sum() / ws)
+        else:
+            port_ret = np.nan
+        new_rets.append(port_ret)
+        new_days.append(max(0, (as_of - rb).days))
 
-        w = pd.to_numeric(sub["Weight"], errors="coerce").fillna(0.0)
-        r = pd.to_numeric(sub["Period_Return"], errors="coerce")
-        if w.sum() > 0 and r.notna().any():
-            port_ret = float((w * r.fillna(0)).sum() / w.sum())
-            ps.at[i, "Period_Return"] = port_ret
-        ps.at[i, "Holding_Days"] = max(0, (as_of - rb).days)
-
+    ps.loc[future_idx, "Period_Return"] = new_rets
+    ps.loc[future_idx, "Holding_Days"] = new_days
     result["period_summary_df"] = ps

@@ -223,7 +223,7 @@ class StrategyBacktester:
                 max_weight=getattr(cfg, "MAX_WEIGHT", 0.4),
             )
 
-            # ── 持仓期收益 ─────────────────────────────────────────────
+            # ── 持仓期收益（向量化替代 iterrows）──────────────────────────
             # 持仓区间：(rb_date, next_rb]，跳过 rb_date 当日（T+1 时序）
             holding_mask = (
                 (self.ret_df.index > rb_date) & (self.ret_df.index <= next_rb)
@@ -233,28 +233,29 @@ class StrategyBacktester:
             if len(period_df) == 0:
                 continue
 
-            period_daily: list[float] = []
+            # 取本组合的权重索引（仅目标分组内的标的）
+            port_stocks = weights.index
+            # period_df 中只有 port_stocks 列有实际意义
+            ret_port = period_df[port_stocks].copy()
+            # 重索引权重（不在组合内的标的 → NaN，乘以 0 掩码后不影响结果）
+            w_all = weights.reindex(ret_port.columns).fillna(0.0)
 
-            for j, (date, row) in enumerate(period_df.iterrows()):
-                valid = weights.index[
-                    weights.index.isin(row.dropna().index)
-                ]
-                if len(valid) == 0:
-                    port_ret = 0.0
-                else:
-                    w = weights[valid]
-                    w = w / w.sum()
-                    port_ret = float((row[valid] * w).sum())
+            # 有效掩码：权重非零 × 收益非空
+            valid_mask = (w_all != 0) & ret_port.notna()
+            # 按日期归一化权重（每日仅对当日有效的股票归一）
+            row_sum = valid_mask.mul(w_all).sum(axis=1)  # Series: date → sum(w * valid)
+            w_norm = valid_mask.mul(w_all).div(row_sum, axis=0)  # DataFrame: date × stock
 
-                # 交易成本：持仓期首日扣除单边买入成本
-                # 注：卖出成本在下一调仓期首日扣除，形成完整的往返成本
-                # 当前简化处理：首日扣除往返成本（买入+卖出各一次）
-                if j == 0:
-                    port_ret -= 2 * getattr(cfg, "TRANSACTION_COST", 0.001)
+            port_ret_all = (w_norm * ret_port).sum(axis=1)  # Series: date → ret
+            port_ret_all = port_ret_all.fillna(0.0)
 
-                period_daily.append(port_ret)
-                all_daily_rets.append(port_ret)
-                all_dates.append(date)
+            period_daily = port_ret_all.to_list()
+
+            # 交易成本：持仓期首日扣除往返成本（买入+卖出各一次）
+            period_daily[0] -= 2 * getattr(cfg, "TRANSACTION_COST", 0.001)
+
+            all_daily_rets.extend(period_daily)
+            all_dates.extend(period_daily.index.tolist())
 
             # 期间总收益率（用于开仓统计）
             if period_daily:
