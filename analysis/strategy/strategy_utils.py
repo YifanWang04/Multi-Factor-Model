@@ -152,11 +152,13 @@ def _build_groups(factor_signal: pd.Series, group_num: int) -> dict:
 # 因子后缀
 # ---------------------------------------------------------------------------
 
-def build_factor_suffix(factor_indices: list[int] | None = None) -> str:
+def build_factor_suffix(factor_indices: list[int] | None = None, default_indices: list[int] | None = None) -> str:
     """
     基于因子编号列表生成简短后缀，如 f95-24-64-65-32。
-    未提供时返回空字符串（供调用方做 fallback）。
+    未提供时优先使用 default_indices；两者均无则返回空字符串。
     """
+    if factor_indices is None:
+        factor_indices = default_indices
     if factor_indices is None:
         return ""
     nums = [str(int(i)) for i in factor_indices]
@@ -243,6 +245,13 @@ def truncate_text(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 3] + "..."
+
+
+def safe_tag(s: str) -> str:
+    """将字符串转成适合文件名的 tag（尽量保持可读性）。"""
+    s = str(s)
+    s = s.strip().replace(" ", "")
+    return "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in s)
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +364,7 @@ class MarkToMarket:
             elif pd.notna(buy_value_raw):
                 buy_value = float(buy_value_raw)
             else:
-                buy_value = 0.0
+                continue  # Buy_Value 与 Weight 均为 NaN，跳过该行
 
             stk_ret = mark / bp - 1.0
             self._ops_df.at[idx, "Sell_Price_Close"] = mark

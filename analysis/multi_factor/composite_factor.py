@@ -91,20 +91,20 @@ def _weighted_composite(factor_dict, weights_series_dict, dates):
     names = list(factor_dict.keys())
     all_dates = dates
     result = pd.DataFrame(index=all_dates, columns=next(iter(factor_dict.values())).columns, dtype=float)
-    result[:] = 0.0
+    result.iloc[:, :] = 0.0
 
-    for d in all_dates:
+    for _date in all_dates:
         row = pd.Series(0.0, index=result.columns)
         total_w = 0.0
         for name in names:
             w_val = weights_series_dict[name]
-            w = w_val.get(d, np.nan) if isinstance(w_val, pd.Series) else w_val
+            w = w_val.get(_date, np.nan) if isinstance(w_val, pd.Series) else w_val
             if np.isnan(w):
                 continue
-            frow = factor_dict[name].loc[d] if d in factor_dict[name].index else pd.Series(dtype=float)
+            frow = factor_dict[name].loc[_date] if _date in factor_dict[name].index else pd.Series(dtype=float)
             row = row.add(frow * w, fill_value=0)
             total_w += abs(w)
-        result.loc[d] = row / total_w if total_w != 0 else row
+        result.loc[_date] = row / total_w if total_w != 0 else row
     return result.apply(pd.to_numeric, errors="coerce")
 
 
@@ -120,18 +120,23 @@ def _composite_from_weight_df(factor_dict, weight_df, dates):
     stocks = next(iter(factor_dict.values())).columns
     result = pd.DataFrame(np.nan, index=dates, columns=stocks)
     names = list(factor_dict.keys())
-    for d in dates:
-        if d not in weight_df.index:
+    for _date in dates:
+        if _date not in weight_df.index:
             continue
-        ws = weight_df.loc[d]
+        ws = weight_df.loc[_date]
         row = pd.Series(0.0, index=stocks)
+        total_w = 0.0
         for name in names:
             w = ws.get(name, np.nan)
             if np.isnan(w):
                 continue
-            frow = factor_dict[name].loc[d] if d in factor_dict[name].index else pd.Series(dtype=float)
+            total_w += abs(w)
+            frow = factor_dict[name].loc[_date] if _date in factor_dict[name].index else pd.Series(dtype=float)
             row = row.add(frow.reindex(stocks) * w, fill_value=0)
-        result.loc[d] = row
+        # total_w == 0 表示当期无任何有效权重，跳过该行（保持 NaN）
+        if total_w == 0:
+            continue
+        result.loc[_date] = row
     return result.apply(pd.to_numeric, errors="coerce")
 
 

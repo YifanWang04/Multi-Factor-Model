@@ -21,7 +21,6 @@
 """
 
 import os
-import re
 import sys
 
 import numpy as np
@@ -36,7 +35,15 @@ for _p in [_HERE, _SF_DIR, _ROOT]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from run_strategy import load_composite_factor, load_return_data
+from run_strategy import load_return_data
+from strategy_utils import (
+    load_price_data,
+    load_composite_factor,
+    _get_price_on_date,
+    _build_groups,
+    parse_strategy_param,
+    strategy_param_from_params as _strategy_param_from_params,
+)
 from analysis.strategy.strategy_config import (
     STRATEGY_SELECTED_FACTOR_INDICES,
     COMPOSITE_FACTOR_FILE,
@@ -47,13 +54,6 @@ from strategy_backtest import (
 )
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
-from strategy_utils import (
-    load_price_data,
-    _get_price_on_date,
-    _build_groups,
-    parse_strategy_param,
-    strategy_param_from_params as _strategy_param_from_params,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +63,9 @@ from strategy_utils import (
 PROJECT_ROOT = r"D:\qqq"
 from data.data_config import PRICE_FILE, DATA_START_OFFSET_DAYS, STRATEGY_REPORTS_DIR
 COMPOSITE_FACTOR_SHEET = "ic_m3_N20"  # beta_m3 方法，N=10 窗口
+
+# Period_Summary 中标注的股票权重展示阈值（仅标注 weight > 此值的标的）
+PERIOD_SUMMARY_DISPLAY_WEIGHT_THRESHOLD: float = 0.01
 
 def _get_data_offset():
     return DATA_START_OFFSET_DAYS
@@ -257,11 +260,11 @@ def run_detailed_backtest(
                 "Factor_Value": factor_val,
             })
 
-        # Symbols: 仅保留 weight > 0.01 的股票，并标注权重（格式：SYM:weight%）
+        # Symbols: 仅保留 weight > PERCENT_THRESHOLD 的股票，并标注权重（格式：SYM:weight%）
         symbols_with_weight = [
             f"{sym}:{w[sym] * 100:.1f}%"
             for sym in sorted(common)
-            if w[sym] > 0.01
+            if w[sym] > PERIOD_SUMMARY_DISPLAY_WEIGHT_THRESHOLD
         ]
         symbols_str = ", ".join(symbols_with_weight)
 

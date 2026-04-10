@@ -128,13 +128,13 @@ COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
 
 # ── 手动因子配置区 ─────────────────────────────────────────────────────────────
 # ⚠️ 如需切换因子，直接修改此列表
-MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
+# MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
+MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
-# STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
-STRATEGY_PARAM = "max_return_5G_Top1_P10d"  # 3/17
+STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
+# STRATEGY_PARAM = "max_return_5G_Top1_P10d"  # 3/17
 
 # 选定因子（直接使用手动配置）
 SELECTED_FACTOR_INDICES = MANUALLY_SELECTED_FACTOR_INDICES
@@ -1506,9 +1506,9 @@ def main(
             mtm_co = MarkToMarket(current_ops, price_df, as_of_date)
             mtm_co.apply(live_prices=live_co)
             current_ops = mtm_co.operations_df
-            # 同步更新 period_summary_df（用 MTM Round 2 的 current_ops）
-            patch_period_summary_from_mtm(result, current_ops, as_of_date)
-            mtm_applied = mtm_applied or mtm_co.was_applied()
+        # 同步更新 period_summary_df（用全量 MTM 结果，覆盖全部持仓期）
+        patch_period_summary_from_mtm(result, mtm.operations_df, as_of_date)
+        mtm_applied = mtm_applied or mtm_co.was_applied()
 
     output_path = os.path.join(run_dir, "rebalance_day_report.xlsx")
     write_rebalance_day_report(

@@ -9,7 +9,16 @@ import os
 import sys
 import numpy as np
 import pandas as pd
-from types import SimpleNamespace
+from dataclasses import dataclass
+
+
+@dataclass
+class CompositeBacktestConfig:
+    """复合因子回测配置（替代 SimpleNamespace，更清晰且 IDE 友好）。"""
+    GROUP_NUM: int
+    WEIGHT_METHOD: str
+    RISK_FREE_RATE: float
+    TRANSACTION_COST: float
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(os.path.dirname(_DIR))
@@ -172,7 +181,7 @@ def main():
     write_composite_factors_excel(composite_dict, out1)
 
     # 5. 对每个复合因子跑回测（复合因子已在调仓期截面，直接作为 factor_periods 传入）
-    config = SimpleNamespace(
+    config = CompositeBacktestConfig(
         GROUP_NUM=GROUP_NUM,
         WEIGHT_METHOD=WEIGHT_METHOD,
         RISK_FREE_RATE=RISK_FREE_RATE,
@@ -236,9 +245,8 @@ def _run_composite_backtest(comp_df, ret_periods, config):
     fp = comp_df.loc[common_dates]
     rp = ret_periods.loc[common_dates]
 
-    # 直接调用 run_one_factor_one_period，传 rebalance_period=1
-    # 但该函数会再做 RebalancePeriodManager，会丢失最后一期
-    # 所以直接内联核心逻辑（复用已有模块）
+    # 不调用 run_one_factor_one_period，因为它的内部 RebalancePeriodManager
+    # 会导致最后一期缺失；改为直接内联核心计算逻辑（复用已有模块的类）。
     from ic import ICAnalyzerEnhanced
     from grouping import GrouperEnhanced
     from backtest import LongOnlyBacktest

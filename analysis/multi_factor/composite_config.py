@@ -10,9 +10,15 @@
   ⚠️ 注意：若需长期换因子，建议同步更新 strategy_config.py 以保持一致性
 """
 import os
+import sys
 
 PROJECT_ROOT = r"D:\qqq"
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
+
+# ── 路径注册（从 strategy_utils 导入统一实现前需先注册）─────────────
+_STRATEGY_UTILS_DIR = os.path.join(PROJECT_ROOT, "analysis", "strategy")
+if os.path.isdir(_STRATEGY_UTILS_DIR) and _STRATEGY_UTILS_DIR not in sys.path:
+    sys.path.insert(0, _STRATEGY_UTILS_DIR)
 
 # ── 手动因子配置区 ─────────────────────────────────────────────────────────────
 # ⚠️ 如需切换因子，直接修改此列表（如 [95, 101, 62, 65, 32]），无需改其他文件
@@ -133,12 +139,22 @@ def get_factor_display_name(filepath):
     return basename.replace("_", " ").strip() or basename
 
 
-def build_factor_suffix(factor_indices: list[int] | None = None) -> str:
-    """
-    基于因子编号列表生成简短后缀，如 f95-24-64-65-32。
-    未提供时使用 SELECTED_FACTOR_INDICES。
-    """
-    if factor_indices is None:
-        factor_indices = SELECTED_FACTOR_INDICES
-    nums = [str(int(i)) for i in factor_indices]
-    return "f" + "-".join(nums)
+# ── 从 strategy_utils 统一导入 build_factor_suffix ──────────────────
+# strategy_utils.build_factor_suffix 支持无参数调用（返回空字符串）
+# composite_config 需要无参数时使用 SELECTED_FACTOR_INDICES，因此用 wrapper
+try:
+    from strategy_utils import build_factor_suffix as _su_build_factor_suffix
+
+    def build_factor_suffix(factor_indices: list[int] | None = None) -> str:
+        if factor_indices is None:
+            factor_indices = SELECTED_FACTOR_INDICES
+        return _su_build_factor_suffix(factor_indices)
+except (ImportError, OSError):
+    # 兜底：内联实现（strategy_utils 不可用时）
+    def build_factor_suffix(factor_indices: list[int] | None = None) -> str:
+        if factor_indices is None:
+            factor_indices = SELECTED_FACTOR_INDICES
+        if factor_indices is None:
+            return ""
+        nums = [str(int(i)) for i in factor_indices]
+        return "f" + "-".join(nums)

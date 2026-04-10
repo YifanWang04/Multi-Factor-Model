@@ -40,11 +40,8 @@ for _p in [_HERE, _SF_DIR, _MF_DIR, _ROOT]:
         sys.path.insert(0, _p)
 
 from run_strategy import load_return_data
-from run_detailed_backtest_report import (
-    run_detailed_backtest,
-    parse_strategy_param,
-    load_price_data,
-)
+from run_detailed_backtest_report import run_detailed_backtest, parse_strategy_param
+from strategy_utils import load_price_data
 from analysis.single_factor.run_multi_factor_test import load_factor
 from analysis.single_factor.rebalance_manager import RebalancePeriodManager
 from analysis.multi_factor.composite_factor import compute_selected_composites
@@ -519,7 +516,7 @@ def run_param_sensitivity(
             continue
 
         result = run_detailed_backtest(
-            factor_df=factor_df,
+            factor_df=composite_factor_df,
             ret_df=ret_df,
             price_df=price_df,
             group_num=gn,
@@ -717,7 +714,7 @@ def write_review_report(
     result: dict,
     benchmark_prices: pd.Series,
     benchmark_returns: pd.Series,
-    factor_df: pd.DataFrame,
+    composite_factor_df: pd.DataFrame,
     ret_df: pd.DataFrame,
     individual_factors: dict,
     param_sensitivity_df: pd.DataFrame | None,
@@ -784,7 +781,7 @@ def write_review_report(
     df_overview = pd.DataFrame(overview_rows, columns=["Metric", "Value"])
 
     # ── Sheet 2: Rebalance_Period_Review ──────────────────────────────────────
-    ic_series = compute_ic_per_period(factor_df, ret_df, period_summary_df)
+    ic_series = compute_ic_per_period(composite_factor_df, ret_df, period_summary_df)
 
     period_review_rows = []
     cum_nav = 1.0
@@ -900,7 +897,8 @@ def main():
         price_file=PRICE_FILE,
         return_column=cfg.RETURN_COLUMN,
     )
-    print(f"      区间: {factor_df.index[0].date()} ~ {factor_df.index[-1].date()}")
+    composite_factor_df = factor_df  # 重命名以区分复合因子与单因子
+    print(f"      区间: {composite_factor_df.index[0].date()} ~ {composite_factor_df.index[-1].date()}")
 
     # 2. 加载日频收益率
     print("\n[2/8] 加载日频收益率...")
@@ -915,7 +913,7 @@ def main():
 
     # 4. 加载基准数据
     print(f"\n[4/8] 加载基准数据（{BENCHMARK_TICKER}）...")
-    data_start = str(factor_df.index[0].date())
+    data_start = str(composite_factor_df.index[0].date())
     benchmark_prices, benchmark_returns = load_benchmark_data(BENCHMARK_TICKER, data_start)
     if len(benchmark_prices) == 0:
         print(f"  [Warning] 基准数据为空，相关分析将跳过")
@@ -925,7 +923,7 @@ def main():
     # 5. 运行策略回测
     print(f"\n[5/8] 运行策略回测: {STRATEGY_PARAM}...")
     result = run_detailed_backtest(
-        factor_df=factor_df,
+        factor_df=composite_factor_df,
         ret_df=ret_df,
         price_df=price_df,
         group_num=group_num,
@@ -952,7 +950,7 @@ def main():
     if run_sensitivity:
         print(f"\n[7/8] 参数敏感度分析（{len(rev_cfg.PARAM_GRID)} 个配置）...")
         param_sensitivity_df = run_param_sensitivity(
-            factor_df=factor_df,
+            factor_df=composite_factor_df,
             ret_df=ret_df,
             price_df=price_df,
             param_grid=rev_cfg.PARAM_GRID,
@@ -983,7 +981,7 @@ def main():
         result=result,
         benchmark_prices=benchmark_prices,
         benchmark_returns=benchmark_returns,
-        factor_df=factor_df,
+        factor_df=composite_factor_df,
         ret_df=ret_df,
         individual_factors=individual_factors,
         param_sensitivity_df=param_sensitivity_df,

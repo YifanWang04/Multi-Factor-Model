@@ -47,10 +47,8 @@ from run_multi_factor_test import load_return_data
 # ---------------------------------------------------------------------------
 
 def _safe_tag(s: str) -> str:
-    """将字符串转成适合文件名的 tag（尽量保持可读性）。"""
-    s = str(s)
-    s = s.strip().replace(" ", "")
-    return "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in s)
+    """从 strategy_utils 导入统一实现（保持旧调用方兼容）。"""
+    return safe_tag(s)
 
 
 def build_strategy_report_filename(base_name: str, composite_sheet: str, data_start_offset_days: int = 0) -> str:
@@ -69,7 +67,7 @@ def build_strategy_report_filename(base_name: str, composite_sheet: str, data_st
 # 数据加载
 # ---------------------------------------------------------------------------
 
-from strategy_utils import load_composite_factor
+from strategy_utils import load_composite_factor, safe_tag
 
 
 # ---------------------------------------------------------------------------
