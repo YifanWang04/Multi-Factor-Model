@@ -277,6 +277,152 @@ python analysis/strategy/run_strategy_review.py
 
 ---
 
+## Factor Library (factors/factor_library.py)
+
+**WorldQuant 101 Alpha Implementation** — implements Alpha #1 through #101 (excluding those requiring industry-neutralization: #48, 56, 58–59, 63, 67, 69–70, 76, 79–80, 82, 87, 89–91, 93, 97, 100). All functions operate on wide-format DataFrames (index = date, columns = ticker symbols).
+
+### Data Keys (input conventions)
+| Key | Description |
+|-----|-------------|
+| `close` | Adjusted closing price (Adj Close) |
+| `open` | Opening price (Open) |
+| `high` | Highest price (High) |
+| `low` | Lowest price (Low) |
+| `volume` | Trading volume (Volume) |
+| `returns` | Daily return = `close.pct_change()` |
+| `vwap` | Volume-weighted average price ≈ `(high+low+close)/3` |
+
+### Helper Functions (wide-format DataFrame operations)
+| Function | Description |
+|----------|-------------|
+| `rank(df)` | Cross-sectional rank (0–1 percentile, per date) |
+| `delta(df, n)` | n-period difference: `df - df.shift(n)` |
+| `delay(df, n)` | n-period lag: `df.shift(n)` |
+| `log(df)` | Natural logarithm |
+| `stddev(df, n)` | n-period rolling standard deviation |
+| `sma(df, n)` | n-period simple moving average |
+| `ts_sum(df, n)` | n-period rolling sum |
+| `ts_min / ts_max` | n-period rolling min / max |
+| `ts_rank(df, n)` | Time-series rank (position of last value in last n periods) |
+| `ts_argmax / ts_argmin` | Position of rolling max / min |
+| `correlation(df1, df2, n)` | Rolling Pearson correlation (column-wise) |
+| `covariance(df1, df2, n)` | Rolling covariance (column-wise) |
+| `sign(df)` | Sign function (−1, 0, or 1) |
+| `SignedPower(df, e)` | `sign(x) * |x|^e` |
+| `scale(df, k)` | Cross-sectional scaling so `sum(|x|) = k` |
+| `decay_linear(df, n)` | Linearly weighted moving average (recent = weight n) |
+
+### Available Alphas
+| Range | Alphas |
+|-------|--------|
+| #1–10 | SignedPower argmax, volume-price correlation, open-volume correlation, low rank, VWAP deviation, momentum/reversal signals |
+| #11–50 | VWAP extremes, volume-price covariance, price acceleration, decay linear combinations, multi-factor composites |
+| #51–101 | Advanced momentum/volume/VWAP combinations, PCA-like rank products, mid-price signals |
+
+Each alpha is documented in `FACTOR_DESCRIPTIONS` with: name, theory, direction (long/short bias), typical holding period, and category.
+
+---
+
+## Data Processing Pipeline (pipeline/)
+
+### Step 1 — Factor Construction (`pipeline/build_factors.py`)
+- Reads OHLCV data from `data/us_top100_daily_2023_present.xlsx`
+- Derives `returns = close.pct_change()` and `vwap = (high+low+close)/3`
+- Applies each `FACTOR_CONFIGS` function to generate raw factors
+- Outputs: `factor_raw/factor_alpha{XXX}_raw.xlsx` (one file per factor, single sheet named "factor")
+
+### Step 2 — Data Processing (`pipeline/data_process.py`)
+- Winsorization: clips outliers per date column (default: 1st–99th percentile)
+- Standardization: z-score per date column (mean=0, std=1)
+- Outputs: `factor_processed/factor_alpha{XXX}_processed.xlsx`
+
+---
+
+## Portfolio Optimizer (analysis/strategy/portfolio_optimizer.py)
+
+Five asset allocation methods, all callable via `compute_weights()`:
+
+| Method | Description |
+|--------|-------------|
+| `equal` | Equal weight: 1/N |
+| `factor_score` | Normalized factor values as weights |
+| `min_variance` | Minimum variance portfolio (scipy SLSQP, `Σw=1`, `0≤w≤max_weight`) |
+| `mvo` | Markowitz mean-variance (max Sharpe ratio, `Σw=1`, `0≤w≤max_weight`) |
+| `max_return` | Maximize expected return under weight constraints |
+
+All optimization methods automatically fall back to equal-weighting if data is insufficient or solver fails. Covariance matrices use Ledoit-Wolf-style diagonal regularization to prevent singularity.
+
+---
+
+## Rebalance Calendar (analysis/strategy/rebalance_calendar.py)
+
+**Single Source of Truth** for rebalance date selection. The `get_rebalance_calendar()` function selects dates from `factor_index` such that consecutive dates are separated by at least `rebalance_period_days` trading days (counted against `ret_index`).
+
+Used by:
+- `strategy_backtest._select_rebalance_dates`
+- `rebalance_manager.RebalancePeriodManager.get_rebalance_dates`
+- `run_rebalance_day` (via `strategy_backtest`)
+
+---
+
+## Mark-to-Market (analysis/strategy/strategy_utils.py → `MarkToMarket` class)
+
+For open positions (where `Next_Rebalance_Date > As_Of` or `Sell_Price_Close` is missing), the report performs mark-to-market valuation:
+
+| Sell_Price_Source | Meaning |
+|-------------------|---------|
+| `假设市价(未到期)` | Next rebalance not yet reached; price = Adj Close on As_Of date |
+| `假设市价(补全)` | Historical sell price missing; filled with last available Adj Close |
+| `到期收盘` | Next rebalance ≤ As_Of with confirmed backtest exit price |
+
+MTM runs in two rounds — round 2 also patches `period_summary_df` via `patch_period_summary_from_mtm`. The `MarkToMarket.apply()` method uses vectorized masking (no `iterrows`) for performance.
+
+---
+
+## Discord Integration (analysis/strategy/rebalance/discord_notifier.py)
+
+Discord notifications are sent after each `run_rebalance_day` execution, containing:
+
+**Performance metrics:** Total return, annualized return, Sharpe ratio, max drawdown, Calmar ratio, win rate, profit/loss ratio
+
+**Current holding P&L:** Weight, assumed sell price (As_Of Adj Close or live price), `Period_Return`, `Sell_Value` — aligned with MTM in the Excel report
+
+**Today's operations:** Buy/sell list with weight, prices, interval return, and position notionals (shown when `Weight ≥ 0.0001`)
+
+**Next rebalance date:** Extrapolated from the rebalance calendar
+
+Live price fetching: Uses yfinance with retry logic (3 attempts, exponential backoff) for symbols where the local price DataFrame lacks a bar for the As_Of date. The `_is_target_date_session_closed` guard uses "target_date + 1 day 00:00 UTC" to confirm a bar is finalized before backfilling.
+
+---
+
+## Walk-Forward Validation (analysis/walk_forward/)
+
+Anti-overfitting validation system with strict train/test separation:
+
+**Pipeline:**
+1. Generate rolling windows (train + test with gap)
+2. Process factors using training data only
+3. Compute composite weights using training-period IC/beta
+4. Apply fixed weights to test period
+5. Grid search strategy parameters on test set
+
+**Key anti-leak mechanisms:**
+- Factor winsorization/standardization uses only training data
+- Composite weights use only training-period IC/beta statistics
+- Portfolio optimization uses only historical returns (already handled in `strategy_backtest`)
+
+**Configuration (`walk_forward_config.py`):**
+| Parameter | Description |
+|-----------|-------------|
+| `TRAINING_WINDOW` | Training window length (trading days) |
+| `TESTING_WINDOW` | Testing window length |
+| `ROLL_FORWARD_STEP` | Days to roll forward between windows |
+| `TRAIN_TEST_GAP` | Gap between train and test (avoids look-ahead) |
+| `COMPOSITE_METHOD` | Composite weighting method (e.g., `beta_m3`) |
+| `N_WINDOW` | Rolling window size for method 3 |
+
+---
+
 ## Common Pitfalls & Notes
 
 1. **PROJECT_ROOT:** Unified to `D:\qqq`; update all config files when changing root path
@@ -313,11 +459,11 @@ python analysis/strategy/run_strategy_review.py
 27. **run_strategy_review fpath scope (Bug 20):** No action needed — the fpath variable in the f-string is correctly scoped within the loop iteration where it's defined.
 28. **rebalance_manager available[-1] (Bug 21):** No action needed — the call site already has an explicit `if len(available) == 0: continue` guard before `available[-1]`.
 29. **Loop variable naming (Bug 22):** `composite_factor.py` `_weighted_composite` and `_composite_from_weight_df` renamed inner date loop variable from `d` to `_date` to avoid shadowing outer-scope references and improve readability.
-30. **P1 Bug 23 — `_run_single` 空组合保护：** `strategy_backtest._run_single` 新增 `if len(port_stocks) == 0: continue` 检查，避免目标组为空时产生 NaN 日收益。
-31. **P6 Bug 24 — 防御性列对齐：** `strategy_backtest._run_single` 在向量化持仓期收益计算中新增 `w_norm = w_norm[ret_port.columns]`，确保权重 DataFrame 列顺序与收益 DataFrame 完全一致，防止广播顺序风险。
-32. **P3 Bug 25 — MarkToMarket 死代码：** `strategy_utils.MarkToMarket.apply` 删除 `ops.loc[need_mtm & ~need_mtm, ...]` 恒假条件行。
-33. **P2 Arc-26 — 调仓日历统一实现：** 新建 `analysis/strategy/rebalance_calendar.py` 作为调仓日历唯一权威实现；`strategy_backtest._select_rebalance_dates` 委托至该模块；`rebalance_manager.RebalancePeriodManager.get_rebalance_dates` 导入使用，消除两处重复实现。
-34. **P5 Arc-27 — `iterrows` 向量化：** `run_detailed_backtest_report.run_detailed_backtest` 将 `for j, (date, row) in enumerate(period_df.iterrows())` 循环替换为向量化 pandas 批量操作，消除逐行迭代的性能瓶颈。
+30. **P1 Bug 23 — `_run_single` empty portfolio guard:** `strategy_backtest._run_single` adds `if len(port_stocks) == 0: continue` to prevent NaN daily returns when the target group is empty.
+31. **P6 Bug 24 — Defensive column alignment:** `strategy_backtest._run_single` adds `w_norm = w_norm[ret_port.columns]` to ensure the weight DataFrame column order exactly matches the return DataFrame, preventing broadcast ordering risk.
+32. **P3 Bug 25 — MarkToMarket dead code:** `strategy_utils.MarkToMarket.apply` removes the always-false condition `ops.loc[need_mtm & ~need_mtm, ...]`.
+33. **P2 Arc-26 — Rebalance calendar unified:** New `analysis/strategy/rebalance_calendar.py` is the single source of truth for rebalance calendar generation; `strategy_backtest._select_rebalance_dates` delegates to this module; `rebalance_manager.RebalancePeriodManager.get_rebalance_dates` imports and uses it, eliminating duplicate implementations.
+34. **P5 Arc-27 — `iterrows` vectorized:** `run_detailed_backtest_report.run_detailed_backtest` replaces `for j, (date, row) in enumerate(period_df.iterrows())` with vectorized pandas bulk operations, eliminating per-row iteration performance bottleneck.
 
 ## Reference Docs
 
