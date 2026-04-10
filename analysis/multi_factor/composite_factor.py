@@ -65,7 +65,6 @@ def _compute_betas_ics(factor_dict, ret_periods):
             fv, rv = f[common].values, r[common].values
             if np.std(fv) == 0 or np.std(rv) == 0:
                 continue
-            # beta via OLS
             beta = np.cov(fv, rv)[0, 1] / np.var(fv)
             ic = np.corrcoef(fv, rv)[0, 1]
             ric, _ = spearmanr(fv, rv)
@@ -79,33 +78,6 @@ def _compute_betas_ics(factor_dict, ret_periods):
             "rank_ic": pd.Series(rank_ics, index=valid_dates),
         }
     return result
-
-
-def _weighted_composite(factor_dict, weights_series_dict, dates):
-    """
-    按权重合成复合因子。
-    weights_series_dict: {factor_name: scalar weight}（每期固定）或 {factor_name: Series(date)}
-    返回 DataFrame(date×stock)。
-    注意：本函数当前未被调用，实际路径均走 _composite_from_weight_df。
-    """
-    names = list(factor_dict.keys())
-    all_dates = dates
-    result = pd.DataFrame(index=all_dates, columns=next(iter(factor_dict.values())).columns, dtype=float)
-    result.iloc[:, :] = 0.0
-
-    for _date in all_dates:
-        row = pd.Series(0.0, index=result.columns)
-        total_w = 0.0
-        for name in names:
-            w_val = weights_series_dict[name]
-            w = w_val.get(_date, np.nan) if isinstance(w_val, pd.Series) else w_val
-            if np.isnan(w):
-                continue
-            frow = factor_dict[name].loc[_date] if _date in factor_dict[name].index else pd.Series(dtype=float)
-            row = row.add(frow * w, fill_value=0)
-            total_w += abs(w)
-        result.loc[_date] = row / total_w if total_w != 0 else row
-    return result.apply(pd.to_numeric, errors="coerce")
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +105,6 @@ def _composite_from_weight_df(factor_dict, weight_df, dates):
             total_w += abs(w)
             frow = factor_dict[name].loc[_date] if _date in factor_dict[name].index else pd.Series(dtype=float)
             row = row.add(frow.reindex(stocks) * w, fill_value=0)
-        # total_w == 0 表示当期无任何有效权重，跳过该行（保持 NaN）
         if total_w == 0:
             continue
         result.loc[_date] = row
@@ -161,41 +132,35 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
     method=3: 滚动 window 期均值（无前瞻，用 index < d 的最近 N 期数据）
     """
     names = list(factor_dict.keys())
-    # 收集各因子的 key 序列
     series_map = {n: stats_dict[n][key] for n in names}
 
     if method == 1:
-        # 全期均值（含前瞻，仅供研究对比）
         rows = []
         for d in dates:
             row = {}
             for n in names:
                 s = series_map[n]
-                # 使用全部历史数据（含当前调仓日之前的所有 IC）
                 past = s[s.index < d]
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
     elif method == 2:
-        # 截至当期累计均值（无前瞻）
         rows = []
         for d in dates:
             row = {}
             for n in names:
                 s = series_map[n]
-                # 使用 d 之前的所有 IC（不排除最近一期，因为它已经实现）
                 past = s[s.index < d]
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
-    else:  # method == 3
+    else:
         assert window is not None
         rows = []
         for d in dates:
             row = {}
             for n in names:
                 s = series_map[n]
-                # 使用 d 之前的最近 window 期 IC
                 past = s[s.index < d].iloc[-window:]
                 row[n] = past.mean() if len(past) > 0 else np.nan
             rows.append(row)
@@ -206,11 +171,9 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
 
 def beta_weighted(factor_dict, ret_periods, N_windows):
     """一元回归加权，返回 {name: composite_df}。"""
-    # IC/beta 计算仅使用有收益数据的日期
     ic_dates = ret_periods.index
     aligned = _factor_matrix(factor_dict, ic_dates)
     stats = _compute_betas_ics(aligned, ret_periods)
-    # 复合因子输出覆盖 factor_dict 全部日期（含最新调仓日 r_k）
     all_dates = _align_dates(factor_dict)
     out = {}
     out["beta_m1"] = _zscore(_univariate_weighted(factor_dict, stats, "beta", all_dates, 1))
@@ -222,11 +185,9 @@ def beta_weighted(factor_dict, ret_periods, N_windows):
 
 def ic_weighted(factor_dict, ret_periods, N_windows):
     """IC加权，返回 {name: composite_df}。"""
-    # IC 计算仅使用有收益数据的日期
     ic_dates = ret_periods.index
     aligned = _factor_matrix(factor_dict, ic_dates)
     stats = _compute_betas_ics(aligned, ret_periods)
-    # 复合因子输出覆盖 factor_dict 全部日期（含最新调仓日 r_k）
     all_dates = _align_dates(factor_dict)
     out = {}
     out["ic_m1"] = _zscore(_univariate_weighted(factor_dict, stats, "ic", all_dates, 1))
@@ -238,11 +199,9 @@ def ic_weighted(factor_dict, ret_periods, N_windows):
 
 def rank_ic_weighted(factor_dict, ret_periods, N_windows):
     """Rank_IC加权，返回 {name: composite_df}。"""
-    # Rank_IC 计算仅使用有收益数据的日期
     ic_dates = ret_periods.index
     aligned = _factor_matrix(factor_dict, ic_dates)
     stats = _compute_betas_ics(aligned, ret_periods)
-    # 复合因子输出覆盖 factor_dict 全部日期（含最新调仓日 r_k）
     all_dates = _align_dates(factor_dict)
     out = {}
     out["rank_ic_m1"] = _zscore(_univariate_weighted(factor_dict, stats, "rank_ic", all_dates, 1))
@@ -258,7 +217,6 @@ def rank_ic_weighted(factor_dict, ret_periods, N_windows):
 
 def rank_weighted(factor_dict, ret_periods):
     """排序相加 & 排序相乘，返回 {name: composite_df}。"""
-    # 排序加权只需因子值，可覆盖 factor_dict 全部日期（含最新调仓日 r_k）
     all_dates = _align_dates(factor_dict)
     names = list(factor_dict.keys())
     stocks = next(iter(factor_dict.values())).columns
@@ -278,7 +236,6 @@ def rank_weighted(factor_dict, ret_periods):
             continue
         stacked = pd.concat(rank_frames, axis=1)
         rank_add.loc[d] = stacked.sum(axis=1, min_count=1)
-        # 归一化后相乘
         norm_frames = [f / f.max() for f in rank_frames]
         mul = norm_frames[0].copy()
         for f in norm_frames[1:]:
@@ -327,11 +284,9 @@ def _ols_betas_per_period(factor_dict, ret_periods):
 
 def multivariate_weighted(factor_dict, ret_periods, M_windows):
     """多元回归加权，返回 {name: composite_df}。"""
-    # OLS beta 计算仅使用有收益数据的日期
     ic_dates = ret_periods.index
     aligned = _factor_matrix(factor_dict, ic_dates)
     beta_df = _ols_betas_per_period(aligned, ret_periods)
-    # 复合因子输出覆盖 factor_dict 全部日期（含最新调仓日 r_k）
     all_dates = _align_dates(factor_dict)
     names = list(factor_dict.keys())
     out = {}
@@ -339,7 +294,6 @@ def multivariate_weighted(factor_dict, ret_periods, M_windows):
     def _build_weight_df(method, window=None):
         rows = []
         for d in all_dates:
-            # 使用 d 之前的所有 beta（不排除最近一期，因为它已经实现）
             past = beta_df[beta_df.index < d]
             if method == 3:
                 past = past.iloc[-window:]
@@ -362,14 +316,12 @@ def pca_composite(factor_dict, ret_periods, n_components=3):
     PCA：对每期截面因子矩阵做PCA，取前n_components个主成分作为复合因子。
     返回 {f'pca_pc{i+1}': DataFrame(date×stock)}。
     """
-    # PCA 只需因子值，可覆盖 factor_dict 全部日期（含最新调仓日 r_k）
     all_dates = _align_dates(factor_dict)
     aligned = _factor_matrix(factor_dict, all_dates)
     names = list(aligned.keys())
     stocks = next(iter(aligned.values())).columns
     n_comp = min(n_components, len(names))
 
-    # 收集每期截面数据：shape (n_stocks, n_factors)
     pc_results = {i: pd.DataFrame(np.nan, index=all_dates, columns=stocks) for i in range(n_comp)}
 
     for d in all_dates:
@@ -379,14 +331,14 @@ def pca_composite(factor_dict, ret_periods, n_components=3):
                 rows[n] = aligned[n].loc[d]
         if len(rows) < 2:
             continue
-        X = pd.DataFrame(rows).dropna()  # stocks × factors
+        X = pd.DataFrame(rows).dropna()
         if len(X) < n_comp + 1:
             continue
         scaler = StandardScaler()
         Xs = scaler.fit_transform(X.values)
         pca = PCA(n_components=n_comp)
         try:
-            components = pca.fit_transform(Xs)  # stocks × n_comp
+            components = pca.fit_transform(Xs)
         except Exception:
             continue
         for i in range(n_comp):

@@ -101,7 +101,10 @@ def write_composite_factors_excel(composite_dict, out_path):
 
 
 def _build_factor_suffix():
-    """基于 SELECTED_FACTOR_INDICES 生成简短后缀，如 f95-24-64-65-32。"""
+    """基于 SELECTED_FACTOR_INDICES 生成简短后缀，如 f95-24-64-65-32。
+
+    直接调用从 composite_config 导入的 build_factor_suffix(SELECTED_FACTOR_INDICES)。
+    """
     suffix = build_factor_suffix(SELECTED_FACTOR_INDICES)
     return suffix if suffix else "fall"
 
