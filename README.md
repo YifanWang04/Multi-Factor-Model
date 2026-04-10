@@ -64,8 +64,9 @@ qqq/
 │   │   ├── strategy_metrics.py              # Strategy performance metrics
 │   │   ├── strategy_review_config.py        # Strategy review config
 │   │   ├── portfolio_optimizer.py           # Portfolio optimizer (MVO, min-variance, equal-weight, etc.)
+│   │   ├── rebalance_calendar.py           # 统一调仓日历生成（唯一权威实现）
 │   │   ├── run_strategy.py                  # Strategy backtest entry
-│   │   ├── run_detailed_backtest_report.py # Detailed strategy report entry
+│   │   ├── run_detailed_backtest_report.py  # Detailed strategy report entry
 │   │   ├── run_strategy_review.py           # Strategy review report entry (multi-sheet Excel)
 │   │   ├── run_rebalance_day.py            # Rebalance day full pipeline (pull→factors→composite→backtest→report)
 │   │   ├── test_discord_notification.py    # Discord Webhook test tool
@@ -312,6 +313,11 @@ python analysis/strategy/run_strategy_review.py
 27. **run_strategy_review fpath scope (Bug 20):** No action needed — the fpath variable in the f-string is correctly scoped within the loop iteration where it's defined.
 28. **rebalance_manager available[-1] (Bug 21):** No action needed — the call site already has an explicit `if len(available) == 0: continue` guard before `available[-1]`.
 29. **Loop variable naming (Bug 22):** `composite_factor.py` `_weighted_composite` and `_composite_from_weight_df` renamed inner date loop variable from `d` to `_date` to avoid shadowing outer-scope references and improve readability.
+30. **P1 Bug 23 — `_run_single` 空组合保护：** `strategy_backtest._run_single` 新增 `if len(port_stocks) == 0: continue` 检查，避免目标组为空时产生 NaN 日收益。
+31. **P6 Bug 24 — 防御性列对齐：** `strategy_backtest._run_single` 在向量化持仓期收益计算中新增 `w_norm = w_norm[ret_port.columns]`，确保权重 DataFrame 列顺序与收益 DataFrame 完全一致，防止广播顺序风险。
+32. **P3 Bug 25 — MarkToMarket 死代码：** `strategy_utils.MarkToMarket.apply` 删除 `ops.loc[need_mtm & ~need_mtm, ...]` 恒假条件行。
+33. **P2 Arc-26 — 调仓日历统一实现：** 新建 `analysis/strategy/rebalance_calendar.py` 作为调仓日历唯一权威实现；`strategy_backtest._select_rebalance_dates` 委托至该模块；`rebalance_manager.RebalancePeriodManager.get_rebalance_dates` 导入使用，消除两处重复实现。
+34. **P5 Arc-27 — `iterrows` 向量化：** `run_detailed_backtest_report.run_detailed_backtest` 将 `for j, (date, row) in enumerate(period_df.iterrows())` 循环替换为向量化 pandas 批量操作，消除逐行迭代的性能瓶颈。
 
 ## Reference Docs
 

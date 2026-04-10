@@ -208,22 +208,26 @@ def run_detailed_backtest(
         common = w.index.intersection(buy_p.index)
         if len(common) == 0:
             continue
-        w = w[common] / w[common].sum()
+        w_common = w[common] / w[common].sum()
         # 卖出价格需要单独处理（最后一期可能为空）
 
-        period_daily = []
-        for j, (date, row) in enumerate(period_df.iterrows()):
-            valid = w.index[w.index.isin(row.dropna().index)]
-            if len(valid) == 0:
-                port_ret = 0.0
-            else:
-                ww = w[valid] / w[valid].sum()
-                port_ret = float((row[valid] * ww).sum())
-            if j == 0:
-                port_ret -= 2 * trans_cost
-            period_daily.append(port_ret)
-            all_daily_rets.append(port_ret)
-            all_dates.append(date)
+        # ── 持仓期收益（向量化替代 iterrows）─────────────────────────
+        # 取持仓期内 common 组合的日收益率
+        period_ret_port = period_df[common].copy()
+        # 每日有效掩码：收益率非空
+        valid_mask = period_ret_port.notna()
+        # 每日归一化权重（仅对当日有收益的股票归一）
+        w_row_sum = valid_mask.mul(w_common).sum(axis=1)  # Series: date → sum(w * valid)
+        w_norm_daily = valid_mask.mul(w_common).div(w_row_sum, axis=0)
+        # 组合日收益率
+        port_ret_series = (w_norm_daily * period_ret_port).sum(axis=1).fillna(0.0)
+        period_daily = port_ret_series.to_list()
+        # 首日扣交易成本（往返）
+        if period_daily:
+            period_daily[0] -= 2 * trans_cost
+        # 全局累积
+        all_daily_rets.extend(period_daily)
+        all_dates.extend(port_ret_series.index.tolist())
 
         if not period_daily:
             continue
@@ -241,7 +245,7 @@ def run_detailed_backtest(
             sp = sell_prices[sym] if sym in sell_prices.index else np.nan
             stk_ret = (sp / bp - 1.0) if (not np.isnan(bp) and not np.isnan(sp) and bp > 0) else np.nan
             factor_val = factor_signal[sym] if sym in factor_signal.index else np.nan
-            wt = w[sym]
+            wt = w_common[sym]
             buy_value = wt * 1.0  # 虚拟买入金额
             sell_value = buy_value * (1 + stk_ret) if not np.isnan(stk_ret) else np.nan
             shares = buy_value / bp if (not np.isnan(bp) and bp > 0) else np.nan
@@ -262,9 +266,9 @@ def run_detailed_backtest(
 
         # Symbols: 仅保留 weight > PERCENT_THRESHOLD 的股票，并标注权重（格式：SYM:weight%）
         symbols_with_weight = [
-            f"{sym}:{w[sym] * 100:.1f}%"
+            f"{sym}:{w_common[sym] * 100:.1f}%"
             for sym in sorted(common)
-            if w[sym] > PERIOD_SUMMARY_DISPLAY_WEIGHT_THRESHOLD
+            if w_common[sym] > PERIOD_SUMMARY_DISPLAY_WEIGHT_THRESHOLD
         ]
         symbols_str = ", ".join(symbols_with_weight)
 

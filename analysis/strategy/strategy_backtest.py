@@ -35,6 +35,7 @@ if _HERE not in sys.path:
 # 从共享工具模块导入（保持 _build_groups 独立定义以兼容已有调用）
 from strategy_utils import _build_groups
 from portfolio_optimizer import compute_weights
+from rebalance_calendar import get_rebalance_calendar as _get_rebalance_calendar
 
 
 # ---------------------------------------------------------------------------
@@ -48,39 +49,9 @@ def _select_rebalance_dates(
 ) -> list:
     """
     从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点。
-    即相邻调仓日之间至少相隔 rebalance_period_days 个交易日（按 ret_index 计数）。
-
-    调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制，已移除 offset 参数。
-
-    Parameters
-    ----------
-    factor_index : pd.DatetimeIndex
-        因子数据的日期索引（可为非日频，如每 10 交易日一次）
-    ret_index : pd.DatetimeIndex
-        日频收益率/交易日的日期索引，用于正确计数交易日间隔
-    rebalance_period_days : int
-        调仓周期（交易日数），相邻调仓日之间至少相隔该交易日数
-
-    Returns
-    -------
-    list
-        调仓日列表（均为交易日）
+    委托至 rebalance_calendar.get_rebalance_calendar 统一实现。
     """
-    dates = sorted(factor_index)
-    if not dates:
-        return []
-    ret_sorted = ret_index.sort_values()
-
-    # 按实际交易日间隔选取：相邻调仓日之间至少 rebalance_period_days 个交易日
-    selected = [dates[0]]
-    last_selected = dates[0]
-    for d in dates[1:]:
-        n_trading_days = ((ret_sorted > last_selected) & (ret_sorted <= d)).sum()
-        if n_trading_days >= rebalance_period_days:
-            selected.append(d)
-            last_selected = d
-
-    return selected
+    return _get_rebalance_calendar(factor_index, ret_index, rebalance_period_days)
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +204,13 @@ class StrategyBacktester:
             if len(period_df) == 0:
                 continue
 
-            # 取本组合的权重索引（仅目标分组内的标的）
+            # 有效标的：至少需要有历史收益率数据
             port_stocks = weights.index
+            if len(port_stocks) == 0:
+                continue
+
+            # ── 持仓期收益（向量化）───────────────────────────────
+            # 取本组合的权重索引（仅目标分组内的标的）
             # period_df 中只有 port_stocks 列有实际意义
             ret_port = period_df[port_stocks].copy()
             # 重索引权重（不在组合内的标的 → NaN，乘以 0 掩码后不影响结果）
@@ -245,6 +221,8 @@ class StrategyBacktester:
             # 按日期归一化权重（每日仅对当日有效的股票归一）
             row_sum = valid_mask.mul(w_all).sum(axis=1)  # Series: date → sum(w * valid)
             w_norm = valid_mask.mul(w_all).div(row_sum, axis=0)  # DataFrame: date × stock
+            # 防御性列对齐：确保 w_norm 列顺序与 ret_port 完全一致
+            w_norm = w_norm[ret_port.columns]
 
             port_ret_all = (w_norm * ret_port).sum(axis=1)  # Series: date → ret
             port_ret_all = port_ret_all.fillna(0.0)

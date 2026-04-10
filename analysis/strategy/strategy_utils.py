@@ -393,8 +393,6 @@ class MarkToMarket:
                 self.SOURCE_FILL_MISSING,
             )
 
-        ops.loc[need_mtm & ~need_mtm, self._source_col] = self.SOURCE_MATURED
-
         return self
 
     def was_applied(self) -> bool:
