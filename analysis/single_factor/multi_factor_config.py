@@ -4,6 +4,12 @@
 定义多因子测试的输入输出路径与参数。
 """
 import os
+import sys
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 # 项目根目录
 PROJECT_ROOT = r"D:\qqq"
@@ -33,7 +39,8 @@ REBALANCE_PERIODS = [5, 10]
 ### other factors: 24共线性分析失败
 # COLLINEARITY_FACTOR_INDICES = [95, 32, 42, 20, 64] #3.1
 # COLLINEARITY_FACTOR_INDICES = [95, 101, 62, 65, 32] #3.17
-COLLINEARITY_FACTOR_INDICES = [95, 24, 64, 65, 32] #3.25
+# COLLINEARITY_FACTOR_INDICES = [95, 24, 64, 65, 32] #3.25
+COLLINEARITY_FACTOR_INDICES = [ 23, 43, 66, 45, 31] #4.15
 
 # 共线性分析输出文件名前缀（调仓周期后缀由代码自动追加，如 _P5.xlsx）
 OUTPUT_COLLINEARITY_NAME = "factor_collinearity_report"

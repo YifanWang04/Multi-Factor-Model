@@ -108,7 +108,7 @@ class StrategyBacktester:
                 }
                 results[strategy_name] = result
             except Exception as exc:
-                print(f"    ⚠  跳过：{exc}")
+                print(f"    [!] 跳过：{exc}")
                 results[strategy_name] = {
                     **self._empty_result(),
                     "params": {
@@ -213,7 +213,9 @@ class StrategyBacktester:
             # 取本组合的权重索引（仅目标分组内的标的）
             # period_df 中只有 port_stocks 列有实际意义
             ret_port = period_df[port_stocks].copy()
+
             # 重索引权重（不在组合内的标的 → NaN，乘以 0 掩码后不影响结果）
+            # 使用 loc 明确指定按列标签对齐，避免 pandas reindex 的维度混淆问题
             w_all = weights.reindex(ret_port.columns).fillna(0.0)
 
             # 有效掩码：权重非零 × 收益非空
@@ -227,18 +229,21 @@ class StrategyBacktester:
             port_ret_all = (w_norm * ret_port).sum(axis=1)  # Series: date → ret
             port_ret_all = port_ret_all.fillna(0.0)
 
-            period_daily = port_ret_all.to_list()
+            # ── 持仓期收益计算：纯 numpy 位置运算，规避 pandas 索引对齐问题 ──
+            # port_ret_all.values: 持仓期天数 × 1，扁平 numpy 数组
+            period_daily_vals = port_ret_all.values.copy()   # 可写的 numpy array
+            period_dates_list = port_ret_all.index.tolist()   # 日期列表
 
             # 交易成本：持仓期首日扣除往返成本（买入+卖出各一次）
-            period_daily[0] -= 2 * getattr(cfg, "TRANSACTION_COST", 0.001)
+            period_daily_vals[0] -= 2 * getattr(cfg, "TRANSACTION_COST", 0.001)
 
-            all_daily_rets.extend(period_daily)
-            all_dates.extend(period_daily.index.tolist())
+            all_daily_rets.extend(period_daily_vals.tolist())
+            all_dates.extend(period_dates_list)
 
             # 期间总收益率（用于开仓统计）
-            if period_daily:
+            if len(period_daily_vals) > 0:
                 period_cum = float(
-                    pd.Series(period_daily).add(1.0).prod() - 1.0
+                    pd.Series(period_daily_vals).add(1.0).prod() - 1.0
                 )
                 period_rets.append(period_cum)
                 period_dates.append(rb_date)

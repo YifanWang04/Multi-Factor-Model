@@ -22,13 +22,15 @@ from data.data_config import PRICE_FILE, STRATEGY_REPORTS_DIR, COMPOSITE_FACTOR_
 # ── 输入 ──────────────────────────────────────────────────────────────────────
 
 # 选定的复合因子方法（Excel sheet 名），对应用户选择的 ols_m3_M5
-COMPOSITE_FACTOR_SHEET = "ic_m3_N20" #3/17
+# COMPOSITE_FACTOR_SHEET = "ic_m3_N20" #3/17
 # COMPOSITE_FACTOR_SHEET = "pca_pc1" #3/25
+COMPOSITE_FACTOR_SHEET = "rank_add" #4/15
 
 # 选定因子（策略专用，与 composite_config 独立）
 # ⚠️ 切换因子后需先运行 run_composite_factor.py 生成新的复合因子 Excel
 # STRATEGY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-STRATEGY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
+# STRATEGY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25
+STRATEGY_SELECTED_FACTOR_INDICES =  [23, 43, 66, 45, 31]  # 4/15
 
 # 因子名称列表（由索引推导）
 STRATEGY_SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in STRATEGY_SELECTED_FACTOR_INDICES]

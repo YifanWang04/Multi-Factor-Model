@@ -23,7 +23,8 @@ if os.path.isdir(_STRATEGY_UTILS_DIR) and _STRATEGY_UTILS_DIR not in sys.path:
 # ── 手动因子配置区 ─────────────────────────────────────────────────────────────
 # ⚠️ 如需切换因子，直接修改此列表（如 [95, 101, 62, 65, 32]），无需改其他文件
 # MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 备选
+# MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25
+MANUALLY_SELECTED_FACTOR_INDICES =  [23, 43, 66, 45, 31]  # 4/15
 # ─────────────────────────────────────────────────────────────────────────────
 
 
