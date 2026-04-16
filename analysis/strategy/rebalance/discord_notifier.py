@@ -43,10 +43,12 @@ DISCORD_OPS_MAX_LINES: int = 20
 def compute_extended_metrics(
     daily_returns: pd.Series,
     nav: pd.Series,
+    rebalance_returns: pd.Series,
     rf_rate: float = 0.02,
 ) -> dict:
     """
     计算完整绩效指标集，供 Discord 通知使用。
+    包含全局最大回撤 + 单周期最坏回撤。
     """
     if daily_returns.empty or nav.empty:
         return {}
@@ -59,6 +61,42 @@ def compute_extended_metrics(
     max_dd = float((nav / nav.cummax() - 1).min()) if len(nav) > 0 else float("nan")
     max_dd_pct = max_dd * 100
     calmar = ann_ret / abs(max_dd) if max_dd and max_dd != 0 else float("nan")
+
+    # ── 单周期最坏回撤 ──────────────────────────────────────────────
+    worst_dd = np.nan
+    worst_dd_pct = np.nan
+    if len(rebalance_returns) > 0:
+        rb_dates = rebalance_returns.index.tolist()
+        worst_val = 0.0
+        for i, rb_start in enumerate(rb_dates):
+            if i + 1 < len(rb_dates):
+                rb_end = rb_dates[i + 1]
+            else:
+                if len(nav) == 0:
+                    continue
+                rb_end = nav.index[-1]
+            period_ret = daily_returns[daily_returns.index > rb_start]
+            if i + 1 < len(rb_dates):
+                period_ret = period_ret[period_ret.index <= rb_end]
+            if len(period_ret) == 0:
+                continue
+            if rb_start in nav.index:
+                base_nav = nav.loc[rb_start]
+            else:
+                valid = nav.index[nav.index <= rb_start]
+                if len(valid) == 0:
+                    continue
+                base_nav = nav.loc[valid[-1]]
+            period_nav = (1.0 + period_ret).cumprod() * base_nav
+            cummax = period_nav.cummax()
+            dd = (period_nav - cummax) / cummax
+            dd_min = dd.min()
+            if dd_min < worst_val:
+                worst_val = dd_min
+        if worst_val < 0:
+            worst_dd = float(worst_val)
+            worst_dd_pct = worst_dd * 100
+    # ── 单周期最坏回撤 end ──────────────��───────────────────────────
 
     win_days = int((daily_returns > 0).sum())
     total_days = len(daily_returns)
@@ -82,6 +120,8 @@ def compute_extended_metrics(
         "win_days": win_days,
         "total_days": total_days,
         "profit_loss_ratio": profit_loss_ratio,
+        "worst_period_drawdown": worst_dd,
+        "worst_period_drawdown_pct": worst_dd_pct,
     }
 
 
@@ -255,9 +295,10 @@ def send_discord_notification(
 
         dr = result.get("daily_returns", pd.Series(dtype=float))
         nv = result.get("nav", pd.Series(dtype=float))
+        rb_rets = result.get("rebalance_returns", pd.Series(dtype=float))
         price_df = result.get("_price_df", pd.DataFrame())
         ops_df = result.get("operations_df", pd.DataFrame())
-        metrics = compute_extended_metrics(dr, nv, rf_rate=rf_rate)
+        metrics = compute_extended_metrics(dr, nv, rb_rets, rf_rate=rf_rate)
 
         # ── 当前持仓盈亏区块 ───────────────────────────────────────────
         holding_field: Optional[dict] = None
@@ -388,6 +429,7 @@ def send_discord_notification(
             ann_ret = metrics.get("annual_return", float("nan"))
             sharpe = metrics.get("sharpe", float("nan"))
             max_dd_pct = metrics.get("max_drawdown_pct", float("nan"))
+            wp_dd_pct = metrics.get("worst_period_drawdown_pct", float("nan"))
             calmar = metrics.get("calmar", float("nan"))
             win_rate = metrics.get("win_rate", float("nan"))
             pl_ratio = metrics.get("profit_loss_ratio", float("nan"))
@@ -401,7 +443,8 @@ def send_discord_notification(
                 f"• 总收益率：{_fmt_metric(total_ret, '{:.2%}')}\n"
                 f"• 年化收益率：{_fmt_metric(ann_ret, '{:.2%}')}\n"
                 f"• 夏普比率：{_fmt_metric(sharpe, '{:.2f}')}\n"
-                f"• 最大回撤：{_fmt_metric(max_dd_pct, '{:.2f}%')}\n"
+                f"• 最大回撤：{_fmt_metric(max_dd_pct, '{:.2f}%')}（全局）\n"
+                f"• 单周期最坏：{_fmt_metric(wp_dd_pct, '{:.2f}%')}（最差持仓周期）\n"
                 f"• Calmar 比率：{_fmt_metric(calmar, '{:.2f}')}\n"
                 f"• 胜率：{_fmt_metric(win_rate, '{:.2%}')}\n"
                 f"• 盈亏比：{_fmt_metric(pl_ratio, '{:.2f}')}\n"

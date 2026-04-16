@@ -76,6 +76,11 @@ class StrategyMetrics:
         dd_start, dd_end = self._max_dd_dates()
         m["max_dd_start"] = dd_start
         m["max_dd_end"] = dd_end
+        # 单持仓周期最坏回撤（所有调仓周期内各自的最大回撤，取最差值）
+        wp_dd, wp_start, wp_end = self._worst_period_drawdown()
+        m["worst_period_drawdown"] = wp_dd
+        m["worst_period_dd_start"] = wp_start
+        m["worst_period_dd_end"] = wp_end
 
         return m
 
@@ -196,6 +201,66 @@ class StrategyMetrics:
         dd_start = self.nav.loc[:dd_end].idxmax()
         return dd_start, dd_end
 
+    def _worst_period_drawdown(self) -> tuple:
+        """
+        返回 (单周期最坏回撤, 该回撤起始日, 该回撤结束日)。
+        对每个持仓区间（调仓日 → 下一调仓日）分别计算期间最大回撤，
+        取所有区间中最差（最负）的一次。
+        """
+        if len(self.rets) == 0 or len(self.rb_rets) == 0:
+            return np.nan, np.nan, np.nan
+
+        # rebalance_returns 的 index 是调仓日，values 是区间总收益率
+        rb_dates = self.rb_rets.index.tolist()
+
+        worst_dd = 0.0       # 越大越好的初始值（回撤 ≤ 0）
+        worst_start = np.nan
+        worst_end = np.nan
+
+        for i, rb_start in enumerate(rb_dates):
+            # 该区间的日频收益率切片
+            if i + 1 < len(rb_dates):
+                rb_end = rb_dates[i + 1]
+            else:
+                # 最后一个区间：到 nav 最后一个日期
+                if len(self.nav) == 0:
+                    continue
+                rb_end = self.nav.index[-1]
+
+            period_ret = self.rets[self.rets.index > rb_start]
+            if i + 1 < len(rb_dates):
+                period_ret = period_ret[period_ret.index <= rb_end]
+
+            if len(period_ret) == 0:
+                continue
+
+            # 从买入时刻（rb_start 的净值）起计算期间最大回撤
+            if rb_start in self.nav.index:
+                base_nav = self.nav.loc[rb_start]
+            else:
+                # 找不到精确 rb_start，用最近的前序日期净值
+                valid = self.nav.index[self.nav.index <= rb_start]
+                if len(valid) == 0:
+                    continue
+                base_nav = self.nav.loc[valid[-1]]
+
+            period_nav = (1.0 + period_ret).cumprod() * base_nav
+            if len(period_nav) == 0:
+                continue
+
+            cummax = period_nav.cummax()
+            dd = (period_nav - cummax) / cummax
+            dd_min = dd.min()
+
+            if dd_min < worst_dd:
+                worst_dd = dd_min
+                worst_end = dd.idxmin()
+                worst_start = period_nav.loc[:worst_end].idxmax() if len(period_nav.loc[:worst_end]) > 0 else np.nan
+
+        if worst_dd == 0.0 and np.isnan(worst_end):
+            return 0.0, np.nan, np.nan
+        return float(worst_dd), worst_start, worst_end
+
     # ------------------------------------------------------------------
     # 空指标字典（无收益数据时的占位）
     # ------------------------------------------------------------------
@@ -207,6 +272,7 @@ class StrategyMetrics:
             "annual_return", "annual_vol", "sharpe",
             "open_win_rate", "open_pl_ratio", "annual_open_count", "annual_profit_count",
             "max_drawdown", "calmar", "max_dd_start", "max_dd_end",
+            "worst_period_drawdown", "worst_period_dd_start", "worst_period_dd_end",
         ]
         return {k: np.nan for k in keys}
 

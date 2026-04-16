@@ -25,7 +25,7 @@ if _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 
 from strategy_utils import filter_weight_lt
-from .discord_notifier import compute_extended_metrics
+from .discord_notifier import compute_extended_metrics as _compute_extended_metrics
 
 
 WEIGHT_FILTER_THRESHOLD: float = 0.0001
@@ -97,6 +97,7 @@ def write_rebalance_day_report(
 
     daily_returns = result["daily_returns"]
     nav = result["nav"]
+    rebalance_returns = result.get("rebalance_returns", pd.Series(dtype=float))
 
     # 计算绩效指标
     total_ret = float(nav.iloc[-1]) - 1.0 if len(nav) > 0 else float("nan")
@@ -106,6 +107,41 @@ def write_rebalance_day_report(
     max_dd = float((nav / nav.cummax() - 1).min()) if len(nav) > 0 else float("nan")
     max_dd_pct = max_dd * 100
     calmar = ann_ret / abs(max_dd) if max_dd and max_dd != 0 else float("nan")
+
+    # 单周期最坏回撤（复用 discord_notifier 中的逻辑，避免重复代码）
+    wp_dd = np.nan
+    wp_dd_pct = np.nan
+    if len(rebalance_returns) > 0:
+        rb_dates = rebalance_returns.index.tolist()
+        worst_val = 0.0
+        for i, rb_start in enumerate(rb_dates):
+            if i + 1 < len(rb_dates):
+                rb_end = rb_dates[i + 1]
+            else:
+                if len(nav) == 0:
+                    continue
+                rb_end = nav.index[-1]
+            period_ret = daily_returns[daily_returns.index > rb_start]
+            if i + 1 < len(rb_dates):
+                period_ret = period_ret[period_ret.index <= rb_end]
+            if len(period_ret) == 0:
+                continue
+            if rb_start in nav.index:
+                base_nav = nav.loc[rb_start]
+            else:
+                valid = nav.index[nav.index <= rb_start]
+                if len(valid) == 0:
+                    continue
+                base_nav = nav.loc[valid[-1]]
+            period_nav = (1.0 + period_ret).cumprod() * base_nav
+            cummax = period_nav.cummax()
+            dd_s = (period_nav - cummax) / cummax
+            dd_min = dd_s.min()
+            if dd_min < worst_val:
+                worst_val = dd_min
+        if worst_val < 0:
+            wp_dd = float(worst_val)
+            wp_dd_pct = wp_dd * 100
     win_days = int((daily_returns > 0).sum())
     total_days = len(daily_returns)
     win_rate = win_days / total_days if total_days > 0 else float("nan")
@@ -157,6 +193,7 @@ def write_rebalance_day_report(
         ["Annual_Volatility_Pct", _fmt(vol * 100 if not np.isnan(vol) else float("nan"), "{:.2f}")],
         ["Sharpe_Ratio", _fmt(sharpe, "{:.2f}")],
         ["Max_Drawdown_Pct", _fmt(max_dd_pct, "{:.2f}")],
+        ["Worst_Period_Drawdown_Pct", _fmt(wp_dd_pct, "{:.2f}")],
         ["Calmar_Ratio", _fmt(calmar, "{:.2f}")],
         ["Win_Rate", _fmt(win_rate, "{:.2%}")],
         ["Profit_Loss_Ratio", _fmt(pl_ratio, "{:.2f}")],
@@ -192,8 +229,18 @@ def write_rebalance_day_report(
                 writer, sheet_name="Future_Rebalance_Dates", index=False
             )
 
-        if len(df_ops_filtered) > 0:
-            df_ops_filtered.to_excel(writer, sheet_name="All_Operations", index=False)
+        # ---- 新增：包含所有权重的 sheet（不过滤）----
+        # Current_Operations_All：当前调仓日所有操作（含 weight < 0.0001）
+        if not current_ops.empty:
+            _nan_to_dash(current_ops).to_excel(writer, sheet_name="Current_Operations_All", index=False)
+        else:
+            pd.DataFrame({"Note": ["无当前调仓日操作（今日非调仓日或数据不足）"]}).to_excel(
+                writer, sheet_name="Current_Operations_All", index=False
+            )
+
+        # All_Operations_All：历史所有操作（含 weight < 0.0001）
+        if len(df_ops_raw) > 0:
+            _nan_to_dash(df_ops_raw).to_excel(writer, sheet_name="All_Operations_All", index=False)
 
         df_period = result["period_summary_df"]
         if len(df_period) > 0:

@@ -44,6 +44,7 @@ _METRIC_COLS = [
     ("avg_annual_return", "平均年化收益"),
     ("avg_annual_vol", "平均年化波动"),
     ("avg_max_drawdown", "平均最大回撤"),
+    ("avg_worst_period_drawdown", "平均单周期最坏回撤"),
     ("avg_calmar", "平均Calmar"),
     ("avg_open_win_rate", "平均开仓胜率"),
     ("avg_open_pl_ratio", "平均开仓盈亏比"),
@@ -59,11 +60,11 @@ _PERIOD_RETURN_COLS = [
     ("ret_1y", "近1年收益"),
     ("ret_prev_year", "上一年整年收益"),
 ]
-_PCT_KEYS = {"win_rate", "avg_annual_return", "avg_annual_vol", "avg_max_drawdown", "avg_open_win_rate",
+_PCT_KEYS = {"win_rate", "avg_annual_return", "avg_annual_vol", "avg_max_drawdown", "avg_worst_period_drawdown", "avg_open_win_rate",
              "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_prev_year"}
 _HIGHER_BETTER = {"avg_sharpe", "win_rate", "avg_annual_return", "avg_calmar", "avg_open_win_rate", "avg_open_pl_ratio", "avg_annual_open_count", "consistency_score",
                   "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_prev_year"}
-_LOWER_BETTER = {"sharpe_std", "avg_max_drawdown"}
+_LOWER_BETTER = {"sharpe_std", "avg_max_drawdown", "avg_worst_period_drawdown"}
 
 
 class WalkForwardAnalyzer:
@@ -162,6 +163,7 @@ class WalkForwardAnalyzer:
                 'avg_annual_return': ann_ret_vals.mean(),
                 'avg_annual_vol': ann_vol_vals.mean(),
                 'avg_max_drawdown': mdd_vals.mean(),
+                'avg_worst_period_drawdown': _safe('worst_period_drawdown').mean(),
                 'avg_calmar': calmar_vals.mean(),
                 'avg_open_win_rate': open_wr.mean() if len(open_wr) > 0 else np.nan,
                 'avg_open_pl_ratio': open_pl.mean() if len(open_pl) > 0 else np.nan,
@@ -378,6 +380,7 @@ class WalkForwardAnalyzer:
             ws[f'A{row}'] = "Win Rate"; ws[f'B{row}'] = f"{top['win_rate']:.1%}"; row += 1
             ws[f'A{row}'] = "Avg Annual Return"; ws[f'B{row}'] = f"{top['avg_annual_return']:.2%}"; row += 1
             ws[f'A{row}'] = "Avg Max Drawdown"; ws[f'B{row}'] = f"{top['avg_max_drawdown']:.2%}"; row += 1
+            ws[f'A{row}'] = "Avg Worst Period Drawdown"; ws[f'B{row}'] = f"{top['avg_worst_period_drawdown']:.2%}"; row += 1
         row += 2
 
         # 3. 配置摘要
@@ -645,6 +648,7 @@ class WalkForwardAnalyzer:
             'win_rate': top['win_rate'],
             'avg_return': top['avg_annual_return'],
             'avg_mdd': top['avg_max_drawdown'],
+            'avg_worst_period_dd': top['avg_worst_period_drawdown'],
             'consistency_score': top['consistency_score']
         }
 

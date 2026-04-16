@@ -464,6 +464,12 @@ Anti-overfitting validation system with strict train/test separation:
 32. **P3 Bug 25 — MarkToMarket dead code:** `strategy_utils.MarkToMarket.apply` removes the always-false condition `ops.loc[need_mtm & ~need_mtm, ...]`.
 33. **P2 Arc-26 — Rebalance calendar unified:** New `analysis/strategy/rebalance_calendar.py` is the single source of truth for rebalance calendar generation; `strategy_backtest._select_rebalance_dates` delegates to this module; `rebalance_manager.RebalancePeriodManager.get_rebalance_dates` imports and uses it, eliminating duplicate implementations.
 34. **P5 Arc-27 — `iterrows` vectorized:** `run_detailed_backtest_report.run_detailed_backtest` replaces `for j, (date, row) in enumerate(period_df.iterrows())` with vectorized pandas bulk operations, eliminating per-row iteration performance bottleneck.
+35. **Arc-28 — 单周期最坏回撤指标:** 新增 `worst_period_drawdown`（单持仓周期最坏回撤），定义为：遍历所有调仓周期，对每个持仓区间（调仓日 T → 下一调仓日 T_next）分别计算期间最大回撤，取所有区间中最差（最负）的一次。已同步更新以下位置：
+    - `strategy_metrics.py`: `StrategyMetrics._worst_period_drawdown()` + `compute_all()` 输出 3 个字段
+    - `discord_notifier.py`: `compute_extended_metrics()` 增加 `worst_period_drawdown` + `worst_period_drawdown_pct`，Discord 通知中同步显示全局/单周期两种回撤
+    - `strategy_report.py`: Sheet1 新增 3 列（单周期最坏回撤、起始日、结束日），百分比格式，反向色阶
+    - `rebalance_report.py`: Config Sheet 新增 `Worst_Period_Drawdown_Pct` 行
+    - `walk_forward_analyzer.py`: `Parameter_Stability` 新增 `avg_worst_period_drawdown` 列，条件格式/色阶同步，Summary Sheet 也加入此指标
 
 ## Reference Docs
 

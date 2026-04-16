@@ -67,9 +67,12 @@ _METRIC_COLS = [
     ("annual_open_count",  "年化开仓次数"),
     ("annual_profit_count","年化盈利次数"),
     ("max_drawdown",       "最大回撤"),
+    ("worst_period_drawdown", "单周期最坏回撤"),
     ("calmar",             "Calmar比率"),
     ("max_dd_start",       "最大回撤起始日"),
     ("max_dd_end",         "最大回撤结束日"),
+    ("worst_period_dd_start", "单周期最坏回撤起始日"),
+    ("worst_period_dd_end",   "单周期最坏回撤结束日"),
 ]
 
 _ALL_COLS = _PARAM_COLS + _METRIC_COLS
@@ -78,7 +81,7 @@ _ALL_COLS = _PARAM_COLS + _METRIC_COLS
 _PCT_KEYS = {
     "ret_1d", "ret_1w", "ret_1m", "ret_3m", "ret_6m",
     "ret_1y", "ret_last_year", "annual_return", "annual_vol",
-    "open_win_rate", "max_drawdown",
+    "open_win_rate", "max_drawdown", "worst_period_drawdown",
 }
 
 # 越大越好（绿）/ 越小越好（红：max_drawdown）
@@ -88,7 +91,7 @@ _HIGHER_BETTER = {
     "open_win_rate", "open_pl_ratio", "calmar",
     "annual_open_count", "annual_profit_count",
 }
-_LOWER_BETTER = {"max_drawdown"}   # 越负越红（用反向色阶）
+_LOWER_BETTER = {"max_drawdown", "worst_period_drawdown"}   # 越负越红（用反向色阶）
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +156,7 @@ class StrategyReporter:
         df = df.reindex(columns=col_order)
 
         # 日期列转字符串（Excel 不支持 pd.Timestamp 直接写入时区）
-        for date_col in ("max_dd_start", "max_dd_end"):
+        for date_col in ("max_dd_start", "max_dd_end", "worst_period_dd_start", "worst_period_dd_end"):
             df[date_col] = df[date_col].apply(
                 lambda x: x.strftime("%Y-%m-%d")
                 if isinstance(x, (pd.Timestamp, datetime)) and not pd.isnull(x)
@@ -310,7 +313,7 @@ class StrategyReporter:
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 if key in _PCT_KEYS:
                     cell.number_format = pct_fmt
-                elif key in ("max_dd_start", "max_dd_end", "strategy_name", "weight_method"):
+                elif key in ("max_dd_start", "max_dd_end", "worst_period_dd_start", "worst_period_dd_end", "strategy_name", "weight_method"):
                     cell.number_format = date_fmt
                 elif key not in ("group_num", "target_group", "rebalance_period"):
                     cell.number_format = num_fmt

@@ -26,20 +26,25 @@ DATA_START_OFFSET_DAYS = 0
 DATA_BASE_START_DATE = "2023-01-01"
 
 # yfinance 日频拉取标的（约 100 只美股，与 us_top100 命名一致）
+# YFINANCE_TICKERS = [
+#     "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
+#     "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
+#     "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
+#     "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
+#     "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
+#     "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
+#     "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
+#     "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
+#     "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
+#     "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
+#     "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
+#     "SANM", "ANET", 
+#     # 'GENV', 'VRT', 'LRCX', 'AMAT', 'NET'
+# ]
+
 YFINANCE_TICKERS = [
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
-    "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
-    "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
-    "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
-    "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
-    "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
-    "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
-    "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
-    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
-    "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
-    "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
-    "SANM", "ANET", 
-    # 'GENV', 'VRT', 'LRCX', 'AMAT', 'NET'
+    "COHR", "LITE", "FLY", "MRVL", "NBIS", "NVDA", "RDW", "GLW", "AEP", "RMBS", 
+    "HROW", "ONDS", "SANM", "TTMI", "MU"
 ]
 
 # yf.download 参数（与历史 Excel 列含义一致时可保持 auto_adjust=False）
