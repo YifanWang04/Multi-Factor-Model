@@ -50,6 +50,8 @@ def get_rebalance_calendar(
     selected = [dates[0]]
     last_selected = dates[0]
     for d in dates[1:]:
+        # 闭区间 (last_selected, d] = 不含 last_selected，含 d 本身
+        # d 本身是交易日（∈ factor_index 且 ∈ ret_index），故计数含 d
         n_trading_days = ((ret_sorted > last_selected) & (ret_sorted <= d)).sum()
         if n_trading_days >= rebalance_period_days:
             selected.append(d)

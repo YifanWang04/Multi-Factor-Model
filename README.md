@@ -94,7 +94,8 @@ qqq/
 │   ├── strategy_reports_offset{N}d/          # offset!=0 subdirs
 │   ├── walk_forward_reports/
 │   ├── strategy_review_YYYY-MM-DD_HHMMSS/     # run_strategy_review output (contains strategy_review.xlsx)
-│   └── rebalance_day_YYYY-MM-DD_HHMMSS/      # run_rebalance_day output (contains rebalance_day_report.xlsx, strategy_detailed_backtest_report*.xlsx)
+│   ├── rebalance_day_YYYY-MM-DD_HHMMSS/      # run_rebalance_day output (offset=0)
+│   ├── rebalance_day_offset{N}d_YYYY-MM-DD_HHMMSS/  # run_rebalance_day output (offset!=0)
 ├── docs/
 │   └── NOTES_VS_CODE_CHECKLIST.md  # Notes vs code implementation checklist
 ├── analyze_report.py               # Quick viewer tool for rebalance day report content
@@ -119,7 +120,7 @@ qqq/
 | Strategy backtest | `analysis/strategy/run_strategy.py` | strategy_config (auto-derives factor suffix from composite_config) | strategy_backtest_report.xlsx |
 | Detailed strategy report | `analysis/strategy/run_detailed_backtest_report.py` | Composite factor + strategy params (auto-derives factor suffix) | strategy_detailed_backtest_report.xlsx |
 | Strategy review report | `analysis/strategy/run_strategy_review.py` | strategy_review_config + composite_factors + price data | output/strategy_review_YYYY-MM-DD_HHMMSS/strategy_review.xlsx |
-| Rebalance day pipeline | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + fixed strategy params | `output/rebalance_day_YYYY-MM-DD_HHMMSS/` (contains `rebalance_day_report.xlsx`) |
+| Rebalance day pipeline | `analysis/strategy/run_rebalance_day.py` | pull_data→build_factors→data_process→run_composite_factor + fixed strategy params | `output/rebalance_day_YYYY-MM-DD_HHMMSS/` (offset=0) or `output/rebalance_day_offset{N}d_...` (offset!=0) |
 | Walk-Forward validation | `analysis/walk_forward/run_walk_forward.py` | walk_forward_config | walk_forward_report.xlsx + visualizations |
 | Quick report viewer | `analyze_report.py` | rebalance_day_report.xlsx | Console output (sheet names + data preview) |
 
@@ -134,11 +135,11 @@ python analysis/multi_factor/inspect_ols_weights.py
 python analysis/strategy/run_strategy.py
 python analysis/strategy/run_detailed_backtest_report.py
 python analysis/strategy/run_strategy_review.py                  # Strategy review (edit strategy_review_config first)
-python analysis/strategy/run_rebalance_day.py                    # Full pipeline (subprocess mode)
+python analysis/strategy/run_rebalance_day.py                    # Full pipeline (subprocess mode, output: rebalance_day_offset{N}d_... when offset!=0)
 python analysis/strategy/run_rebalance_day.py --inline           # Full pipeline (inline mode, faster)
 python analysis/strategy/run_rebalance_day.py --skip-pipeline    # Generate report from existing data
-python analysis/strategy/run_rebalance_day.py --skip-pull       # Skip pull_data in pipeline
-python analysis/strategy/run_rebalance_day.py --no-discord      # Skip Discord notification
+python analysis/strategy/run_rebalance_day.py --skip-pull         # Skip pull_data in pipeline
+python analysis/strategy/run_rebalance_day.py --no-discord       # Skip Discord notification
 python analysis/strategy/run_rebalance_day.py --run-dir <path>  # Specify run directory to reuse data
 python analysis/strategy/test_discord_notification.py           # Test Discord Webhook
 python analysis/walk_forward/run_walk_forward.py
@@ -178,7 +179,7 @@ Weighting method meaning:
 5. Generate Excel report (`rebalance_day_report.xlsx`)
 6. Send Discord notification (performance metrics + current holding P&L)
 
-**Output:** `output/rebalance_day_YYYY-MM-DD_HHMMSS/`, containing:
+**Output:** `output/rebalance_day_YYYY-MM-DD_HHMMSS/` (offset=0) or `output/rebalance_day_offset{N}d_YYYY-MM-DD_HHMMSS/` (offset!=0), containing:
 - `data/` — raw price/volume data
 - `factor_raw/` — raw factor values
 - `factor_processed/` — processed factor data
@@ -196,7 +197,10 @@ Weighting method meaning:
 - `--inline`: All steps in the same Python process (recommended, faster, no subprocess overhead)
 - subprocess (default): Each step as a separate child process (stdout/stderr streamed in real time for progress monitoring)
 
-**Run directory convention:** Each run creates a timestamped directory `output/rebalance_day_YYYY-MM-DD_HHMMSS/`; `--run-dir` can specify an existing directory to reuse data.
+**Run directory convention:** Each run creates a timestamped directory with offset suffix:
+- offset=0: `output/rebalance_day_YYYY-MM-DD_HHMMSS/`
+- offset=N: `output/rebalance_day_offset{N}d_YYYY-MM-DD_HHMMSS/`
+`--run-dir` can specify an existing directory to reuse data.
 
 ---
 
@@ -208,7 +212,8 @@ Weighting method meaning:
 - **DATA_START_OFFSET_DAYS**: Number of trading days to shift data start date earlier
   - **Config location:** `data/data_config.py` (set directly in code; no env var override)
   - **Implementation:** In `pull_yhfinance_Data.py`, start_date is shifted back N trading days so factors and rebalance calendar stay aligned
-  - **Subdirs by offset (no overwrite):** offset=0 uses default paths; offset!=0 uses `_offset{N}d` suffix, e.g. `factor_raw_offset7d/`, `factor_processed_offset7d/`, `output/composite_factor_reports_offset7d/`, `output/strategy_reports_offset7d/`, etc.
+  - **Subdirs by offset (no overwrite):** offset=0 uses default paths; offset!=0 uses `_offset{N}d` suffix, e.g. `factor_raw_offset7d/`, `factor_processed_offset7d/`, `output/composite_factor_reports_offset7d/`, `output/strategy_reports_offset7d/`, `output/rebalance_day_offset7d_YYYY-MM-DD_HHMMSS/`, etc.
+  - **Subprocess offset propagation:** When `run_rebalance_day.py` calls subprocess steps, it sets `REBALANCE_OFFSET_DAYS` env var so subprocess scripts (`pull_yhfinance_Data.py`, `build_factors.py`, `data_process.py`, `run_composite_factor.py` via `composite_config._offset_suffix()`) pick up the same offset value without re-reading `data_config.py`. Note: `pull_yhfinance_Data.py` also uses `_resolve_offset()` internally so that subprocess runs respect the env var even when `data_config.DATA_START_OFFSET_DAYS` is 0.
 - **Factor selection mechanism (composite_config.py):**
   - **Priority 1:** Env var `REBALANCE_SELECTED_FACTOR_INDICES` (set by `run_rebalance_day.py`, ensures consistent factors across the full pipeline)
   - **Priority 2:** `MANUALLY_SELECTED_FACTOR_INDICES` (manual config in this file, for temporary testing)
@@ -470,6 +475,15 @@ Anti-overfitting validation system with strict train/test separation:
     - `strategy_report.py`: Sheet1 新增 3 列（单周期最坏回撤、起始日、结束日），百分比格式，反向色阶
     - `rebalance_report.py`: Config Sheet 新增 `Worst_Period_Drawdown_Pct` 行
     - `walk_forward_analyzer.py`: `Parameter_Stability` 新增 `avg_worst_period_drawdown` 列，条件格式/色阶同步，Summary Sheet 也加入此指标
+36. **P6 Bug — offset 参数失效（pull 脚本未读环境变量）:** `pull_yhfinance_Data.py` 直接从 `data_config` 导入 `DATA_START_OFFSET_DAYS` 常量（=0），而 `yfinance_pull_start_date()` 也用的是模块级 `DATA_START_OFFSET_DAYS`，导致无论 subprocess 设置 `REBALANCE_OFFSET_DAYS=1`，pull 阶段始终用 offset=0 的起始日拉数据，最终因子、调仓日完全相同。修复：
+    - `pull_yhfinance_Data.py`: 改用 `_resolve_offset()` 读取 offset（优先环境变量，其次配置文件）
+    - `data_config.yfinance_pull_start_date()`: 内部调用 `_resolve_offset()` 而非直接引用模块级 `DATA_START_OFFSET_DAYS`
+37. **Bug — 未来调仓日外推未考虑 NYSE 非联邦节假日（Good Friday 等）:** 未来调仓日外推时，当超出数据范围走 fallback，`pd.bdate_range(freq="B")` 仅识别周末+美国联邦法定节假日，**遗漏 Good Friday（耶稣受难日）和感恩节次日（黑五）**，导致调仓日预测错误。案例：`P20d` 从 3.13 外推 → `bdate_range` 给出 4.10（错误，将 4.3 计为交易日）→ 正确值应为 4.13。修复：
+    - `rebalance/rebalance_operations.py`: 新增 `_get_nyse_calendar()` 和 `_nth_nyse_trading_day()`，fallback 路径改用 `pandas_market_calendars.NYSE.valid_days()` 正确排除 NYSE 休市日；同时修正主路径和外推路径的 off-by-one 语义（`>= P` → `> P-1`），与历史调仓日逻辑保持一致
+    - `run_detailed_backtest_report.py`: 同样将 `bdate_range` fallback 替换为 `_nth_nyse_trading_day()`
+    - `rebalance_calendar.py`: 统一语义 `>= P` → `> P-1`（历史调仓日选取逻辑），确保历史回测与外推使用一致的交易日计数方式
+    - 新增依赖：`pip install pandas_market_calendars`（已在 `.venv` 中安装）
+38. **Bug — 调仓日选取使用开区间导致 off-by-one：** `rebalance_calendar.py` 中交易日计数使用 `(ret > last_selected) & (ret < d)`（开区间），同时条件为 `> P-1`，导致区间 `(T1, T2]` 的交易日数被少计1。例如 P=10 时：`(01-03, 01-18)` = 9交易日 < 10 → 01-18 未被选中；`(01-03, 01-19)` = 10交易日 < 10 → 01-19 也未被选中，实际选中的是 01-20。修复：将 `< d` 改为 `<= d`（含 d 本身），条件改为 `>= P`，使 `(01-03, 01-18]` = 10交易日 ≥ 10 → 正确选中 01-18。修复后 P=10 调仓日数量从 75 增加到 83（精确每 10 交易日选一个）。
 
 ## Reference Docs
 

@@ -168,9 +168,15 @@ def build_factor_suffix(factor_indices: list[int] | None = None, default_indices
 def composite_factors_path(base_dir: str, factor_indices: list[int]) -> str:
     """
     返回 composite_factor_reports 目录下带因子后缀的文件路径。
+    base_dir：完整路径（可含 composite_factor_reports/ 子目录）
+    当 base_dir 已含 composite_factor_reports 子目录时，直接在其下生成文件；
+    否则自动追加该子目录。
     """
     suffix = build_factor_suffix(factor_indices)
     name = f"composite_factors_{suffix}.xlsx"
+    # 若 base_dir 已为完整目录（已含 composite_factor_reports 子目录），直接使用
+    if os.path.basename(base_dir) == "composite_factor_reports":
+        return os.path.join(base_dir, name)
     return os.path.join(base_dir, "composite_factor_reports", name)
 
 

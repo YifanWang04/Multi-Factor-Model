@@ -26,26 +26,26 @@ DATA_START_OFFSET_DAYS = 0
 DATA_BASE_START_DATE = "2023-01-01"
 
 # yfinance 日频拉取标的（约 100 只美股，与 us_top100 命名一致）
-# YFINANCE_TICKERS = [
-#     "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
-#     "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
-#     "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
-#     "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
-#     "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
-#     "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
-#     "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
-#     "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
-#     "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
-#     "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
-#     "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
-#     "SANM", "ANET", 
-#     # 'GENV', 'VRT', 'LRCX', 'AMAT', 'NET'
-# ]
-
 YFINANCE_TICKERS = [
-    "COHR", "LITE", "FLY", "MRVL", "NBIS", "NVDA", "RDW", "GLW", "AEP", "RMBS", 
-    "HROW", "ONDS", "SANM", "TTMI", "MU"
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
+    "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
+    "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
+    "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
+    "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
+    "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
+    "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
+    "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
+    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
+    "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
+    "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
+    "SANM", "ANET", 
+    # 'GENV', 'VRT', 'LRCX', 'AMAT', 'NET'
 ]
+
+# YFINANCE_TICKERS = [
+#     "COHR", "LITE", "FLY", "MRVL", "NBIS", "NVDA", "RDW", "GLW", "AEP", "RMBS", 
+#     "HROW", "ONDS", "SANM", "TTMI", "MU"
+# ]
 
 # yf.download 参数（与历史 Excel 列含义一致时可保持 auto_adjust=False）
 YFINANCE_DOWNLOAD_AUTO_ADJUST = False
@@ -53,26 +53,39 @@ YFINANCE_DOWNLOAD_PROGRESS = False
 
 
 def yfinance_pull_start_date() -> str:
-    """根据 DATA_BASE_START_DATE 与 DATA_START_OFFSET_DAYS 得到 yfinance 的 start 参数（YYYY-MM-DD）。"""
-    if DATA_START_OFFSET_DAYS <= 0:
+    """根据 DATA_BASE_START_DATE 与 DATA_START_OFFSET_DAYS 得到 yfinance 的 start 参数（YYYY-MM-DD）。
+    通过 _resolve_offset() 优先读取环境变量 REBALANCE_OFFSET_DAYS。
+    """
+    offset = _resolve_offset()
+    if offset <= 0:
         return DATA_BASE_START_DATE
     base = pd.Timestamp(DATA_BASE_START_DATE)
     # 用 BDay 回推 N 个交易日；避免 bdate_range(end=非交易日, periods=...) 与预期长度不一致
-    start = base - pd.offsets.BDay(DATA_START_OFFSET_DAYS)
+    start = base - pd.offsets.BDay(offset)
     return start.strftime("%Y-%m-%d")
+
+
+# 统一 offset 解析：优先读环境变量（subprocess 传播），否则读配置文件常量
+def _resolve_offset() -> int:
+    env_val = os.environ.get("REBALANCE_OFFSET_DAYS")
+    if env_val is not None:
+        return int(env_val)
+    return DATA_START_OFFSET_DAYS
 
 
 # 价格文件名（不含路径）
 def _price_filename() -> str:
-    if DATA_START_OFFSET_DAYS == 0:
+    offset = _resolve_offset()
+    if offset == 0:
         return "us_top100_daily_2023_present.xlsx"
-    return f"us_top100_daily_2023_present_offset{DATA_START_OFFSET_DAYS}d.xlsx"
+    return f"us_top100_daily_2023_present_offset{offset}d.xlsx"
 
 # 目录后缀：offset=0 为空，offset!=0 为 _offset{N}d
 def _offset_dir_suffix() -> str:
-    if DATA_START_OFFSET_DAYS == 0:
+    offset = _resolve_offset()
+    if offset == 0:
         return ""
-    return f"_offset{DATA_START_OFFSET_DAYS}d"
+    return f"_offset{offset}d"
 
 # 默认价格文件路径（项目 data 目录下）
 # 当 offset 文件不存在时，回退到基线文件

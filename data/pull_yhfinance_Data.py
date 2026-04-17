@@ -27,15 +27,17 @@ import yfinance as yf
 from datetime import datetime, timedelta, timezone
 
 from data.data_config import (
-    DATA_START_OFFSET_DAYS,
     YFINANCE_DOWNLOAD_AUTO_ADJUST,
     YFINANCE_DOWNLOAD_PROGRESS,
     YFINANCE_TICKERS,
     _price_filename,
     yfinance_pull_start_date,
+    _resolve_offset,
 )
 
 # 1. 运行参数（配置均在 data_config）
+# 优先读环境变量（subprocess 传播的 REBALANCE_OFFSET_DAYS），否则读配置文件
+DATA_START_OFFSET_DAYS = _resolve_offset()
 
 start_date = yfinance_pull_start_date()
 if DATA_START_OFFSET_DAYS > 0:

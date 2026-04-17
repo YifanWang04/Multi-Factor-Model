@@ -54,6 +54,7 @@ from strategy_backtest import (
 )
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
+from rebalance.rebalance_operations import _nth_nyse_trading_day
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +121,8 @@ def run_detailed_backtest(
     if len(_after) >= rebalance_period:
         next_rb_date = pd.Timestamp(_after[rebalance_period - 1])
     else:
-        _bd = pd.bdate_range(start=last_rb, periods=rebalance_period + 1, freq="B")
-        next_rb_date = pd.Timestamp(_bd[-1])
+        # 超出数据范围：用 NYSE 日历外推（正确处理 Good Friday 等非联邦节假日）
+        next_rb_date = _nth_nyse_trading_day(last_rb, rebalance_period)
 
     # 如果 next_rb_date 晚于价格截止日，则使用价格截止日
     actual_sell_date = min(next_rb_date, price_end_date)

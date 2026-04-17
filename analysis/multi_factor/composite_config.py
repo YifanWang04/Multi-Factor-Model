@@ -22,9 +22,9 @@ if os.path.isdir(_STRATEGY_UTILS_DIR) and _STRATEGY_UTILS_DIR not in sys.path:
 
 # ── 手动因子配置区 ─────────────────────────────────────────────────────────────
 # ⚠️ 如需切换因子，直接修改此列表（如 [95, 101, 62, 65, 32]），无需改其他文件
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
+MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
 # MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25
-MANUALLY_SELECTED_FACTOR_INDICES =  [23, 43, 66, 45, 31]  # 4/15
+# MANUALLY_SELECTED_FACTOR_INDICES =  [23, 43, 66, 45, 31]  # 4/15
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -52,9 +52,15 @@ def _resolve_selected_factor_indices():
 
 
 # 内联 offset 目录后缀逻辑（避免从 data_config 导入 _offset_dir_suffix 触发循环导入）
+# 支持两层来源：1) 环境变量 REBALANCE_OFFSET_DAYS（subprocess 传递） 2) data_config.DATA_START_OFFSET_DAYS
 def _offset_suffix() -> str:
-    from data.data_config import DATA_START_OFFSET_DAYS
-    return f"_offset{DATA_START_OFFSET_DAYS}d" if DATA_START_OFFSET_DAYS != 0 else ""
+    env_val = os.environ.get("REBALANCE_OFFSET_DAYS")
+    if env_val is not None:
+        offset = int(env_val)
+    else:
+        from data.data_config import DATA_START_OFFSET_DAYS
+        offset = DATA_START_OFFSET_DAYS
+    return f"_offset{offset}d" if offset != 0 else ""
 
 # 路径：根据 data_config 按 offset 分子目录（不覆盖）
 from data.data_config import (
@@ -81,7 +87,8 @@ SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
 
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
 # ⚠️ 重要：此周期决定复合因子的生成频率
-# 建议：策略回测的 REBALANCE_PERIODS 应包含此值，或为此值的整数倍
+# ⚠️ 必须与策略回测的调仓周期（STRATEGY_PARAM 中的 P{N}d）保持一致！
+#   当前策略: max_return_10G_Top1_P20d → P=20
 REBALANCE_PERIOD = 10
 
 # 一元/IC加权滚动窗口列表 N

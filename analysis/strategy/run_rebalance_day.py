@@ -4,7 +4,10 @@
 完整 Pipeline：pull_data → build_factors → data_process → run_composite_factor
 使用固定策略参数生成持仓，输出调仓日判定、当前调仓日操作及未来调仓日列表。
 
-所有输出保存至带日期时间的独立文件夹：output/rebalance_day_YYYY-MM-DD_HHMMSS/
+所有输出保存至带日期时间的独立文件夹：
+  offset=0:  output/rebalance_day_YYYY-MM-DD_HHMMSS/
+  offset!=0: output/rebalance_day_offset{N}d_YYYY-MM-DD_HHMMSS/
+offset 由本脚本中 DATA_START_OFFSET_DAYS 配置控制。
 
 职责分工（SRP 原则）：
   - run_rebalance_day.py  — 流程编排器（Pipeline 执行 + 各阶段串联）
@@ -31,6 +34,7 @@ from __future__ import annotations
 import os
 import sys
 import io
+import shutil
 import subprocess
 from datetime import datetime
 from typing import Optional
@@ -71,8 +75,6 @@ from run_detailed_backtest_report import run_detailed_backtest, parse_strategy_p
 from strategy_backtest import _select_rebalance_dates
 import strategy_config as cfg
 from data.data_config import (
-    DATA_START_OFFSET_DAYS,
-    _price_filename,
     COMPOSITE_FACTOR_OUTPUT_DIR,
     COMPOSITE_FACTOR_FILE as _COMPOSITE_FACTOR_FILE,
 )
@@ -97,16 +99,33 @@ PIPELINE_SUBPROCESS_TIMEOUT: int = 600
 PROJECT_ROOT = r"D:\qqq"
 OUTPUT_BASE = os.path.join(PROJECT_ROOT, "output")
 
+# offset 配置：数据起始日提前的交易日数，0=不提前，正数=提前 N 个交易日
+DATA_START_OFFSET_DAYS = 0
+
+
+def _price_filename() -> str:
+    """根据 DATA_START_OFFSET_DAYS 返回价格文件名。"""
+    if DATA_START_OFFSET_DAYS == 0:
+        return "us_top100_daily_2023_present.xlsx"
+    return f"us_top100_daily_2023_present_offset{DATA_START_OFFSET_DAYS}d.xlsx"
+
+
+def _offset_dir_suffix() -> str:
+    """目录后缀：offset=0 为空，offset!=0 为 _offset{N}d。"""
+    if DATA_START_OFFSET_DAYS == 0:
+        return ""
+    return f"_offset{DATA_START_OFFSET_DAYS}d"
+
 COMPOSITE_FACTOR_SHEET = "ic_m3_N20"
-COMPOSITE_FACTOR_SHEET = "rank_add"
+# COMPOSITE_FACTOR_SHEET = "rank_add"
 
 # MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 
-MANUALLY_SELECTED_FACTOR_INDICES = [23, 43, 66, 45, 31]  # 4/15 
+MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 
+# MANUALLY_SELECTED_FACTOR_INDICES = [23, 43, 66, 45, 31]  # 4/15 
 
 # STRATEGY_PARAM = "max_return_5G_Top1_P10d"  # 3/17
-# STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
-STRATEGY_PARAM = "max_return_10G_Top1_P10d"  # 4/15
+STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
+# STRATEGY_PARAM = "max_return_10G_Top1_P10d"  # 4/15
 
 SELECTED_FACTOR_INDICES = MANUALLY_SELECTED_FACTOR_INDICES
 SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
@@ -137,7 +156,18 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
     for d in (data_dir, factor_raw_dir, factor_processed_dir, composite_dir):
         os.makedirs(d, exist_ok=True)
 
-    if not skip_pull:
+    if skip_pull:
+        from data.data_config import PRICE_FILE as _src_price
+        src = _src_price
+        dst = os.path.join(data_dir, _price_filename())
+        if os.path.isfile(src):
+            shutil.copy2(src, dst)
+            print(f"  [Pipeline] 已复制数据至: {dst}")
+        else:
+            raise FileNotFoundError(
+                f"skip_pull 时需存在 {src}，请先运行 pull 或确保已在当前脚本中设好 DATA_START_OFFSET_DAYS"
+            )
+    else:
         print("[Pipeline] 拉取行情数据...")
         from data import pull_yhfinance_Data
         pull_yhfinance_Data.main()
@@ -162,6 +192,7 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
     env["REBALANCE_SELECTED_FACTORS"] = ",".join(SELECTED_FACTOR_NAMES)
     env["REBALANCE_SELECTED_FACTOR_INDICES"] = ",".join(str(i) for i in SELECTED_FACTOR_INDICES)
     env["REBALANCE_SELECTED_COMPOSITE"] = COMPOSITE_FACTOR_SHEET
+    env["REBALANCE_OFFSET_DAYS"] = str(DATA_START_OFFSET_DAYS)
 
     data_dir = os.path.join(run_dir, "data")
     for sub_dir in (data_dir, os.path.join(run_dir, "factor_raw"),
@@ -170,7 +201,7 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
         os.makedirs(sub_dir, exist_ok=True)
 
     if skip_pull:
-        from data.data_config import PRICE_FILE as _src_price, _price_filename
+        from data.data_config import PRICE_FILE as _src_price
         src = _src_price
         dst = os.path.join(data_dir, _price_filename())
         if os.path.isfile(src):
@@ -178,7 +209,7 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
             print(f"  已复制数据至: {dst}")
         else:
             raise FileNotFoundError(
-                f"skip_pull 时需存在 {src}，请先运行 pull 或确保已在 data/data_config.py 中设好 DATA_START_OFFSET_DAYS"
+                f"skip_pull 时需存在 {src}，请先运行 pull 或确保已在当前脚本中设好 DATA_START_OFFSET_DAYS"
             )
 
     steps = []
@@ -216,19 +247,25 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 def _get_run_dir(run_dir_arg: Optional[str], skip_pipeline: bool) -> str:
-    """获取本次运行的输出目录。"""
+    """获取本次运行的输出目录，目录名含 offset 后缀以区分不同偏移配置。"""
     if run_dir_arg:
         return os.path.abspath(run_dir_arg)
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    offset_suffix = _offset_dir_suffix()
+    # offset=0 时目录名为 rebalance_day_YYYY-MM-DD_HHMMSS
+    # offset=N 时为 rebalance_day_offset{N}d_YYYY-MM-DD_HHMMSS
+    if offset_suffix:
+        return os.path.join(OUTPUT_BASE, f"rebalance_day{offset_suffix}_{ts}")
     return os.path.join(OUTPUT_BASE, f"rebalance_day_{ts}")
 
 
 def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
     """
     将 Pipeline 生成的复合因子同步到标准路径，使 run_detailed_backtest_report.py 使用最新数据。
-    原子写保护：先写临时文件，再 os.replace() 原子替换。
+    原子写保护：使用 NamedTemporaryFile(suffix=".xlsx") + os.replace() 原子替换，
+    避免 openpyxl 拒绝 .tmp/.bak 等非标准扩展名。
     """
-    import openpyxl
+    import tempfile
 
     src = composite_factors_path(run_dir, SELECTED_FACTOR_INDICES)
     dst = composite_factors_path(COMPOSITE_FACTOR_OUTPUT_DIR, SELECTED_FACTOR_INDICES)
@@ -243,10 +280,18 @@ def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
         src_df = src_df.apply(pd.to_numeric, errors="coerce")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
 
-        tmp_path = dst + ".tmp"
-        with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
-            src_df.to_excel(writer, sheet_name=sheet)
-        os.replace(tmp_path, dst)
+        # openpyxl 拒绝非 .xlsx 扩展名，使用 NamedTemporaryFile(suffix=".xlsx") 规避
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tf:
+            tmp_path = tf.name
+        try:
+            with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+                src_df.to_excel(writer, sheet_name=sheet)
+            os.replace(tmp_path, dst)
+        except Exception:
+            # 写入失败时清理临时文件
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
 
         print(f"  [同步完成] 复合因子 {sheet} 已更新至: {dst}")
         print(f"             因子日期范围: {src_df.index[0].date()} ~ {src_df.index[-1].date()}")
@@ -314,7 +359,20 @@ def main(
     else:
         print("\n[阶段 1] 跳过 Pipeline")
 
-    # 阶段 2：加载数据
+    # skip_pipeline 时若 run_dir_arg 指定了自定义目录但价格文件缺失，从标准位置复制
+    if skip_pipeline and run_dir_arg:
+        price_src = os.path.join(PROJECT_ROOT, "data", _price_filename())
+        price_dst = price_file
+        if not os.path.isfile(price_dst):
+            if os.path.isfile(price_src):
+                data_dir = os.path.join(run_dir, "data")
+                os.makedirs(data_dir, exist_ok=True)
+                shutil.copy2(price_src, price_dst)
+                print(f"  已从 {price_src} 复制价格数据至: {price_dst}")
+            else:
+                print(f"  [警告] 价格文件缺失: {price_src}（不影响后续因子加载）")
+
+    # 阶段 2：加载复合因子与收益率
     print("\n[阶段 2] 加载复合因子与收益率...")
     factor_df = load_composite_factor_with_fallback(composite_file, COMPOSITE_FACTOR_SHEET, _COMPOSITE_FACTOR_FILE)
     ret_df = _load_ret_data(price_file, cfg.RETURN_COLUMN)
