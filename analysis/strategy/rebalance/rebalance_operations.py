@@ -103,62 +103,72 @@ def get_rebalance_day_status(
 ) -> dict:
     """
     判定调仓日状态。
-    rebalance_period: 调仓周期（交易日数）。
-    trading_dates: 可选，交易日序列；用于推算未来调仓日。
-    有 trading_dates 时优先用实际交易日序列外推（保持与回测日历一致），
-    无 trading_dates 或超出数据范围时使用 NYSE 日历（正确处理 Good Friday 等非联邦节假日）。
+
+    核心原则：
+    - `is_rebalance_today`：仅取决于调仓日历，与因子数据是否可用无关。
+      4/27 在调仓日历上 → is_rebalance_today=True（即使盘中因子数据尚未生成）。
+    - `has_factor_data`：因子数据是否已生成（pipeline 是否已跑完今日数据）。
+      若 False，说明今日是调仓日但因子尚未生成，不应显示买卖操作。
+
+    trading_dates：用于外推未来调仓日（保持与回测日历一致）。
     """
     rebalance_dates = sorted(rebalance_dates)
     if not rebalance_dates:
         return {
             "is_rebalance_today": False,
+            "has_factor_data": False,
             "current_rebalance_date": None,
             "next_rebalance_date": None,
             "future_rebalance_dates": [],
             "all_rebalance_dates": [],
         }
 
+    sorted_td = sorted(trading_dates) if trading_dates else []
+    # anchor：最后一个有因子数据的历史调仓日，外推从这里开始
     anchor = rebalance_dates[-1]
+
+    # ── 构建外推调仓日列表 ──
     extrapolated = []
     current_date = anchor
-    sorted_td = sorted(trading_dates) if trading_dates else []
-
     for _ in range(REBALANCE_EXTRAPOLATE_MAX_PERIODS):
         if sorted_td:
             try:
-                # 找严格大于 current_date 的第一个交易日（不含当天本身）
+                # 找严格大于 current_date 的第一个交易日
                 idx = next(i for i, x in enumerate(sorted_td) if x > current_date)
             except StopIteration:
                 idx = len(sorted_td)
-            next_idx = idx + rebalance_period - 1
+            next_idx = idx + rebalance_period
             if next_idx < len(sorted_td):
                 current_date = sorted_td[next_idx]
             else:
-                # 超出数据范围：用 NYSE 日历外推（正确处理 Good Friday 等非联邦节假日）
                 current_date = _nth_nyse_trading_day(current_date, rebalance_period)
         else:
-            # 无真实交易日数据：直接用 NYSE 日历
             current_date = _nth_nyse_trading_day(current_date, rebalance_period)
         extrapolated.append(current_date)
+        # 用 as_of_date 判断"未来"：≤ as_of_date 为已确认，> as_of_date 为未来
         future_so_far = [x for x in extrapolated if x > as_of_date]
         if len(future_so_far) >= REBALANCE_EXTRAPOLATE_FUTURE_MIN:
             break
 
     all_dates = sorted(set(rebalance_dates) | set(extrapolated))
-    past_all = [x for x in all_dates if x <= as_of_date]
-    current_rebalance_date = past_all[-1] if past_all else None
-    future_all = [x for x in all_dates if x > as_of_date]
-    next_rebalance_date = future_all[0] if future_all else None
 
-    is_rebalance_today = (
-        current_rebalance_date is not None
-        and current_rebalance_date.date() == as_of_date.date()
-    )
+    # ── 调仓日判定（与因子数据无关）──
+    is_rebalance_today = as_of_date.normalize() in {d.normalize() for d in all_dates}
+
+    # ── 因子数据是否可用 ──
+    # 盘中 pipeline 未跑完 → last_factor_date < as_of_date → 无今日因子数据
+    has_factor_data = as_of_date <= last_factor_date
+
+    past_all = [x for x in all_dates if x <= as_of_date]
+    future_all = [x for x in all_dates if x > as_of_date]
+    current_rebalance_date = past_all[-1] if past_all else None
+    next_rebalance_date = future_all[0] if future_all else None
 
     future_rebalance_dates = future_all[:REBALANCE_EXTRAPOLATE_FUTURE_MIN]
 
     return {
         "is_rebalance_today": is_rebalance_today,
+        "has_factor_data": has_factor_data,
         "current_rebalance_date": current_rebalance_date,
         "next_rebalance_date": next_rebalance_date,
         "future_rebalance_dates": future_rebalance_dates,
@@ -363,6 +373,7 @@ def get_current_rebalance_operations(
     rebalance_dates: Optional[list] = None,
     strategy_params: Optional[dict] = None,
     config=None,
+    status: Optional[dict] = None,
 ) -> pd.DataFrame:
     """
     获取当前调仓日操作：卖出上一期持仓 + 买入本期标的。
@@ -370,9 +381,15 @@ def get_current_rebalance_operations(
     rebalance_dates: 历史调仓日列表，用于在无卖出记录时回退到前一个调仓日的卖出。
 
     卖出逻辑：
-    - 取 Rebalance_Date < current_rebalance_date 且 Next_Rebalance_Date == current_rebalance_date 的记录
-    - 若无匹配（current_rebalance_date 还未发生），回退到前一调仓日的卖出记录
-    - 过滤掉 Next_Rebalance_Date 为空的记录（最后一期持仓，无实际卖出）
+    - 今日是调仓日：卖出上一期持仓（前一个调仓日的所有持仓）
+    - 今日非调仓日：取 Next_Rebalance_Date == current_rebalance_date 的记录
+
+    买入逻辑：
+    - 今日是调仓日：强制用最新可用因子计算今日操作
+    - 今日非调仓日：从 operations_df 取已有记录
+
+    status: 调仓日状态 dict，含 is_rebalance_today，用于区分
+            "今日是调仓日"与"今日非调仓日"两种场景。
 
     返回含 Action 列（Sell/Buy）的 DataFrame，先卖后买。
     """
@@ -384,49 +401,59 @@ def get_current_rebalance_operations(
     buy_ops = pd.DataFrame()
 
     rb_ts = pd.Timestamp(current_rebalance_date)
+    today_is_rb = status.get("is_rebalance_today", False) is True if status else False
 
-    # 1. 卖出操作：买入日在 current_rb 之前、卖出日在 current_rb 当日
+    # 1. 卖出操作
     if not ops_df.empty and "Next_Rebalance_Date" in ops_df.columns:
         ops = ops_df.copy()
         ops["Rebalance_Date"] = pd.to_datetime(ops["Rebalance_Date"], errors="coerce")
         ops["Next_Rebalance_Date"] = pd.to_datetime(ops["Next_Rebalance_Date"], errors="coerce")
 
-        mask_sell = (
-            (ops["Rebalance_Date"] < rb_ts)
-            & (ops["Next_Rebalance_Date"] == rb_ts)
-            & (ops["Sell_Price_Close"].notna())
-        )
-        sell_ops = ops.loc[mask_sell].copy()
+        if today_is_rb:
+            # 今日是调仓日：卖出上一期持仓（前一个调仓日的全部持仓）
+            if rebalance_dates:
+                sorted_rb = sorted([pd.Timestamp(d) for d in rebalance_dates if pd.notna(d)])
+                prev_rb = None
+                for d in reversed(sorted_rb):
+                    if d < rb_ts:
+                        prev_rb = d
+                        break
+                if prev_rb is not None:
+                    # 取前一个调仓日买入的所有标的（不论 Next_Rebalance_Date 是什么）
+                    mask_prev = (
+                        (ops["Rebalance_Date"] == prev_rb)
+                    )
+                    sell_ops = ops.loc[mask_prev].copy()
+        else:
+            # 今日非调仓日：取 Next_Rebalance_Date == current_rebalance_date 的记录
+            mask_sell = (
+                (ops["Rebalance_Date"] < rb_ts)
+                & (ops["Next_Rebalance_Date"] == rb_ts)
+                & (ops["Sell_Price_Close"].notna())
+            )
+            sell_ops = ops.loc[mask_sell].copy()
 
-        # 若无卖出记录（current_rb 还未发生），回退到前一调仓日的卖出
-        if sell_ops.empty and rebalance_dates:
-            sorted_rb = sorted([pd.Timestamp(d) for d in rebalance_dates if pd.notna(d)])
-            prev_rb = None
-            for d in reversed(sorted_rb):
-                if d < rb_ts:
-                    prev_rb = d
-                    break
-            if prev_rb is not None:
-                mask_prev = (
-                    (ops["Rebalance_Date"] < prev_rb)
-                    & (ops["Next_Rebalance_Date"] == prev_rb)
-                    & (ops["Sell_Price_Close"].notna())
-                )
-                sell_ops = ops.loc[mask_prev].copy()
+            if sell_ops.empty and rebalance_dates:
+                sorted_rb = sorted([pd.Timestamp(d) for d in rebalance_dates if pd.notna(d)])
+                prev_rb = None
+                for d in reversed(sorted_rb):
+                    if d < rb_ts:
+                        prev_rb = d
+                        break
+                if prev_rb is not None:
+                    mask_prev = (
+                        (ops["Rebalance_Date"] < prev_rb)
+                        & (ops["Next_Rebalance_Date"] == prev_rb)
+                        & (ops["Sell_Price_Close"].notna())
+                    )
+                    sell_ops = ops.loc[mask_prev].copy()
 
         if not sell_ops.empty:
             sell_ops.insert(0, "Action", "Sell")
 
-    # 2. 买入操作：今日买入的标的
-    if not ops_df.empty and "Rebalance_Date" in ops_df.columns:
-        ops = ops_df.copy()
-        ops["Rebalance_Date"] = pd.to_datetime(ops["Rebalance_Date"], errors="coerce")
-        mask_buy = ops["Rebalance_Date"] == rb_ts
-        buy_ops = ops.loc[mask_buy].copy()
-        if not buy_ops.empty:
-            buy_ops.insert(0, "Action", "Buy")
-
-    if buy_ops.empty:
+    # 2. 买入操作
+    if today_is_rb:
+        # 今日是调仓日：强制计算今日操作
         computed = _compute_last_rebalance_ops(
             factor_df=result.get("_factor_df"),
             ret_df=result.get("_ret_df"),
@@ -439,6 +466,29 @@ def get_current_rebalance_operations(
         if not computed.empty:
             buy_ops = computed.copy()
             buy_ops.insert(0, "Action", "Buy")
+    else:
+        # 今日非调仓日：从 operations_df 取已有的今日买入记录
+        if not ops_df.empty and "Rebalance_Date" in ops_df.columns:
+            ops = ops_df.copy()
+            ops["Rebalance_Date"] = pd.to_datetime(ops["Rebalance_Date"], errors="coerce")
+            mask_buy = ops["Rebalance_Date"] == rb_ts
+            buy_ops = ops.loc[mask_buy].copy()
+            if not buy_ops.empty:
+                buy_ops.insert(0, "Action", "Buy")
+
+        if buy_ops.empty:
+            computed = _compute_last_rebalance_ops(
+                factor_df=result.get("_factor_df"),
+                ret_df=result.get("_ret_df"),
+                price_df=result.get("_price_df"),
+                rb_date=current_rebalance_date,
+                config=result.get("_config"),
+                next_rb_date=next_rebalance_date,
+                strategy_params=strategy_params,
+            )
+            if not computed.empty:
+                buy_ops = computed.copy()
+                buy_ops.insert(0, "Action", "Buy")
 
     # 合并：先卖后买
     if sell_ops.empty and buy_ops.empty:

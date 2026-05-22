@@ -40,12 +40,8 @@ YFINANCE_TICKERS = [
     "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
     "SANM", "ANET", 
     # 'GENV', 'VRT', 'LRCX', 'AMAT', 'NET'
+    # AMAT
 ]
-
-# YFINANCE_TICKERS = [
-#     "COHR", "LITE", "FLY", "MRVL", "NBIS", "NVDA", "RDW", "GLW", "AEP", "RMBS", 
-#     "HROW", "ONDS", "SANM", "TTMI", "MU"
-# ]
 
 # yf.download 参数（与历史 Excel 列含义一致时可保持 auto_adjust=False）
 YFINANCE_DOWNLOAD_AUTO_ADJUST = False

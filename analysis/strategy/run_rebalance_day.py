@@ -440,6 +440,7 @@ def main(
             next_rebalance_date=next_rb_date,
             rebalance_dates=rebalance_dates,
             strategy_params=STRATEGY_PARAMS,
+            status=status,
         )
         current_ops, used_live_prices = apply_live_prices_to_operations(
             current_ops, price_df, current_rb_date, as_of_date
