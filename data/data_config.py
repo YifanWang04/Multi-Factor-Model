@@ -39,8 +39,14 @@ YFINANCE_TICKERS = [
     "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
     "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
     "SANM", "ANET", 
-    # 'GENV', 'VRT', 'LRCX', 'AMAT', 'NET'
-    # AMAT
+    ## June 8, 2026 add new stocks
+    # "AMAT", "LRCX", "CRDO", "ARM", 
+    # "AAOI",
+    # "MRVL", "NBIS",
+    # "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
+    # "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "KLAC", "SNPS", "CDNS",
+    # "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
+    # "MDB", "PANW", "CRWD"
 ]
 
 # yf.download 参数（与历史 Excel 列含义一致时可保持 auto_adjust=False）
