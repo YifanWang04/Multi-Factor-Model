@@ -109,7 +109,6 @@ def _price_filename() -> str:
         return "us_top100_daily_2023_present.xlsx"
     return f"us_top100_daily_2023_present_offset{DATA_START_OFFSET_DAYS}d.xlsx"
 
-
 def _offset_dir_suffix() -> str:
     """目录后缀：offset=0 为空，offset!=0 为 _offset{N}d。"""
     if DATA_START_OFFSET_DAYS == 0:
@@ -120,12 +119,12 @@ COMPOSITE_FACTOR_SHEET = "ic_m3_N20" # 3/17 + 3/25
 # COMPOSITE_FACTOR_SHEET = "ols_m3_M10" # June 8, 2026
 
 # MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 99, 27, 75, 19]  # June 8, 2026
+# MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 
+MANUALLY_SELECTED_FACTOR_INDICES = [95, 99, 27, 75, 19]  # June 8, 2026
 
 # STRATEGY_PARAM = "max_return_5G_Top1_P10d"  # 3/17
-STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
-# STRATEGY_PARAM = "max_return_5G_Top2_P20d" # June 8, 2026
+# STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
+STRATEGY_PARAM = "max_return_5G_Top2_P20d" # June 8, 2026
 
 SELECTED_FACTOR_INDICES = MANUALLY_SELECTED_FACTOR_INDICES
 SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
