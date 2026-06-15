@@ -303,6 +303,7 @@ This is the preferred tool for checking overfitting and parameter stability afte
 ## Reference Docs
 
 - `docs/NOTES_VS_CODE_CHECKLIST.md`: checklist comparing design notes with code behavior
+- `AGENTS.md`: coding-agent operating instructions for this repository
 - `analysis/walk_forward/README.md`: detailed walk-forward validation notes
 - `notes_markdown/notion_notes_EN.md`: translated research/design notes
 

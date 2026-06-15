@@ -303,6 +303,7 @@ Discord 消息包含：
 ## 参考文档
 
 - `docs/NOTES_VS_CODE_CHECKLIST.md`：设计笔记与代码行为检查清单
+- `AGENTS.md`：本仓库的 coding agent 协作说明
 - `analysis/walk_forward/README.md`：Walk-Forward 验证详细说明
 - `notes_markdown/notion_notes_ZH.md`：中文研究/设计笔记
 
