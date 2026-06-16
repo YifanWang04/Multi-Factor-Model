@@ -115,6 +115,7 @@ def _offset_dir_suffix() -> str:
     return offset_dir_suffix(DATA_START_OFFSET_DAYS)
 
 ACTIVE_STRATEGY_PROFILE = getattr(cfg, "ACTIVE_STRATEGY_PROFILE", "")
+ACTIVE_TICKER_UNIVERSE = cfg.ACTIVE_PROFILE.ticker_universe
 COMPOSITE_FACTOR_SHEET = cfg.COMPOSITE_FACTOR_SHEET
 STRATEGY_PARAM = cfg.STRATEGY_PARAM
 SELECTED_FACTOR_INDICES = list(cfg.STRATEGY_SELECTED_FACTOR_INDICES)
@@ -141,6 +142,7 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
         "REBALANCE_SELECTED_FACTOR_INDICES": ",".join(str(i) for i in SELECTED_FACTOR_INDICES),
         "REBALANCE_SELECTED_COMPOSITE": COMPOSITE_FACTOR_SHEET,
         "REBALANCE_OFFSET_DAYS": str(DATA_START_OFFSET_DAYS),
+        "REBALANCE_TICKER_UNIVERSE": ACTIVE_TICKER_UNIVERSE,
     }
     old_env = {k: os.environ.get(k) for k in env_updates}
     os.environ.update(env_updates)
@@ -166,7 +168,10 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
         else:
             print("[Pipeline] 拉取行情数据...")
             from data import pull_yhfinance_Data
-            pull_yhfinance_Data.main()
+            pull_yhfinance_Data.main(
+                ticker_universe=ACTIVE_TICKER_UNIVERSE,
+                ticker_source=f"profile:{ACTIVE_STRATEGY_PROFILE}",
+            )
 
         print("[Pipeline] 构建因子...")
         run_build_factors()
@@ -195,6 +200,7 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
     env["REBALANCE_SELECTED_FACTOR_INDICES"] = ",".join(str(i) for i in SELECTED_FACTOR_INDICES)
     env["REBALANCE_SELECTED_COMPOSITE"] = COMPOSITE_FACTOR_SHEET
     env["REBALANCE_OFFSET_DAYS"] = str(DATA_START_OFFSET_DAYS)
+    env["REBALANCE_TICKER_UNIVERSE"] = ACTIVE_TICKER_UNIVERSE
 
     data_dir = os.path.join(run_dir, "data")
     for sub_dir in (data_dir, os.path.join(run_dir, "factor_raw"),

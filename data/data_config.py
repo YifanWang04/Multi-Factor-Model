@@ -15,6 +15,7 @@ import os
 import pandas as pd
 import pandas_market_calendars as mcal
 from qqq_core.paths import ProjectPaths, offset_dir_suffix, price_filename
+from qqq_config.strategy_profiles import TICKER_UNIVERSES
 
 # 项目根目录（data 的上级）
 _PATHS = ProjectPaths.from_env()
@@ -29,35 +30,53 @@ DATA_START_OFFSET_DAYS = 0
 # 基准起始日（用于 pull 计算实际 start_date）
 DATA_BASE_START_DATE = "2023-01-01"
 
-# yfinance 日频拉取标的（约 100 只美股，与 us_top100 命名一致）
-YFINANCE_TICKERS = [
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
-    "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
-    "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
-    "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
-    "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
-    "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
-    "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
-    "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
-    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
-    "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
-    "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
-    "SANM", "ANET", 
-    ## June 8, 2026 add new stocks
-    # "AMAT", "LRCX", "CRDO", "ARM", 
-    # "AAOI",
-    # "MRVL", "NBIS",
-    # "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
-    # "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "SNPS", "CDNS",
-    # "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
-    # "MDB", "PANW", "CRWD",
-    # "KLAC" #June 12, 2026拆股一拆十
-]
+# 直接运行 data/pull_yhfinance_Data.py 时使用的默认股票池。
+# 调仓日或其他调用方需要指定股票池时，通过 REBALANCE_TICKER_UNIVERSE /
+# YFINANCE_TICKER_UNIVERSE 环境变量，或 pull_yhfinance_Data.main(ticker_universe=...)
+# 显式传入。
+DATA_PULL_TICKER_UNIVERSE = "US_108"
+REBALANCE_TICKER_UNIVERSE_ENV_VAR = "REBALANCE_TICKER_UNIVERSE"
+YFINANCE_TICKER_UNIVERSE_ENV_VAR = "YFINANCE_TICKER_UNIVERSE"
+
+
+def resolve_ticker_universe_source(ticker_universe: str | None = None) -> tuple[str, str]:
+    """Return ``(universe_name, source)`` for the yfinance ticker universe."""
+    if ticker_universe:
+        return ticker_universe, "argument"
+    env_val = os.environ.get(REBALANCE_TICKER_UNIVERSE_ENV_VAR)
+    if env_val:
+        return env_val, REBALANCE_TICKER_UNIVERSE_ENV_VAR
+    env_val = os.environ.get(YFINANCE_TICKER_UNIVERSE_ENV_VAR)
+    if env_val:
+        return env_val, YFINANCE_TICKER_UNIVERSE_ENV_VAR
+    return DATA_PULL_TICKER_UNIVERSE, "DATA_PULL_TICKER_UNIVERSE"
+
+
+def resolve_ticker_universe_name(ticker_universe: str | None = None) -> str:
+    """Return the configured yfinance ticker universe name."""
+    return resolve_ticker_universe_source(ticker_universe)[0]
+
+
+def resolve_yfinance_tickers(ticker_universe: str | None = None) -> list[str]:
+    """Return yfinance tickers for a universe name or the current config context."""
+    universe_name = resolve_ticker_universe_name(ticker_universe)
+    try:
+        return list(TICKER_UNIVERSES[universe_name])
+    except KeyError as exc:
+        available = ", ".join(sorted(TICKER_UNIVERSES))
+        raise KeyError(
+            f"Unknown yfinance ticker universe {universe_name!r}. "
+            f"Available universes: {available}"
+        ) from exc
+
+
+YFINANCE_TICKER_UNIVERSE = resolve_ticker_universe_name()
+YFINANCE_TICKERS = resolve_yfinance_tickers(YFINANCE_TICKER_UNIVERSE)
 
 
 def configured_ticker_set() -> set[str]:
     """Return the configured ticker universe used by data/factor loaders."""
-    return set(YFINANCE_TICKERS)
+    return set(resolve_yfinance_tickers())
 
 
 def should_use_price_sheet(sheet_name: str) -> bool:

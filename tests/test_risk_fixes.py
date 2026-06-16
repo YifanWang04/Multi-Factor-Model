@@ -198,6 +198,72 @@ class RiskFixTests(unittest.TestCase):
         self.assertEqual(legacy.ACTIVE_STRATEGY_PROFILE, authority.ACTIVE_STRATEGY_PROFILE)
         self.assertIn("Strategy4", authority.STRATEGY_PROFILES)
 
+    def test_strategy_profiles_own_ticker_universe(self):
+        import qqq_config.strategy_profiles as profiles
+
+        self.assertEqual(len(profiles.TICKER_UNIVERSES["US_108"]), 108)
+        self.assertEqual(len(profiles.TICKER_UNIVERSES["US_143"]), 143)
+        self.assertEqual(
+            profiles.STRATEGY_PROFILES["Strategy1"].ticker_universe,
+            "US_108",
+        )
+        self.assertEqual(
+            profiles.STRATEGY_PROFILES["Strategy2"].ticker_universe,
+            "US_108",
+        )
+        for name in ("Strategy3", "Strategy4", "Strategy5"):
+            profile = profiles.STRATEGY_PROFILES[name]
+            tickers = profile.ticker_symbols
+            self.assertEqual(profile.ticker_universe, "US_143")
+            self.assertEqual(tickers, profiles.TICKER_UNIVERSES["US_143"])
+            self.assertIn("AMAT", tickers)
+            self.assertIn("KLAC", tickers)
+
+    def test_data_config_tickers_use_config_unless_explicitly_overridden(self):
+        old_profile = os.environ.get("QQQ_STRATEGY_PROFILE")
+        old_rebalance_universe = os.environ.get("REBALANCE_TICKER_UNIVERSE")
+        old_yfinance_universe = os.environ.get("YFINANCE_TICKER_UNIVERSE")
+        had_market_calendar = "pandas_market_calendars" in sys.modules
+        old_market_calendar = sys.modules.get("pandas_market_calendars")
+        if not had_market_calendar:
+            class _MarketCalendarStub:
+                pass
+            sys.modules["pandas_market_calendars"] = _MarketCalendarStub()
+        os.environ["QQQ_STRATEGY_PROFILE"] = "Strategy4"
+        os.environ.pop("REBALANCE_TICKER_UNIVERSE", None)
+        os.environ.pop("YFINANCE_TICKER_UNIVERSE", None)
+        try:
+            import data.data_config as dc
+
+            dc = importlib.reload(dc)
+            self.assertEqual(dc.YFINANCE_TICKER_UNIVERSE, dc.DATA_PULL_TICKER_UNIVERSE)
+            self.assertEqual(dc.YFINANCE_TICKER_UNIVERSE, "US_108")
+            self.assertFalse(dc.should_use_price_sheet("AMAT"))
+
+            os.environ["REBALANCE_TICKER_UNIVERSE"] = "US_143"
+            self.assertEqual(dc.resolve_ticker_universe_name(), "US_143")
+            self.assertTrue(dc.should_use_price_sheet("AMAT"))
+            self.assertTrue(dc.should_use_price_sheet("KLAC"))
+        finally:
+            if old_profile is None:
+                os.environ.pop("QQQ_STRATEGY_PROFILE", None)
+            else:
+                os.environ["QQQ_STRATEGY_PROFILE"] = old_profile
+            if old_rebalance_universe is None:
+                os.environ.pop("REBALANCE_TICKER_UNIVERSE", None)
+            else:
+                os.environ["REBALANCE_TICKER_UNIVERSE"] = old_rebalance_universe
+            if old_yfinance_universe is None:
+                os.environ.pop("YFINANCE_TICKER_UNIVERSE", None)
+            else:
+                os.environ["YFINANCE_TICKER_UNIVERSE"] = old_yfinance_universe
+            import data.data_config as dc
+            importlib.reload(dc)
+            if had_market_calendar:
+                sys.modules["pandas_market_calendars"] = old_market_calendar
+            else:
+                sys.modules.pop("pandas_market_calendars", None)
+
     def test_project_paths_offset_and_run_dir_layout(self):
         from qqq_core.paths import ProjectPaths, resolve_output_path
 

@@ -14,6 +14,48 @@ import re
 from typing import Mapping
 
 
+YFINANCE_TICKERS_US_108: tuple[str, ...] = (
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
+    "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
+    "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
+    "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
+    "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
+    "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
+    "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
+    "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
+    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
+    "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
+    "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
+    "SANM", "ANET",
+)
+
+YFINANCE_TICKERS_US_143: tuple[str, ...] = (
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
+    "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
+    "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
+    "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
+    "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
+    "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
+    "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
+    "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
+    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
+    "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
+    "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
+    "SANM", "ANET",
+    "AMAT", "LRCX", "CRDO", "ARM", "AAOI", "MRVL", "NBIS",
+    "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
+    "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "SNPS", "CDNS",
+    "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
+    "MDB", "PANW", "CRWD",
+    "KLAC",  # June 12, 2026 1-for-10 split noted in research comments.
+)
+
+TICKER_UNIVERSES: Mapping[str, tuple[str, ...]] = {
+    "US_108": YFINANCE_TICKERS_US_108,
+    "US_143": YFINANCE_TICKERS_US_143,
+}
+
+
 @dataclass(frozen=True)
 class StrategyProfile:
     """Core strategy configuration shared across entry points."""
@@ -22,7 +64,19 @@ class StrategyProfile:
     factor_indices: tuple[int, ...]
     composite_sheet: str
     strategy_param: str
+    ticker_universe: str
     description: str = ""
+
+    @property
+    def ticker_symbols(self) -> tuple[str, ...]:
+        try:
+            return TICKER_UNIVERSES[self.ticker_universe]
+        except KeyError as exc:
+            available = ", ".join(sorted(TICKER_UNIVERSES))
+            raise KeyError(
+                f"Unknown ticker universe {self.ticker_universe!r} for profile "
+                f"{self.name!r}. Available universes: {available}"
+            ) from exc
 
     @property
     def factor_names(self) -> tuple[str, ...]:
@@ -49,6 +103,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 101, 62, 65, 32),
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
+        ticker_universe="US_108",
         description="Strategy1 75 2.6_annual_return Legacy 2026-03/17 live profile.",
     ),
     "Strategy2": StrategyProfile(
@@ -56,6 +111,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 24, 64, 65, 32),
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_10G_Top1_P20d",
+        ticker_universe="US_108",
         description="Strategy2 Legacy 2026-03/25 research profile.",
     ),
     "Strategy3": StrategyProfile(
@@ -63,6 +119,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 99, 27, 75, 19),
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top2_P20d",
+        ticker_universe="US_143",
         description="Strategy3 June 2026 strategy profile.",
     ),
     "Strategy4": StrategyProfile(
@@ -70,6 +127,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 99, 27, 46, 19),
         composite_sheet="ic_m3_N10",
         strategy_param="max_return_5G_Top2_P20d",
+        ticker_universe="US_143",
         description="Strategy4 June 2026 strategy profile.",
     ),
     "Strategy5": StrategyProfile(
@@ -77,6 +135,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 99, 27, 19, 46),
         composite_sheet="ic_m3_N10",
         strategy_param="max_return_5G_Top2_P20d",
+        ticker_universe="US_143",
         description="Strategy5 June 2026 strategy profile.",
     ),
 }

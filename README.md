@@ -133,7 +133,7 @@ Common input keys:
 | `returns` | `close.pct_change()` |
 | `vwap` | approximate VWAP, `(high + low + close) / 3` |
 
-When yfinance is pulled with `auto_adjust=False`, the raw workbook keeps original OHLC/Close/Adj Close and derives `Adj Open`, `Adj High`, and `Adj Low` from the `Adj Close / Close` adjustment ratio. Factor construction defaults to the legacy research-compatible OHLC convention (`Open/High/Low` raw, `close` adjusted). Set `FACTOR_USE_ADJUSTED_OHLC=True` in `data/data_config.py` to opt into adjusted OHLC for split-consistent factor construction; this will change historical backtest results. Factor, price, and return loaders filter Excel sheets to `YFINANCE_TICKERS` in `data/data_config.py`, so stale or experimental extra sheets in a price workbook do not silently change the cross-sectional universe.
+When yfinance is pulled with `auto_adjust=False`, the raw workbook keeps original OHLC/Close/Adj Close and derives `Adj Open`, `Adj High`, and `Adj Low` from the `Adj Close / Close` adjustment ratio. Factor construction defaults to the legacy research-compatible OHLC convention (`Open/High/Low` raw, `close` adjusted). Set `FACTOR_USE_ADJUSTED_OHLC=True` in `data/data_config.py` to opt into adjusted OHLC for split-consistent factor construction; this will change historical backtest results. Factor, price, and return loaders filter Excel sheets to the current ticker universe resolved by `data/data_config.py`, so stale or experimental extra sheets in a price workbook do not silently change the cross-sectional universe.
 
 Core helper operations include cross-sectional rank, lag/delay, delta, rolling sum/min/max/rank, rolling correlation/covariance, signed power, scaling, and linear decay.
 
@@ -222,8 +222,8 @@ Important config files:
 | `qqq_core/paths.py` | single source of truth for project root, offset-aware paths, and output layout |
 | `qqq_core/run_context.py` | resolved profile/offset/run-dir context for one run |
 | `qqq_core/excel_io.py` | shared Excel sheet validation, price workbook loading, and atomic Excel writing |
-| `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, selected factors, composite sheet, and live strategy parameter |
-| `data/data_config.py` | data start date, ticker universe, offset-aware paths |
+| `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, ticker universe, selected factors, composite sheet, and live strategy parameter |
+| `data/data_config.py` | data start date, direct-pull ticker universe, offset-aware paths |
 | `analysis/single_factor/config.py` | single-factor test settings |
 | `analysis/single_factor/multi_factor_config.py` | multi-factor test settings |
 | `analysis/multi_factor/composite_config.py` | selected factors and composite settings |
@@ -250,6 +250,10 @@ Rules:
 ### Factor Selection
 
 Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/multi_factor/composite_config.py` derive their default selected factors, composite sheet, and strategy parameter from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses. For direct composite-method research before a profile is finalized, set `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`.
+
+Each strategy profile selects one complete ticker universe through `ticker_universe`: `US_108` for the original 108-stock pool, or `US_143` for the full 143-stock pool used by the June 2026 profiles. `Strategy1` and `Strategy2` use `US_108`; `Strategy3`, `Strategy4`, and `Strategy5` use `US_143`, which includes names such as `AMAT`, `LRCX`, `CRDO`, `ARM`, `MRVL`, `ASML`, `DDOG`, `PANW`, `CRWD`, and `KLAC`.
+
+Direct runs of `data/pull_yhfinance_Data.py` use `DATA_PULL_TICKER_UNIVERSE` in `data/data_config.py`, independent of `QQQ_STRATEGY_PROFILE`. Rebalance-day and other callers should pass the intended universe explicitly, either through `pull_yhfinance_Data.main(ticker_universe=...)` or the `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` environment variables. `run_rebalance_day.py` passes the active strategy profile's `ticker_universe` into the pipeline automatically. The pull script prints the resolved ticker universe, source, and ticker count at startup.
 
 Composite factor selection is resolved in this order:
 

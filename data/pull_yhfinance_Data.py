@@ -3,7 +3,6 @@ Yahoo Finance 行情数据下载脚本 (data/pull_yhfinance_Data.py)
 ===========================================================
 通过 yfinance 下载指定股票列表的日频行情，写入单个 Excel 文件。
 
-关键口径：
 - yfinance 使用 auto_adjust=False，保留原始 OHLC/Close/Adj Close。
 - 若存在 Adj Close 与 Close，则用 Adj Close / Close 派生 Adj Open/Adj High/Adj Low，
   后续因子构建优先使用复权 OHLC，避免拆股附近 OHLC 与 Adj Close 混用。
@@ -18,6 +17,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from collections.abc import Sequence
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -29,9 +29,10 @@ import yfinance as yf
 from data.data_config import (
     YFINANCE_DOWNLOAD_AUTO_ADJUST,
     YFINANCE_DOWNLOAD_PROGRESS,
-    YFINANCE_TICKERS,
     _price_filename,
     _resolve_offset,
+    resolve_ticker_universe_source,
+    resolve_yfinance_tickers,
     yfinance_pull_start_date,
 )
 
@@ -204,7 +205,11 @@ def _download_one_symbol(symbol: str, start_date: str, end_date: str) -> pd.Data
     return _add_adjusted_ohlc(df)
 
 
-def main() -> str:
+def main(
+    ticker_universe: str | None = None,
+    tickers: Sequence[str] | None = None,
+    ticker_source: str | None = None,
+) -> str:
     """下载行情并写入 Excel，返回输出文件路径。"""
     offset = _resolve_offset()
     start_date = yfinance_pull_start_date()
@@ -212,9 +217,21 @@ def main() -> str:
         print(f"DATA_START_OFFSET_DAYS={offset}，NYSE 起始日提前至 {start_date}")
 
     end_date = (datetime.today() + timedelta(days=1)).strftime("%Y-%m-%d")
-    codes = YFINANCE_TICKERS
+    if tickers is not None:
+        codes = list(tickers)
+        universe_name = ticker_universe or "explicit_tickers"
+        source = ticker_source or "argument:tickers"
+    else:
+        universe_name, source = resolve_ticker_universe_source(ticker_universe)
+        if ticker_source is not None:
+            source = ticker_source
+        codes = resolve_yfinance_tickers(universe_name)
     data_dict: dict[str, pd.DataFrame] = {}
 
+    print(
+        "YFinance ticker universe: "
+        f"{universe_name} | source={source} | tickers={len(codes)}"
+    )
     print(f"开始下载 {len(codes)} 只标的...")
     for i, code in enumerate(codes, 1):
         df = _download_one_symbol(code, start_date, end_date)

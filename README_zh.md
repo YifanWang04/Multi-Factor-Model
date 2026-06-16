@@ -128,7 +128,7 @@ qqq/
 | `returns` | `close.pct_change()` |
 | `vwap` | 近似 VWAP，`(high + low + close) / 3` |
 
-当 yfinance 使用 `auto_adjust=False` 拉取数据时，原始工作簿会保留未复权 OHLC/Close/Adj Close，并通过 `Adj Close / Close` 比例派生 `Adj Open`、`Adj High`、`Adj Low`。因子构建默认使用历史兼容口径（`Open/High/Low` 为原始列，`close` 为复权收盘价）；如需启用拆股一致的复权 OHLC，可在 `data/data_config.py` 将 `FACTOR_USE_ADJUSTED_OHLC=True`，但这会改变历史回测结果。因子、价格和收益加载都会把价格工作簿 sheet 过滤到 `data/data_config.py` 中的 `YFINANCE_TICKERS`，避免旧文件里残留或实验性新增股票静默改变横截面股票池。
+当 yfinance 使用 `auto_adjust=False` 拉取数据时，原始工作簿会保留未复权 OHLC/Close/Adj Close，并通过 `Adj Close / Close` 比例派生 `Adj Open`、`Adj High`、`Adj Low`。因子构建默认使用历史兼容口径（`Open/High/Low` 为原始列，`close` 为复权收盘价）；如需启用拆股一致的复权 OHLC，可在 `data/data_config.py` 将 `FACTOR_USE_ADJUSTED_OHLC=True`，但这会改变历史回测结果。因子、价格和收益加载都会把价格工作簿 sheet 过滤到 `data/data_config.py` 当前解析出的股票池，避免旧文件里残留或实验性新增股票静默改变横截面股票池。
 
 核心辅助操作包括截面排名、滞后、差分、滚动求和/最小/最大/排名、滚动相关/协方差、有符号幂、缩放和线性衰减。
 
@@ -214,8 +214,8 @@ qqq/
 
 | 文件 | 用途 |
 | --- | --- |
-| `qqq_config/strategy_profiles.py` | active strategy profile、选定因子、复合 sheet、实盘策略参数的唯一权威配置源 |
-| `data/data_config.py` | 数据起始日、股票池、offset 路径 |
+| `qqq_config/strategy_profiles.py` | active strategy profile、股票池、选定因子、复合 sheet、实盘策略参数的唯一权威配置源 |
+| `data/data_config.py` | 数据起始日、直接拉取默认股票池、offset 路径 |
 | `analysis/single_factor/config.py` | 单因子测试配置 |
 | `analysis/single_factor/multi_factor_config.py` | 多因子测试配置 |
 | `analysis/multi_factor/composite_config.py` | 已选因子和复合设置 |
@@ -242,6 +242,10 @@ qqq/
 ### 因子选择
 
 核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/multi_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet 和策略参数。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。在新 profile 尚未定稿、需要直接探索复合方法时，可在 `analysis/multi_factor/composite_config.py` 中设置 `COMPOSITE_RESEARCH_FACTOR_INDICES`。
+
+每个 strategy profile 通过 `ticker_universe` 选择一套完整股票池：`US_108` 表示原来的 108 只股票，`US_143` 表示 2026 年 6 月 profile 使用的完整 143 只股票。`Strategy1` 和 `Strategy2` 使用 `US_108`；`Strategy3`、`Strategy4` 和 `Strategy5` 使用 `US_143`，其中包含 `AMAT`、`LRCX`、`CRDO`、`ARM`、`MRVL`、`ASML`、`DDOG`、`PANW`、`CRWD`、`KLAC` 等股票。
+
+直接运行 `data/pull_yhfinance_Data.py` 时使用 `data/data_config.py` 中的 `DATA_PULL_TICKER_UNIVERSE`，不受 `QQQ_STRATEGY_PROFILE` 影响。调仓日或其他调用方需要显式传入股票池，可调用 `pull_yhfinance_Data.main(ticker_universe=...)`，或设置 `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` 环境变量。`run_rebalance_day.py` 会自动把 active strategy profile 的 `ticker_universe` 传给 pipeline。拉取脚本启动时会打印解析后的 ticker universe、来源和 ticker 数量。
 
 复合因子选择按以下优先级解析：
 
