@@ -140,8 +140,7 @@ def _univariate_weighted(factor_dict, stats_dict, key, dates, method, window=Non
             row = {}
             for n in names:
                 s = series_map[n]
-                past = s[s.index < d]
-                row[n] = past.mean() if len(past) > 0 else np.nan
+                row[n] = s.mean() if len(s) > 0 else np.nan
             rows.append(row)
         weight_df = pd.DataFrame(rows, index=dates)
     elif method == 2:
@@ -294,7 +293,10 @@ def multivariate_weighted(factor_dict, ret_periods, M_windows):
     def _build_weight_df(method, window=None):
         rows = []
         for d in all_dates:
-            past = beta_df[beta_df.index < d]
+            if method == 1:
+                past = beta_df
+            else:
+                past = beta_df[beta_df.index < d]
             if method == 3:
                 past = past.iloc[-window:]
             rows.append(past.mean().to_dict() if len(past) > 0 else {n: np.nan for n in names})

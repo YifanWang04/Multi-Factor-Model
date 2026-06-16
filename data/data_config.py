@@ -13,6 +13,7 @@
 import os
 
 import pandas as pd
+import pandas_market_calendars as mcal
 
 # 项目根目录（data 的上级）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,18 +41,35 @@ YFINANCE_TICKERS = [
     "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
     "SANM", "ANET", 
     # ## June 8, 2026 add new stocks
-    "AMAT", "LRCX", "CRDO", "ARM", 
-    "AAOI",
-    "MRVL", "NBIS",
-    "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
-    "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "KLAC", "SNPS", "CDNS",
-    "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
-    "MDB", "PANW", "CRWD"
+    # "AMAT", "LRCX", "CRDO", "ARM", 
+    # "AAOI",
+    # "MRVL", "NBIS",
+    # "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
+    # "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "SNPS", "CDNS",
+    # "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
+    # "MDB", "PANW", "CRWD",
+    # "KLAC" #June 12, 2026拆股一拆十
 ]
+
+
+def configured_ticker_set() -> set[str]:
+    """Return the configured ticker universe used by data/factor loaders."""
+    return set(YFINANCE_TICKERS)
+
+
+def should_use_price_sheet(sheet_name: str) -> bool:
+    """Whether an Excel sheet belongs to the configured ticker universe."""
+    universe = configured_ticker_set()
+    return not universe or sheet_name in universe
 
 # yf.download 参数（与历史 Excel 列含义一致时可保持 auto_adjust=False）
 YFINANCE_DOWNLOAD_AUTO_ADJUST = False
 YFINANCE_DOWNLOAD_PROGRESS = False
+
+# 因子构建 OHLC 口径：
+# False = 兼容历史回测：Open/High/Low 使用 yfinance 原始列，close 使用 Adj Close。
+# True  = 更严格复权口径：优先使用 Adj Open/Adj High/Adj Low 与 Adj Close。
+FACTOR_USE_ADJUSTED_OHLC = False
 
 
 def yfinance_pull_start_date() -> str:
@@ -62,8 +80,18 @@ def yfinance_pull_start_date() -> str:
     if offset <= 0:
         return DATA_BASE_START_DATE
     base = pd.Timestamp(DATA_BASE_START_DATE)
-    # 用 BDay 回推 N 个交易日；避免 bdate_range(end=非交易日, periods=...) 与预期长度不一致
-    start = base - pd.offsets.BDay(offset)
+    nyse = mcal.get_calendar("NYSE")
+    schedule = nyse.schedule(
+        start_date=(base - pd.Timedelta(days=offset * 3 + 30)).strftime("%Y-%m-%d"),
+        end_date=base.strftime("%Y-%m-%d"),
+    )
+    valid_days = schedule.index.tz_localize(None)
+    prior_days = valid_days[valid_days < base.normalize()]
+    if len(prior_days) < offset:
+        raise ValueError(
+            f"NYSE 日历不足以从 {DATA_BASE_START_DATE} 回推 {offset} 个交易日"
+        )
+    start = pd.Timestamp(prior_days[-offset])
     return start.strftime("%Y-%m-%d")
 
 
@@ -90,10 +118,33 @@ def _offset_dir_suffix() -> str:
     return f"_offset{offset}d"
 
 # 默认价格文件路径（项目 data 目录下）
-# 当 offset 文件不存在时，回退到基线文件
+# offset 文件不存在时不再回退到基线文件，读取方必须 fail fast。
 _BASE_PRICE_FILE = os.path.join(_PROJECT_ROOT, "data", "us_top100_daily_2023_present.xlsx")
 _OFFSET_PRICE_FILE = os.path.join(_PROJECT_ROOT, "data", _price_filename())
-PRICE_FILE = _OFFSET_PRICE_FILE if os.path.isfile(_OFFSET_PRICE_FILE) else _BASE_PRICE_FILE
+_RESOLVED_OFFSET = _resolve_offset()
+if _RESOLVED_OFFSET == 0:
+    PRICE_FILE = _BASE_PRICE_FILE
+else:
+    PRICE_FILE = _OFFSET_PRICE_FILE
+
+
+def require_price_file_exists(price_file: str | None = None) -> str:
+    """返回价格文件路径；若不存在则报错，禁止 offset 静默回退到基线文件。"""
+    path = price_file or PRICE_FILE
+    if os.path.isfile(path):
+        return path
+    offset = _resolve_offset()
+    if offset != 0:
+        raise FileNotFoundError(
+            f"DATA_START_OFFSET_DAYS/REBALANCE_OFFSET_DAYS={offset}，"
+            f"但 offset 价格文件不存在: {path}。"
+            "请先运行 data/pull_yhfinance_Data.py 生成对应 offset 数据，"
+            "避免静默回退到基线价格文件造成回测口径混淆。"
+        )
+    raise FileNotFoundError(
+        f"DATA_START_OFFSET_DAYS/REBALANCE_OFFSET_DAYS={_RESOLVED_OFFSET}，"
+        f"但价格文件不存在: {path}。请先运行 data/pull_yhfinance_Data.py。"
+    )
 
 # 因子目录（按 offset 分子目录，不覆盖）
 FACTOR_RAW_DIR = os.path.join(_PROJECT_ROOT, f"factor_raw{_offset_dir_suffix()}")

@@ -22,7 +22,7 @@ import strategy_config as cfg
 # 设置 UTF-8 输出（Windows 兼容）
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1478641216659652709/TRe7zHYv0x5AbYJMngnJbi1TbjUwXiOhIct-rze0wHFFYgi-Yqt320iGOCY4J1NUbq68"
+DISCORD_WEBHOOK_URL = ""
 
 
 def test_simple_message():

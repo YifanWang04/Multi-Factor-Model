@@ -29,11 +29,30 @@ import requests
 
 DISCORD_WEBHOOK_URL = os.environ.get(
     "REBALANCE_DISCORD_WEBHOOK_URL",
-    "https://discord.com/api/webhooks/1478641216659652709/TRe7zHYv0x5AbYJMngnJbi1TbjUwXiOhIct-rze0wHFFYgi-Yqt320iGOCY4J1NUbq68",
+    "",
 )
 
 DISCORD_FIELD_MAX_CHARS: int = 1024
 DISCORD_OPS_MAX_LINES: int = 20
+
+
+def _describe_composite_method(sheet_name: str) -> str:
+    """给 Discord 展示用的复合方法说明；m1 明确标注全样本前瞻偏误。"""
+    if "_m1" in sheet_name:
+        return f"{sheet_name}（全样本 oracle baseline，含前瞻偏误，仅供研究对比）"
+    if sheet_name.startswith("ic_"):
+        return f"{sheet_name}（IC 加权）"
+    if sheet_name.startswith("rank_ic_"):
+        return f"{sheet_name}（Rank IC 加权）"
+    if sheet_name.startswith("beta_"):
+        return f"{sheet_name}（Beta 加权）"
+    if sheet_name.startswith("ols_"):
+        return f"{sheet_name}（OLS 多元回归加权）"
+    if sheet_name.startswith("pca_"):
+        return f"{sheet_name}（PCA 主成分）"
+    if sheet_name.startswith("rank_"):
+        return f"{sheet_name}（截面排名复合）"
+    return sheet_name
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +303,7 @@ def send_discord_notification(
 
         factor_info = (
             f"**选定因子：** {', '.join(selected_factor_names)}\n"
-            f"**复合因子：** {composite_factor_sheet}（IC加权 M3/N20）\n"
+            f"**复合因子：** {_describe_composite_method(composite_factor_sheet)}\n"
             f"**策略参数：** {strategy_param}\n"
             f"**权重方式：** {strategy_params.get('weight_method', '')}　"
             f"**分组数：** {strategy_params.get('group_num', '')}　"

@@ -25,7 +25,14 @@ import pandas as pd
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 
-from data.data_config import PRICE_FILE, _price_filename, FACTOR_RAW_DIR as _DEFAULT_FACTOR_RAW_DIR
+from data.data_config import (
+    PRICE_FILE,
+    _price_filename,
+    FACTOR_RAW_DIR as _DEFAULT_FACTOR_RAW_DIR,
+    FACTOR_USE_ADJUSTED_OHLC,
+    require_price_file_exists,
+    should_use_price_sheet,
+)
 
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
 if _RUN_DIR:
@@ -42,11 +49,17 @@ def load_ohlcv_data(excel_path):
         'open', 'high', 'low', 'close', 'volume' → DataFrame(index=Date, columns=tickers)
     若某列不存在（如 Open/High/Low），则对应 DataFrame 为空（empty）。
     """
+    excel_path = require_price_file_exists(excel_path)
     raw = pd.read_excel(excel_path, sheet_name=None)
 
     frames = {k: {} for k in ('open', 'high', 'low', 'close', 'volume')}
 
+    skipped_extra_sheets = []
+
     for ticker, df in raw.items():
+        if not should_use_price_sheet(ticker):
+            skipped_extra_sheets.append(ticker)
+            continue
         if "Date" not in df.columns:
             continue
         df = df.copy()
@@ -61,11 +74,17 @@ def load_ohlcv_data(excel_path):
 
         if "Volume" in df.columns:
             frames['volume'][ticker] = df["Volume"]
-        if "Open" in df.columns:
+        if FACTOR_USE_ADJUSTED_OHLC and "Adj Open" in df.columns:
+            frames['open'][ticker] = df["Adj Open"]
+        elif "Open" in df.columns:
             frames['open'][ticker] = df["Open"]
-        if "High" in df.columns:
+        if FACTOR_USE_ADJUSTED_OHLC and "Adj High" in df.columns:
+            frames['high'][ticker] = df["Adj High"]
+        elif "High" in df.columns:
             frames['high'][ticker] = df["High"]
-        if "Low" in df.columns:
+        if FACTOR_USE_ADJUSTED_OHLC and "Adj Low" in df.columns:
+            frames['low'][ticker] = df["Adj Low"]
+        elif "Low" in df.columns:
             frames['low'][ticker] = df["Low"]
 
     result = {}
@@ -74,6 +93,14 @@ def load_ohlcv_data(excel_path):
             result[key] = pd.DataFrame(col_dict)
         else:
             result[key] = pd.DataFrame()
+
+    if skipped_extra_sheets:
+        preview = ", ".join(skipped_extra_sheets[:10])
+        suffix = "..." if len(skipped_extra_sheets) > 10 else ""
+        print(
+            f"  [universe] skipped {len(skipped_extra_sheets)} Excel sheets "
+            f"outside YFINANCE_TICKERS: {preview}{suffix}"
+        )
 
     return result
 
@@ -173,6 +200,11 @@ def main():
     factor_list = build_and_save_all_factors(data_dict)
     print(f"\n共成功构建 {len(factor_list)} 个因子（数据处理请运行 pipeline/data_process.py）")
     print("\nFactor pipeline finished.")
+
+
+def run():
+    """可导入入口，供 run_rebalance_day --inline 复用。"""
+    return main()
 
 
 if __name__ == "__main__":

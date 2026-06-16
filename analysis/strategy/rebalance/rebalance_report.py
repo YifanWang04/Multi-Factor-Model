@@ -31,6 +31,25 @@ from .discord_notifier import compute_extended_metrics as _compute_extended_metr
 WEIGHT_FILTER_THRESHOLD: float = 0.0001
 
 
+def _describe_composite_method(sheet_name: str) -> str:
+    """给报告用的复合方法说明；m1 明确标注全样本前瞻偏误。"""
+    if "_m1" in sheet_name:
+        return f"{sheet_name}（全样本 oracle baseline，含前瞻偏误，仅供研究对比）"
+    if sheet_name.startswith("ic_"):
+        return f"{sheet_name}（IC 加权）"
+    if sheet_name.startswith("rank_ic_"):
+        return f"{sheet_name}（Rank IC 加权）"
+    if sheet_name.startswith("beta_"):
+        return f"{sheet_name}（Beta 加权）"
+    if sheet_name.startswith("ols_"):
+        return f"{sheet_name}（OLS 多元回归加权）"
+    if sheet_name.startswith("pca_"):
+        return f"{sheet_name}（PCA 主成分）"
+    if sheet_name.startswith("rank_"):
+        return f"{sheet_name}（截面排名复合）"
+    return sheet_name
+
+
 def write_rebalance_day_report(
     result: dict,
     status: dict,
@@ -182,7 +201,7 @@ def write_rebalance_day_report(
         ["Factor_Indices", str(selected_factor_indices)],
         ["Selected_Factors", ", ".join(selected_factor_names)],
         ["Composite_Factor", composite_factor_sheet],
-        ["Composite_Method", f"IC加权 {composite_factor_sheet} (M=3月, N=20日)"],
+        ["Composite_Method", _describe_composite_method(composite_factor_sheet)],
         ["Strategy_Param", strategy_param],
         ["Weight_Method", params.get("weight_method", strategy_params.get("weight_method", ""))],
         ["Group_Num", params.get("group_num", strategy_params.get("group_num", ""))],

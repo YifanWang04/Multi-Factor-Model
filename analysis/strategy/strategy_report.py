@@ -128,6 +128,7 @@ class StrategyReporter:
             self._write_with_format(output_path, sheet1_df, sheet2_df, sheet3_df)
         else:
             with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+                self._build_metadata_df().to_excel(writer, sheet_name="metadata", index=False)
                 sheet1_df.to_excel(writer, sheet_name="strategy_statistics", index=False)
                 sheet2_df.to_excel(writer, sheet_name="strategy_daily_returns")
                 if len(sheet3_df) > 0:
@@ -163,6 +164,23 @@ class StrategyReporter:
                 else x
             )
         return df
+
+    def _build_metadata_df(self) -> pd.DataFrame:
+        """构建报告口径元数据，避免不同配置生成的结果被误比较。"""
+        rows = [
+            ("Generated_At", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("Price_File", getattr(self.config, "PRICE_FILE", "")),
+            ("Return_Column", getattr(self.config, "RETURN_COLUMN", "")),
+            ("Composite_Factor_File", getattr(self.config, "COMPOSITE_FACTOR_FILE", "")),
+            ("Composite_Factor_Sheet", getattr(self.config, "COMPOSITE_FACTOR_SHEET", "")),
+            ("Selected_Factor_Indices", str(getattr(self.config, "STRATEGY_SELECTED_FACTOR_INDICES", ""))),
+            ("Selected_Factor_Names", ", ".join(getattr(self.config, "STRATEGY_SELECTED_FACTOR_NAMES", []))),
+            ("Group_Nums", str(getattr(self.config, "GROUP_NUMS", ""))),
+            ("Rebalance_Periods", str(getattr(self.config, "REBALANCE_PERIODS", ""))),
+            ("Target_Group_Ranks", str(getattr(self.config, "TARGET_GROUP_RANKS", ""))),
+            ("Weight_Methods", str(getattr(self.config, "WEIGHT_METHODS", ""))),
+        ]
+        return pd.DataFrame(rows, columns=["Key", "Value"])
 
     def _build_sheet2_df(self) -> pd.DataFrame:
         """构建日频收益率宽表（行=日期，列=策略名）。"""
@@ -233,6 +251,7 @@ class StrategyReporter:
         sheet3_df: pd.DataFrame
     ) -> None:
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            self._build_metadata_df().to_excel(writer, sheet_name="metadata", index=False)
             # ── Sheet1 ────────────────────────────────────────────────
             header_row = 1            # 标题行偏移（1-based）
             data_start_row = 2        # 数据行起始（1-based）

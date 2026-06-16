@@ -17,7 +17,13 @@ import os
 PROJECT_ROOT = r"D:\qqq"
 
 # 日频收益率文件：根据 data_config 按 offset 分子目录
-from data.data_config import PRICE_FILE, STRATEGY_REPORTS_DIR, COMPOSITE_FACTOR_OUTPUT_DIR, _offset_dir_suffix
+from data.data_config import (
+    PRICE_FILE,
+    STRATEGY_REPORTS_DIR,
+    COMPOSITE_FACTOR_OUTPUT_DIR,
+    DATA_START_OFFSET_DAYS,
+    _offset_dir_suffix,
+)
 
 # ── 输入 ──────────────────────────────────────────────────────────────────────
 
@@ -47,13 +53,15 @@ def build_strategy_factor_suffix(factor_indices=None):
 def get_composite_factor_file() -> str:
     """
     根据 STRATEGY_SELECTED_FACTOR_INDICES 构建复合因子文件路径。
-    优先使用 offset 子目录，fallback 到基线目录。
+    优先使用 offset 子目录；offset 非 0 时不回退到基线目录。
     """
     suffix = build_strategy_factor_suffix()
     fname = f"composite_factors_{suffix}.xlsx"
     offset_dir = COMPOSITE_FACTOR_OUTPUT_DIR  # 来自 data_config，已按 offset 分子目录
     offset_path = os.path.join(offset_dir, fname)
     if os.path.isfile(offset_path):
+        return offset_path
+    if DATA_START_OFFSET_DAYS != 0:
         return offset_path
     base_dir = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
     base_path = os.path.join(base_dir, fname)

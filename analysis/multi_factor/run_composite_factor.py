@@ -258,6 +258,7 @@ def _run_composite_backtest(comp_df, ret_periods, config):
 
     if len(fp) == 0:
         return _empty_factor_record(config)
+    periods_per_year = 252 / REBALANCE_PERIOD if REBALANCE_PERIOD > 0 else 252
 
     ic_analyzer = ICAnalyzerEnhanced(fp, rp)
     ic_df = ic_analyzer.calculate_ic()
@@ -294,20 +295,29 @@ def _run_composite_backtest(comp_df, ret_periods, config):
 
     ls_returns = long_combined - short_combined_raw - 2 * config.TRANSACTION_COST
     ls_nav = (1 + ls_returns).cumprod()
-    ls_stats = PerformanceAnalyzer(ls_nav, ls_returns, config.RISK_FREE_RATE).calculate_metrics()
+    ls_stats = PerformanceAnalyzer(
+        ls_nav, ls_returns, config.RISK_FREE_RATE, periods_per_year=periods_per_year
+    ).calculate_metrics()
 
     short_ret = -group_returns[bottom2_cols].mean(axis=1) - config.TRANSACTION_COST
     short_nav = (1 + short_ret).cumprod()
-    short_combined_stats = PerformanceAnalyzer(short_nav, short_ret, config.RISK_FREE_RATE).calculate_metrics()
+    short_combined_stats = PerformanceAnalyzer(
+        short_nav, short_ret, config.RISK_FREE_RATE, periods_per_year=periods_per_year
+    ).calculate_metrics()
 
     benchmark_returns = rp.mean(axis=1)
     long_ret = long_combined - config.TRANSACTION_COST
     long_nav = (1 + long_ret).cumprod()
-    long_metrics = PerformanceAnalyzer(long_nav, long_ret, config.RISK_FREE_RATE).calculate_metrics()
+    long_metrics = PerformanceAnalyzer(
+        long_nav, long_ret, config.RISK_FREE_RATE, periods_per_year=periods_per_year
+    ).calculate_metrics()
 
     long_excess_returns = long_ret - benchmark_returns
     long_excess_nav = (1 + long_excess_returns).cumprod()
-    long_excess_metrics = PerformanceAnalyzer(long_excess_nav, long_excess_returns, config.RISK_FREE_RATE).calculate_metrics()
+    long_excess_metrics = PerformanceAnalyzer(
+        long_excess_nav, long_excess_returns, config.RISK_FREE_RATE,
+        periods_per_year=periods_per_year
+    ).calculate_metrics()
 
     return {
         "ic_df": ic_df,

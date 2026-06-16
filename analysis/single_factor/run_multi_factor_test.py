@@ -38,6 +38,7 @@ from ic import ICAnalyzerEnhanced
 from grouping import GrouperEnhanced
 from backtest import LongOnlyBacktest, ShortOnlyBacktest
 from performance import PerformanceAnalyzer
+from data.data_config import should_use_price_sheet
 
 try:
     import openpyxl
@@ -59,6 +60,8 @@ def load_return_data(price_file, return_column="Return"):
     price_data = pd.read_excel(price_file, sheet_name=None)
     columns_dict = {}
     for ticker, df in price_data.items():
+        if not should_use_price_sheet(ticker):
+            continue
         if "Date" not in df.columns or "Adj Close" not in df.columns:
             continue
         df = df.copy()
@@ -69,7 +72,10 @@ def load_return_data(price_file, return_column="Return"):
         else:
             columns_dict[ticker] = df["Adj Close"].pct_change()
     if not columns_dict:
-        return pd.DataFrame()
+        raise ValueError(
+            f"价格文件 {price_file} 中没有可用的收益数据；"
+            "请检查 sheet 名是否在 YFINANCE_TICKERS 内。"
+        )
     ret = pd.concat(columns_dict, axis=1)
     ret = ret.replace([np.inf, -np.inf], np.nan)
     return ret
@@ -164,6 +170,7 @@ def run_one_factor_one_period(factor, ret, rebalance_period, config):
 
     if len(factor_periods) == 0:
         return _empty_factor_record(config)
+    periods_per_year = 252 / rebalance_period if rebalance_period > 0 else 252
 
     ic_analyzer = ICAnalyzerEnhanced(factor_periods, ret_periods)
     ic_df = ic_analyzer.calculate_ic()
@@ -217,7 +224,7 @@ def run_one_factor_one_period(factor, ret, rebalance_period, config):
     )
     ls_nav = (1 + ls_returns).cumprod()
     ls_perf = PerformanceAnalyzer(
-        ls_nav, ls_returns, config.RISK_FREE_RATE
+        ls_nav, ls_returns, config.RISK_FREE_RATE, periods_per_year=periods_per_year
     )
     ls_stats = ls_perf.calculate_metrics()
 
@@ -227,7 +234,8 @@ def run_one_factor_one_period(factor, ret, rebalance_period, config):
     )
     short_combined_nav = (1 + short_combined_returns).cumprod()
     short_combined_perf = PerformanceAnalyzer(
-        short_combined_nav, short_combined_returns, config.RISK_FREE_RATE
+        short_combined_nav, short_combined_returns, config.RISK_FREE_RATE,
+        periods_per_year=periods_per_year
     )
     short_combined_stats = short_combined_perf.calculate_metrics()
 
@@ -237,7 +245,9 @@ def run_one_factor_one_period(factor, ret, rebalance_period, config):
     long_ret = long_combined_returns - config.TRANSACTION_COST
     long_nav = (1 + long_ret).cumprod()
     # 多头绝对收益指标
-    long_perf = PerformanceAnalyzer(long_nav, long_ret, config.RISK_FREE_RATE)
+    long_perf = PerformanceAnalyzer(
+        long_nav, long_ret, config.RISK_FREE_RATE, periods_per_year=periods_per_year
+    )
     long_metrics = long_perf.calculate_metrics()
     long_annual_return = long_metrics["Annual_Return"]
     long_sharpe = long_metrics["Sharpe"]
@@ -245,7 +255,8 @@ def run_one_factor_one_period(factor, ret, rebalance_period, config):
     long_excess_returns = long_ret - benchmark_returns
     long_excess_nav = (1 + long_excess_returns).cumprod()
     long_excess_perf = PerformanceAnalyzer(
-        long_excess_nav, long_excess_returns, config.RISK_FREE_RATE
+        long_excess_nav, long_excess_returns, config.RISK_FREE_RATE,
+        periods_per_year=periods_per_year
     )
     long_excess_metrics = long_excess_perf.calculate_metrics()
     long_excess_annual = long_excess_metrics["Annual_Return"]

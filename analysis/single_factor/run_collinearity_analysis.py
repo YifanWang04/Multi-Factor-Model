@@ -38,6 +38,7 @@ if _PROJECT_ROOT not in sys.path:
 
 from config import SingleFactorConfig
 from rebalance_manager import RebalancePeriodManager
+from data.data_config import should_use_price_sheet
 
 try:
     import openpyxl
@@ -61,6 +62,8 @@ def load_return_data(price_file, return_column="Return"):
     price_data = pd.read_excel(price_file, sheet_name=None)
     ret = pd.DataFrame()
     for ticker, df in price_data.items():
+        if not should_use_price_sheet(ticker):
+            continue
         if "Date" not in df.columns or "Adj Close" not in df.columns:
             continue
         df = df.copy()
@@ -71,6 +74,11 @@ def load_return_data(price_file, return_column="Return"):
         else:
             ret[ticker] = df["Adj Close"].pct_change()
     ret = ret.replace([np.inf, -np.inf], np.nan)
+    if ret.empty:
+        raise ValueError(
+            f"价格文件 {price_file} 中没有可用的收益数据；"
+            "请检查 sheet 名是否在 YFINANCE_TICKERS 内。"
+        )
     return ret
 
 

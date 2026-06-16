@@ -222,12 +222,19 @@ class StrategyBacktester:
             valid_mask = (w_all != 0) & ret_port.notna()
             # 按日期归一化权重（每日仅对当日有效的股票归一）
             row_sum = valid_mask.mul(w_all).sum(axis=1)  # Series: date → sum(w * valid)
+            valid_days = row_sum > 1e-12
+            if not valid_days.any():
+                continue
+            ret_port = ret_port.loc[valid_days]
+            valid_mask = valid_mask.loc[valid_days]
+            row_sum = row_sum.loc[valid_days]
             w_norm = valid_mask.mul(w_all).div(row_sum, axis=0)  # DataFrame: date × stock
             # 防御性列对齐：确保 w_norm 列顺序与 ret_port 完全一致
             w_norm = w_norm[ret_port.columns]
 
-            port_ret_all = (w_norm * ret_port).sum(axis=1)  # Series: date → ret
-            port_ret_all = port_ret_all.fillna(0.0)
+            port_ret_all = (w_norm * ret_port).sum(axis=1, min_count=1).dropna()  # Series: date → ret
+            if port_ret_all.empty:
+                continue
 
             # ── 持仓期收益计算：纯 numpy 位置运算，规避 pandas 索引对齐问题 ──
             # port_ret_all.values: 持仓期天数 × 1，扁平 numpy 数组

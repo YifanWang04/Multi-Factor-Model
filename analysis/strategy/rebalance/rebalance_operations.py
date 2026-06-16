@@ -137,7 +137,9 @@ def get_rebalance_day_status(
                 idx = next(i for i, x in enumerate(sorted_td) if x > current_date)
             except StopIteration:
                 idx = len(sorted_td)
-            next_idx = idx + rebalance_period
+            # idx 是 current_date 之后第 1 个交易日；第 N 个交易日为 idx + N - 1。
+            # 与 _nth_nyse_trading_day(start_date, n) 和 rebalance_calendar 的 (T, T_next] 计数语义一致。
+            next_idx = idx + rebalance_period - 1
             if next_idx < len(sorted_td):
                 current_date = sorted_td[next_idx]
             else:
@@ -559,12 +561,20 @@ def _compute_last_rebalance_ops(
         return pd.DataFrame()
 
     w = weights.reindex(valid_stocks).fillna(0)
-    w = w / w.sum()
+    w_sum = float(w.sum())
+    if not np.isfinite(w_sum) or abs(w_sum) < 1e-12:
+        print("  [warning] _compute_last_rebalance_ops: 有效权重和为 0，跳过")
+        return pd.DataFrame()
+    w = w / w_sum
     buy_p = buy_prices.reindex(valid_stocks).dropna()
     common = w.index.intersection(buy_p.index)
     if len(common) == 0:
         return pd.DataFrame()
-    w = w[common] / w[common].sum()
+    common_sum = float(w[common].sum())
+    if not np.isfinite(common_sum) or abs(common_sum) < 1e-12:
+        print("  [warning] _compute_last_rebalance_ops: 价格交集后的权重和为 0，跳过")
+        return pd.DataFrame()
+    w = w[common] / common_sum
 
     _next_rb = pd.Timestamp(next_rb_date) if next_rb_date is not None else pd.NaT
     _holding_days = (

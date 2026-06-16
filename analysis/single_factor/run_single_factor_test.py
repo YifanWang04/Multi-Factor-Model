@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np
 import os
 from datetime import datetime
+from data.data_config import should_use_price_sheet
 
 # 导入所有模块
 from config import SingleFactorConfig as Config
@@ -53,7 +54,8 @@ class SingleFactorTesterOptimized:
         
         # 加载因子
         print(f"加载因子文件: {self.config.FACTOR_FILE}")
-        factor = pd.read_excel(self.config.FACTOR_FILE, sheet_name=0, index_col=0)
+        factor_sheet = getattr(self.config, "FACTOR_SHEET", 0)
+        factor = pd.read_excel(self.config.FACTOR_FILE, sheet_name=factor_sheet, index_col=0)
         factor.index = pd.to_datetime(factor.index)
         factor = factor.apply(pd.to_numeric, errors='coerce')
         
@@ -67,7 +69,11 @@ class SingleFactorTesterOptimized:
         
         close_df = pd.DataFrame()
         ret = pd.DataFrame()
+        skipped_extra_sheets = []
         for ticker, df in price_data.items():
+            if not should_use_price_sheet(ticker):
+                skipped_extra_sheets.append(ticker)
+                continue
             if 'Date' not in df.columns or 'Adj Close' not in df.columns:
                 continue
             df = df.copy()
@@ -79,6 +85,18 @@ class SingleFactorTesterOptimized:
             else:
                 ret[ticker] = df['Adj Close'].pct_change()
         
+        if skipped_extra_sheets:
+            preview = ", ".join(skipped_extra_sheets[:10])
+            suffix = "..." if len(skipped_extra_sheets) > 10 else ""
+            print(
+                f"  [universe] skipped {len(skipped_extra_sheets)} Excel sheets "
+                f"outside YFINANCE_TICKERS: {preview}{suffix}"
+            )
+        if close_df.empty or ret.empty:
+            raise ValueError(
+                f"价格文件 {self.config.PRICE_FILE} 中没有可用的 Adj Close/Return 数据；"
+                "请检查 sheet 名是否在 YFINANCE_TICKERS 内。"
+            )
         print(f"价格数据: {close_df.shape}")
         ret = ret.replace([np.inf, -np.inf], np.nan)
         
@@ -105,6 +123,7 @@ class SingleFactorTesterOptimized:
     
     def run_single_period(self, rebalance_period):
         """运行单个调仓周期的测试"""
+        periods_per_year = 252 / rebalance_period if rebalance_period > 0 else 252
         
         # 1. 准备数据
         print("\nStep 2: 准备调仓期数据")
@@ -166,23 +185,6 @@ class SingleFactorTesterOptimized:
         # # 多空收益 = 多头组合收益 - 空头组合收益 - 双边交易成本（空头端 = 做空底组，收益为 -做多底组收益）
         # ls_returns = long_combined_returns - short_combined_returns - 2 * self.config.TRANSACTION_COST
         # ls_nav = (1 + ls_returns).cumprod()
-        # # #region agent log
-        # try:
-        #     _d = group_returns.index[0]
-        #     r1 = float(group_returns.loc[_d, 1]) if 1 in group_returns.columns else None
-        #     r2 = float(group_returns.loc[_d, 2]) if 2 in group_returns.columns else None
-        #     r9 = float(group_returns.loc[_d, 9]) if 9 in group_returns.columns else None
-        #     r10 = float(group_returns.loc[_d, 10]) if 10 in group_returns.columns else None
-        #     lcr = float(long_combined_returns.loc[_d]) if _d in long_combined_returns.index else None
-        #     scr = float(short_combined_returns.loc[_d]) if _d in short_combined_returns.index else None
-        #     lsr = float(ls_returns.loc[_d]) if _d in ls_returns.index else None
-        #     cost = 2 * self.config.TRANSACTION_COST
-        #     formula_ok = abs((lcr - scr - cost) - lsr) < 1e-6 if lcr is not None and scr is not None and lsr is not None else None
-        #     with open(r"d:\qqq\.cursor\debug.log", "a", encoding="utf-8") as _f:
-        #         _f.write('{"id":"ls_check","location":"run_single_period","message":"Long-short composition","data":{"R1":r1,"R2":r2,"R9":r9,"R10":r10,"long_combined":lcr,"short_combined":scr,"ls_return":lsr,"cost":cost,"formula_ok":formula_ok},"hypothesisId":"H2"}\n')
-        # except Exception:
-        #     pass
-        # # #endregion
         # ls_perf = PerformanceAnalyzer(ls_nav, ls_returns, self.config.RISK_FREE_RATE)
         # ls_stats = ls_perf.calculate_metrics()
         # ls_monthly_returns = ls_perf.get_monthly_returns()
@@ -197,7 +199,12 @@ class SingleFactorTesterOptimized:
         
         long_stats = {}
         for group_num, result in long_results.items():
-            perf = PerformanceAnalyzer(result['nav'], result['returns'], self.config.RISK_FREE_RATE)
+            perf = PerformanceAnalyzer(
+                result['nav'],
+                result['returns'],
+                self.config.RISK_FREE_RATE,
+                periods_per_year=periods_per_year,
+            )
             long_stats[group_num] = perf.calculate_metrics()
         
         # 6. 空头回测：做空最低两组（合并）。做空收益 = -组收益，单边成本

@@ -128,13 +128,15 @@ qqq/
 | `returns` | `close.pct_change()` |
 | `vwap` | 近似 VWAP，`(high + low + close) / 3` |
 
+当 yfinance 使用 `auto_adjust=False` 拉取数据时，原始工作簿会保留未复权 OHLC/Close/Adj Close，并通过 `Adj Close / Close` 比例派生 `Adj Open`、`Adj High`、`Adj Low`。因子构建默认使用历史兼容口径（`Open/High/Low` 为原始列，`close` 为复权收盘价）；如需启用拆股一致的复权 OHLC，可在 `data/data_config.py` 将 `FACTOR_USE_ADJUSTED_OHLC=True`，但这会改变历史回测结果。因子、价格和收益加载都会把价格工作簿 sheet 过滤到 `data/data_config.py` 中的 `YFINANCE_TICKERS`，避免旧文件里残留或实验性新增股票静默改变横截面股票池。
+
 核心辅助操作包括截面排名、滞后、差分、滚动求和/最小/最大/排名、滚动相关/协方差、有符号幂、缩放和线性衰减。
 
 ### 因子处理
 
 `pipeline/data_process.py` 按日期进行截面处理：
 
-- 去极值，目前按日期做分位数截断
+- 去极值，目前按日期做中位数 MAD 截断
 - 按日期做 z-score 标准化
 - 每个因子输出一个处理后 Excel 文件
 
@@ -169,6 +171,8 @@ qqq/
 - `m1`：全样本均值。这是 oracle/research 基线，存在前瞻偏误。
 - `m2`：截至当前日期的历史扩展均值。
 - `m3`：最近 N 或 M 个窗口的滚动历史均值。
+
+`m1` sheet 会刻意使用全样本统计，只能作为含前瞻偏误的 research/oracle baseline 做研究对比，不应用于实盘策略选择。
 
 `inspect_ols_weights.py` 只适用于 `ols_*` 复合因子 sheet。
 
@@ -228,6 +232,9 @@ qqq/
 
 - `offset=0` 使用默认文件和目录。
 - `offset=N` 使用 `_offset{N}d` 文件和目录。
+- offset 价格文件不再静默回退到基线价格文件。若请求 `offset=N` 但 `data/us_top100_daily_2023_present_offset{N}d.xlsx` 不存在，读取方会直接报错，避免不同交易日历被混用。
+- offset 因子目录和复合因子目录也不再回退到基线目录。运行 offset 研究前必须生成匹配的 offset 因子和复合因子文件。
+- offset 起始日回推使用 NYSE 交易日历，不再使用普通工作日。
 - `run_rebalance_day.py` 通过 `REBALANCE_OFFSET_DAYS` 将 offset 传给子进程。
 - 修改 offset 后，需要重新运行 pull、因子构建、因子处理和复合因子生成。
 
@@ -241,6 +248,10 @@ qqq/
 临时实验可以只改 `MANUALLY_SELECTED_FACTOR_INDICES`。长期策略变更还需要同步 `analysis/strategy/strategy_config.py` 中的 `STRATEGY_SELECTED_FACTOR_INDICES`。
 
 `config/selected_factors_reference.py` 只是已选因子的人工参考，不会被流水线导入。
+
+单因子测试通过 `SingleFactorConfig.FACTOR_SHEET` 指定读取的因子 sheet；测试多 sheet 因子文件时不要依赖默认第一个 sheet。
+
+复合因子加载只有在主文件不存在时才回退到标准路径。若主文件存在但缺少目标 sheet 或无法读取，流程会直接失败，避免静默使用旧结果。
 
 ## 调仓日报告
 
@@ -264,7 +275,9 @@ Discord 消息包含：
 - 过滤微小权重后的今日买卖操作
 - 下一调仓日
 
-实时价格回退逻辑优先使用本地价格。若已完成的历史 bar 缺少 close，会通过 yfinance 重试回填。今日盘中 bar 不会用于污染历史 close 数据。
+Discord 发送默认关闭，只有设置环境变量 `REBALANCE_DISCORD_WEBHOOK_URL` 后才会推送。Webhook URL 不应提交到仓库。
+
+实时价格回退逻辑优先使用本地价格。若已完成的历史 bar 缺少 close，会通过 yfinance 重新拉取已完成日线；`fast_info.last_price` 不再写入历史 close 数据。
 
 ## 策略复盘
 
@@ -299,6 +312,8 @@ Discord 消息包含：
 - `MarkToMarket` 使用向量化掩码，跳过买入金额和权重都缺失的无效行，并为未到期持仓重算区间收益、卖出价值和股数。
 - 如果某一期没有有效复合权重，复合因子该行保留缺失值，不会静默设为 0。
 - 调仓日状态支持盘中运行：除非因子数据和日历状态支持，否则不会把未来日期误判为有效调仓日；若今天确实是调仓日，会用最近可用因子和实时/本地价格计算操作。
+- 单因子和复合因子中基于调仓期收益的指标使用 `252 / rebalance_period` 年化；基于日收益的策略回测仍使用 252 个交易日年化。旧报告与新口径报告不可直接比较。
+- 因子处理不再删除全空/全零原始因子；跳过记录会写入 `factor_processing_skip_manifest.csv`。
 
 ## 参考文档
 

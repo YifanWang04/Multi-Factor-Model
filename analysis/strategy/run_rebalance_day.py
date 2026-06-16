@@ -83,6 +83,7 @@ from strategy_utils import (
     load_composite_factor_with_fallback,
     composite_factors_path,
 )
+from rebalance.rebalance_report import _describe_composite_method as _describe_composite_method_for_report
 
 
 # ---------------------------------------------------------------------------
@@ -118,13 +119,13 @@ def _offset_dir_suffix() -> str:
 COMPOSITE_FACTOR_SHEET = "ic_m3_N20" # 3/17 + 3/25 
 # COMPOSITE_FACTOR_SHEET = "ols_m3_M10" # June 8, 2026
 
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
+MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
 # MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 
-MANUALLY_SELECTED_FACTOR_INDICES = [95, 99, 27, 75, 19]  # June 8, 2026
+# MANUALLY_SELECTED_FACTOR_INDICES = [95, 99, 27, 75, 19]  # June 8, 2026
 
-# STRATEGY_PARAM = "max_return_5G_Top1_P10d"  # 3/17
+STRATEGY_PARAM = "max_return_5G_Top1_P10d"  # 3/17
 # STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
-STRATEGY_PARAM = "max_return_5G_Top2_P20d" # June 8, 2026
+# STRATEGY_PARAM = "max_return_5G_Top2_P20d" # June 8, 2026
 
 SELECTED_FACTOR_INDICES = MANUALLY_SELECTED_FACTOR_INDICES
 SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
@@ -144,41 +145,53 @@ STRATEGY_PARAMS = {
 
 def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
     """在同一进程中依次执行 pipeline 各步骤（避免 subprocess 进程启动开销）。"""
-    from pipeline.build_factors import run as run_build_factors
-    from pipeline.data_process import run as run_data_process
-    from analysis.multi_factor.run_composite_factor import main as run_composite
+    env_updates = {
+        "REBALANCE_RUN_DIR": run_dir,
+        "REBALANCE_SELECTED_FACTORS": ",".join(SELECTED_FACTOR_NAMES),
+        "REBALANCE_SELECTED_FACTOR_INDICES": ",".join(str(i) for i in SELECTED_FACTOR_INDICES),
+        "REBALANCE_SELECTED_COMPOSITE": COMPOSITE_FACTOR_SHEET,
+        "REBALANCE_OFFSET_DAYS": str(DATA_START_OFFSET_DAYS),
+    }
+    old_env = {k: os.environ.get(k) for k in env_updates}
+    os.environ.update(env_updates)
 
-    data_dir = os.path.join(run_dir, "data")
-    factor_raw_dir = os.path.join(run_dir, "factor_raw")
-    factor_processed_dir = os.path.join(run_dir, "factor_processed")
-    composite_dir = os.path.join(run_dir, "composite_factor_reports")
-    for d in (data_dir, factor_raw_dir, factor_processed_dir, composite_dir):
-        os.makedirs(d, exist_ok=True)
+    try:
+        from pipeline.build_factors import run as run_build_factors
+        from pipeline.data_process import run as run_data_process
+        from analysis.multi_factor.run_composite_factor import main as run_composite
 
-    if skip_pull:
-        from data.data_config import PRICE_FILE as _src_price
-        src = _src_price
-        dst = os.path.join(data_dir, _price_filename())
-        if os.path.isfile(src):
+        data_dir = os.path.join(run_dir, "data")
+        factor_raw_dir = os.path.join(run_dir, "factor_raw")
+        factor_processed_dir = os.path.join(run_dir, "factor_processed")
+        composite_dir = os.path.join(run_dir, "composite_factor_reports")
+        for d in (data_dir, factor_raw_dir, factor_processed_dir, composite_dir):
+            os.makedirs(d, exist_ok=True)
+
+        if skip_pull:
+            from data.data_config import PRICE_FILE as _src_price, require_price_file_exists
+            src = require_price_file_exists(_src_price)
+            dst = os.path.join(data_dir, _price_filename())
             shutil.copy2(src, dst)
             print(f"  [Pipeline] 已复制数据至: {dst}")
         else:
-            raise FileNotFoundError(
-                f"skip_pull 时需存在 {src}，请先运行 pull 或确保已在当前脚本中设好 DATA_START_OFFSET_DAYS"
-            )
-    else:
-        print("[Pipeline] 拉取行情数据...")
-        from data import pull_yhfinance_Data
-        pull_yhfinance_Data.main()
+            print("[Pipeline] 拉取行情数据...")
+            from data import pull_yhfinance_Data
+            pull_yhfinance_Data.main()
 
-    print("[Pipeline] 构建因子...")
-    run_build_factors()
+        print("[Pipeline] 构建因子...")
+        run_build_factors()
 
-    print("[Pipeline] 因子数据处理...")
-    run_data_process()
+        print("[Pipeline] 因子数据处理...")
+        run_data_process()
 
-    print("[Pipeline] 因子复合...")
-    run_composite()
+        print("[Pipeline] 因子复合...")
+        run_composite()
+    finally:
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
@@ -200,16 +213,11 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
         os.makedirs(sub_dir, exist_ok=True)
 
     if skip_pull:
-        from data.data_config import PRICE_FILE as _src_price
-        src = _src_price
+        from data.data_config import PRICE_FILE as _src_price, require_price_file_exists
+        src = require_price_file_exists(_src_price)
         dst = os.path.join(data_dir, _price_filename())
-        if os.path.isfile(src):
-            shutil.copy2(src, dst)
-            print(f"  已复制数据至: {dst}")
-        else:
-            raise FileNotFoundError(
-                f"skip_pull 时需存在 {src}，请先运行 pull 或确保已在当前脚本中设好 DATA_START_OFFSET_DAYS"
-            )
+        shutil.copy2(src, dst)
+        print(f"  已复制数据至: {dst}")
 
     steps = []
     if not skip_pull:
@@ -280,7 +288,11 @@ def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
 
         # openpyxl 拒绝非 .xlsx 扩展名，使用 NamedTemporaryFile(suffix=".xlsx") 规避
-        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tf:
+        with tempfile.NamedTemporaryFile(
+            suffix=".xlsx",
+            delete=False,
+            dir=os.path.dirname(dst),
+        ) as tf:
             tmp_path = tf.name
         try:
             with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
@@ -363,13 +375,12 @@ def main(
         price_src = os.path.join(PROJECT_ROOT, "data", _price_filename())
         price_dst = price_file
         if not os.path.isfile(price_dst):
-            if os.path.isfile(price_src):
-                data_dir = os.path.join(run_dir, "data")
-                os.makedirs(data_dir, exist_ok=True)
-                shutil.copy2(price_src, price_dst)
-                print(f"  已从 {price_src} 复制价格数据至: {price_dst}")
-            else:
-                print(f"  [警告] 价格文件缺失: {price_src}（不影响后续因子加载）")
+            from data.data_config import require_price_file_exists
+            require_price_file_exists(price_src)
+            data_dir = os.path.join(run_dir, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            shutil.copy2(price_src, price_dst)
+            print(f"  已从 {price_src} 复制价格数据至: {price_dst}")
 
     # 阶段 2：加载复合因子与收益率
     print("\n[阶段 2] 加载复合因子与收益率...")
@@ -477,7 +488,7 @@ def main(
     print("\n" + "-" * 64)
     print("策略概要:")
     print(f"  选定因子: {', '.join(SELECTED_FACTOR_NAMES)}")
-    print(f"  复合因子: {COMPOSITE_FACTOR_SHEET} (IC加权 M3/N20)")
+    print(f"  复合因子: {_describe_composite_method_for_report(COMPOSITE_FACTOR_SHEET)}")
     print(f"  策略参数: {STRATEGY_PARAM}")
     print(f"    权重方式: {STRATEGY_PARAMS['weight_method']}")
     print(f"    分组数:   {STRATEGY_PARAMS['group_num']}")

@@ -18,6 +18,9 @@ import pandas as pd
 from scipy.optimize import minimize
 
 
+MIN_VALID_RETURN_RATIO = 0.8
+
+
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
@@ -252,12 +255,39 @@ def compute_weights(
     if len(valid_stocks) < 2:
         return pd.Series(equal_weight(n), index=stocks)
 
-    hist = hist_returns[valid_stocks].tail(lookback)
-    hist_clean = hist.dropna(how="all").ffill().fillna(0.0)
-
-    if len(hist_clean) < 5:
+    if len(valid_stocks) * max_weight < 1.0 - 1e-12:
+        print(
+            f"  [权重降级] {method}: 约束不可行 "
+            f"(有效标的 {len(valid_stocks)} × max_weight {max_weight:.3f} < 1)，使用等权"
+        )
         return pd.Series(equal_weight(n), index=stocks)
 
+    hist = hist_returns[valid_stocks].tail(lookback).apply(pd.to_numeric, errors="coerce")
+    hist = hist.replace([np.inf, -np.inf], np.nan)
+    min_obs = max(5, int(np.ceil(len(hist) * MIN_VALID_RETURN_RATIO)))
+    obs_counts = hist.notna().sum(axis=0)
+    eligible_stocks = obs_counts[obs_counts >= min_obs].index.tolist()
+
+    if len(eligible_stocks) < 2:
+        print(
+            f"  [权重降级] {method}: 历史收益有效样本不足 "
+            f"(阈值 {MIN_VALID_RETURN_RATIO:.0%})，使用等权"
+        )
+        return pd.Series(equal_weight(n), index=stocks)
+
+    if len(eligible_stocks) * max_weight < 1.0 - 1e-12:
+        print(
+            f"  [权重降级] {method}: 缺失过滤后约束不可行 "
+            f"(有效标的 {len(eligible_stocks)} × max_weight {max_weight:.3f} < 1)，使用等权"
+        )
+        return pd.Series(equal_weight(n), index=stocks)
+
+    hist_clean = hist[eligible_stocks].dropna(how="any")
+    if len(hist_clean) < 5:
+        print(f"  [权重降级] {method}: 完整历史收益行数不足，使用等权")
+        return pd.Series(equal_weight(n), index=stocks)
+
+    valid_stocks = eligible_stocks
     ret_mat = hist_clean.values
 
     if method == "min_variance":

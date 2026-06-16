@@ -55,6 +55,7 @@ from strategy_backtest import (
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
 from rebalance.rebalance_operations import _nth_nyse_trading_day
+from rebalance.rebalance_report import _describe_composite_method
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +201,10 @@ def run_detailed_backtest(
             continue
 
         w = weights.reindex(valid_stocks).fillna(0)
-        w = w / w.sum()
+        w_sum = float(w.sum())
+        if not np.isfinite(w_sum) or abs(w_sum) < 1e-12:
+            continue
+        w = w / w_sum
         buy_p = buy_prices.reindex(valid_stocks).dropna()
         # 对于最后一期，可能没有完全有效的卖出价格，但仍需处理
         sell_p = sell_prices.reindex(valid_stocks).dropna()
@@ -209,7 +213,10 @@ def run_detailed_backtest(
         common = w.index.intersection(buy_p.index)
         if len(common) == 0:
             continue
-        w_common = w[common] / w[common].sum()
+        common_sum = float(w[common].sum())
+        if not np.isfinite(common_sum) or abs(common_sum) < 1e-12:
+            continue
+        w_common = w[common] / common_sum
         # 卖出价格需要单独处理（最后一期可能为空）
 
         # ── 持仓期收益（向量化替代 iterrows）─────────────────────────
@@ -219,9 +226,15 @@ def run_detailed_backtest(
         valid_mask = period_ret_port.notna()
         # 每日归一化权重（仅对当日有收益的股票归一）
         w_row_sum = valid_mask.mul(w_common).sum(axis=1)  # Series: date → sum(w * valid)
+        valid_days = w_row_sum > 1e-12
+        if not valid_days.any():
+            continue
+        period_ret_port = period_ret_port.loc[valid_days]
+        valid_mask = valid_mask.loc[valid_days]
+        w_row_sum = w_row_sum.loc[valid_days]
         w_norm_daily = valid_mask.mul(w_common).div(w_row_sum, axis=0)
         # 组合日收益率
-        port_ret_series = (w_norm_daily * period_ret_port).sum(axis=1).fillna(0.0)
+        port_ret_series = (w_norm_daily * period_ret_port).sum(axis=1, min_count=1).dropna()
         period_daily = port_ret_series.to_list()
         # 首日扣交易成本（往返）
         if period_daily:
@@ -321,6 +334,8 @@ def write_detailed_report(result: dict, output_path: str) -> None:
     params = result.get("params", {})
     dr = result["daily_returns"]
     nv = result["nav"]
+    ret_df = result.get("_ret_df", pd.DataFrame())
+    price_df = result.get("_price_df", pd.DataFrame())
     total_ret = float(nv.iloc[-1]) - 1.0 if len(nv) > 0 else np.nan
     ann_ret = (1 + total_ret) ** (252 / max(1, len(dr))) - 1 if len(dr) > 0 else np.nan
     vol = dr.std() * np.sqrt(252) * 100 if len(dr) > 1 else np.nan
@@ -332,6 +347,7 @@ def write_detailed_report(result: dict, output_path: str) -> None:
         config_rows = [
             ["Factor_Indices", str(STRATEGY_SELECTED_FACTOR_INDICES)],
             ["Composite_Factor", COMPOSITE_FACTOR_SHEET],
+            ["Composite_Method", _describe_composite_method(COMPOSITE_FACTOR_SHEET)],
             ["Strategy_Param", _strategy_param_from_params(params)],
             ["Weight_Method", params.get("weight_method", "")],
             ["Group_Num", params.get("group_num", "")],
@@ -340,6 +356,10 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["Data_Start_Offset_TradingDays", params.get("data_start_offset_days", _get_data_offset())],
             ["Transaction_Cost_OneSide", f"{getattr(cfg, 'TRANSACTION_COST', 0.001):.3f}"],
             ["Timing_Convention", "Trade at T close, holding period (T, T_next]"],
+            ["Return_Data_Range", f"{ret_df.index[0].date()} ~ {ret_df.index[-1].date()}" if len(ret_df) > 0 else "-"],
+            ["Return_Universe_Size", ret_df.shape[1] if len(ret_df) > 0 else 0],
+            ["Price_Data_Range", f"{price_df.index[0].date()} ~ {price_df.index[-1].date()}" if len(price_df) > 0 else "-"],
+            ["Price_Universe_Size", price_df.shape[1] if len(price_df) > 0 else 0],
             ["---", "---"],
             ["Total_Return", f"{total_ret:.4f}" if not np.isnan(total_ret) else "-"],
             ["Annual_Return", f"{ann_ret:.4f}" if not np.isnan(ann_ret) else "-"],

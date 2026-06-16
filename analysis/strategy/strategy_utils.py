@@ -18,8 +18,15 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import numpy as np
 import pandas as pd
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from data.data_config import should_use_price_sheet
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +43,11 @@ def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.Data
 
     price_data = pd.read_excel(price_file, sheet_name=None)
     columns_dict = {}
+    skipped_extra_sheets = []
     for ticker, df in price_data.items():
+        if not should_use_price_sheet(ticker):
+            skipped_extra_sheets.append(ticker)
+            continue
         if "Date" not in df.columns or price_column not in df.columns:
             continue
         df = df.copy()
@@ -44,8 +55,19 @@ def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.Data
         df = df.set_index("Date")
         columns_dict[ticker] = df[price_column]
 
+    if skipped_extra_sheets:
+        preview = ", ".join(skipped_extra_sheets[:10])
+        suffix = "..." if len(skipped_extra_sheets) > 10 else ""
+        print(
+            f"  [universe] skipped {len(skipped_extra_sheets)} Excel sheets "
+            f"outside YFINANCE_TICKERS: {preview}{suffix}"
+        )
+
     if not columns_dict:
-        return pd.DataFrame()
+        raise ValueError(
+            f"No usable {price_column} data found in {price_file}; "
+            "check sheet names against YFINANCE_TICKERS and required columns."
+        )
 
     price_df = pd.concat(columns_dict, axis=1)
     price_df = price_df.apply(pd.to_numeric, errors="coerce")
@@ -82,8 +104,8 @@ def load_composite_factor(file_path: str, sheet_name: str) -> pd.DataFrame:
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"复合因子文件不存在: {file_path}")
 
-    xl = pd.ExcelFile(file_path)
-    available = xl.sheet_names
+    with pd.ExcelFile(file_path) as xl:
+        available = xl.sheet_names
     if sheet_name not in available:
         raise ValueError(
             f"Sheet '{sheet_name}' 不存在于 {os.path.basename(file_path)}。\n"
@@ -102,23 +124,25 @@ def load_composite_factor_with_fallback(
     sheet: str,
     std_file: str,
 ) -> pd.DataFrame:
-    """
-    加载复合因子，主路径失败时尝试标准路径回退。
-    主路径和标准路径均失败时抛出 FileNotFoundError（含已尝试路径信息）。
-    """
+    """加载复合因子；只有主文件不存在时才允许回退到标准路径。"""
     tried: list[str] = []
-    for path in (primary_path, std_file):
-        if not path:
-            tried.append(f"<空路径>")
-            continue
-        tried.append(path)
-        if os.path.isfile(path):
-            try:
-                df = load_composite_factor(path, sheet)
-                if not df.empty:
-                    return df
-            except Exception:
-                pass
+    if primary_path:
+        tried.append(primary_path)
+        if os.path.isfile(primary_path):
+            df = load_composite_factor(primary_path, sheet)
+            if df.empty:
+                raise ValueError(f"主复合因子文件为空: {primary_path} sheet={sheet}")
+            return df
+    else:
+        tried.append("<空路径>")
+
+    if std_file and os.path.abspath(std_file) != os.path.abspath(primary_path or ""):
+        tried.append(std_file)
+        if os.path.isfile(std_file):
+            df = load_composite_factor(std_file, sheet)
+            if df.empty:
+                raise ValueError(f"标准复合因子文件为空: {std_file} sheet={sheet}")
+            return df
 
     raise FileNotFoundError(
         f"无法加载复合因子 sheet '{sheet}'（已尝试: {', '.join(tried)}）"

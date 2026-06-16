@@ -1,260 +1,250 @@
 """
 Yahoo Finance 行情数据下载脚本 (data/pull_yhfinance_Data.py)
-=====================================
-本脚本通过 yfinance 下载指定股票列表的日频行情（含复权收盘价、成交量等），并写入单个 Excel 文件，每个标的一个 sheet，便于后续因子构建与回测使用。
+===========================================================
+通过 yfinance 下载指定股票列表的日频行情，写入单个 Excel 文件。
 
-行为说明：
-- 股票列表与时间范围：见 data/data_config.py（YFINANCE_TICKERS、yfinance_pull_start_date、DATA_BASE_START_DATE）。
-- end_date 使用运行当日（datetime.today()）。
-- DATA_START_OFFSET_DAYS：数据起始日提前的交易日数，0=不提前；正数=提前 N 个交易日，使调仓日历整体前移。
-- 输出：offset=0 时为 us_top100_daily_2023_present.xlsx；offset!=0 时为 us_top100_daily_2023_present_offset{N}d.xlsx，避免覆盖原数据。
-- 自动补全收盘价：当日线中 Open/High/Low 已有但 Close 缺失（通常为收盘后短期延迟），
-  且目标日期已收盘（早于今日），则用 fast_info.last_price 补全 Close/Adj Close。
-  注意：盘中运行时不会对当日数据做补全（避免用盘中价冒充收盘价）。
+关键口径：
+- yfinance 使用 auto_adjust=False，保留原始 OHLC/Close/Adj Close。
+- 若存在 Adj Close 与 Close，则用 Adj Close / Close 派生 Adj Open/Adj High/Adj Low，
+  后续因子构建优先使用复权 OHLC，避免拆股附近 OHLC 与 Adj Close 混用。
+- 历史收盘价缺失时，仅尝试重新拉取目标日期的已完成日线；不再用 fast_info.last_price
+  写入历史 close，避免用实时价污染历史数据。
+- 导入本模块无副作用；只有调用 main() 或直接运行脚本才会下载和写文件。
 """
+
+from __future__ import annotations
 
 import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
-# 确保项目根目录在 path 中，以便 import data.data_config
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta, timezone
 
 from data.data_config import (
     YFINANCE_DOWNLOAD_AUTO_ADJUST,
     YFINANCE_DOWNLOAD_PROGRESS,
     YFINANCE_TICKERS,
     _price_filename,
-    yfinance_pull_start_date,
     _resolve_offset,
+    yfinance_pull_start_date,
 )
 
-# 1. 运行参数（配置均在 data_config）
-# 优先读环境变量（subprocess 传播的 REBALANCE_OFFSET_DAYS），否则读配置文件
-DATA_START_OFFSET_DAYS = _resolve_offset()
 
-start_date = yfinance_pull_start_date()
-if DATA_START_OFFSET_DAYS > 0:
-    print(f"DATA_START_OFFSET_DAYS={DATA_START_OFFSET_DAYS}，起始日提前至 {start_date}")
-
-# yfinance 的 end 为不包含结束日，+1 天以纳入「运行当日」的日线
-end_date = (datetime.today() + timedelta(days=1)).strftime("%Y-%m-%d")
-codes = YFINANCE_TICKERS
-
-# 2. get data
-
-data_dict = {}
-
-total = len(codes)
-print(f"开始下载 {total} 只标的...")
-
-for i, code in enumerate(codes, 1):
-    df = yf.download(
-        code,
-        start=start_date,
-        end=end_date,
-        auto_adjust=YFINANCE_DOWNLOAD_AUTO_ADJUST,
-        progress=YFINANCE_DOWNLOAD_PROGRESS,
-    )
-
-    if df.empty:
-        print(f"  [{i}/{total}] {code} ✗ (无数据)")
-        continue
-
-    # 单标的 yf.download 可能返回单级或 MultiIndex 列名
+def _normalize_yfinance_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """单标的 yf.download 可能返回 MultiIndex；统一成普通列名。"""
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
+    return df
 
-    df.reset_index(inplace=True)
-    df["Ticker"] = code
 
-    data_dict[code] = df
-    # print(f"  [{i}/{total}] {code} ✓")
+def _add_adjusted_ohlc(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    用 Adj Close / Close 的复权比例派生 Adj Open/High/Low。
+    若缺少必要列或 Close 非正，则保持 NaN，不猜测。
+    """
+    required = {"Open", "High", "Low", "Close", "Adj Close"}
+    if not required.issubset(df.columns):
+        return df
 
-print(f"下载完成，成功获取 {len(data_dict)}/{total} 只")
+    close = pd.to_numeric(df["Close"], errors="coerce")
+    adj_close = pd.to_numeric(df["Adj Close"], errors="coerce")
+    ratio = adj_close.div(close.where(close > 0))
+    ratio = ratio.replace([float("inf"), float("-inf")], pd.NA)
 
-# ── 美股收盘判断（美东时区）─────────────────────────────────────────────────────
-# 美股交易日：周一至周五，节假日除外
-# 收盘时间：美东 16:00（对应 UTC 21:00 / 北京次日 04:00）
-_MARKET_CLOSE_HOUR_UTC = 21  # 美东 16:00 = UTC 21:00
-_MARKET_CLOSE_MINUTE = 0
+    for src, dst in (("Open", "Adj Open"), ("High", "Adj High"), ("Low", "Adj Low")):
+        df[dst] = pd.to_numeric(df[src], errors="coerce") * ratio
+    return df
 
 
 def _is_target_date_session_closed(target_date: pd.Timestamp) -> bool:
     """
-    判断目标日期（交易日）的美股是否已收盘。
-
-    原理：美股在交易日 D 的 21:00 UTC 收盘（DST 期间，ET=UTC-4）。
-    D 的收盘一定早于 D+1 的 00:00 UTC。因此：
-    若当前 UTC 时间 > target_date + 1 天 00:00 UTC，则该交易日必已收盘。
-    若 target_date >= today（今天或未来），则未收盘。
+    判断目标日期是否已确认收盘。
+    仅用于历史 bar 回补，今天或未来一律不回补。
     """
     now_utc = datetime.now(timezone.utc)
     today = pd.Timestamp(datetime.today().date())
     if target_date >= today:
         return False
-    # D+1 天 00:00 UTC = 收盘截止判断线
     cutoff_utc = datetime(
         year=target_date.year,
         month=target_date.month,
         day=target_date.day,
-        hour=0, minute=0, second=0,
+        hour=0,
+        minute=0,
+        second=0,
         tzinfo=timezone.utc,
     ) + pd.Timedelta(days=1)
     return now_utc > cutoff_utc
 
 
-def _is_market_closed_now() -> bool:
-    """判断美股当前是否已收盘（UTC 时间），用于盘中实时监控。"""
-    now_utc = datetime.now(timezone.utc)
-    # 美股交易日（周一=0，周日=6）
-    if now_utc.weekday() >= 5:  # 周六、周日
-        return True
-    # 检查是否已过收盘时间
-    if now_utc.hour > _MARKET_CLOSE_HOUR_UTC:
-        return True
-    if now_utc.hour == _MARKET_CLOSE_HOUR_UTC and now_utc.minute >= _MARKET_CLOSE_MINUTE:
-        return True
-    return False
+def _latest_completed_business_date() -> pd.Timestamp:
+    """返回最近一个已完成的普通工作日；yfinance 回补只作为缺失 close 的保守兜底。"""
+    target = pd.Timestamp(datetime.today().date()) - pd.Timedelta(days=1)
+    while target.weekday() >= 5:
+        target -= pd.Timedelta(days=1)
+    return target
 
 
 def _find_missing_close_rows(df: pd.DataFrame, target_date: pd.Timestamp) -> list[int]:
-    """
-    找出目标日期行中 Open/High/Low 已有但 Close（及 Adj Close）缺失的行索引（相对于 df）。
-    返回 df 中缺失 Close 的行的 .index 列表。
-    """
+    """查找目标日期 OHL 有值但 Close/Adj Close 缺失的行。"""
     if "Date" not in df.columns:
         return []
-    df_dt = df["Date"].copy()
-    if not pd.api.types.is_datetime64_any_dtype(df_dt):
-        df_dt = pd.to_datetime(df_dt, errors="coerce")
+    df_dt = pd.to_datetime(df["Date"], errors="coerce")
     rows = df[df_dt.dt.normalize() == target_date.normalize()]
-    missing = []
+    missing: list[int] = []
     for idx, row in rows.iterrows():
-        close_vals = []
-        if "Close" in df.columns:
-            close_vals.append(row["Close"])
-        if "Adj Close" in df.columns:
-            close_vals.append(row["Adj Close"])
-        if not close_vals or all(pd.isna(v) or v == 0 for v in close_vals):
-            # OHL 至少有一个非空
-            ohl = [row[c] for c in ["Open", "High", "Low"] if c in df.columns]
-            if ohl and not all(pd.isna(v) or v == 0 for v in ohl):
-                missing.append(idx)
+        close_vals = [row[c] for c in ("Close", "Adj Close") if c in df.columns]
+        close_missing = not close_vals or all(pd.isna(v) or v == 0 for v in close_vals)
+        ohl_vals = [row[c] for c in ("Open", "High", "Low") if c in df.columns]
+        has_ohl = bool(ohl_vals) and not all(pd.isna(v) or v == 0 for v in ohl_vals)
+        if close_missing and has_ohl:
+            missing.append(idx)
     return missing
 
 
-def _backfill_close_fast_info(
+def _fetch_completed_daily_bar(symbol: str, target_date: pd.Timestamp) -> pd.Series | None:
+    """重新拉取目标日期的已完成日线。失败或缺目标日时返回 None。"""
+    start = target_date.strftime("%Y-%m-%d")
+    end = (target_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        hist = yf.download(
+            symbol,
+            start=start,
+            end=end,
+            auto_adjust=YFINANCE_DOWNLOAD_AUTO_ADJUST,
+            progress=False,
+        )
+    except Exception:
+        return None
+    if hist.empty:
+        return None
+    hist = _normalize_yfinance_columns(hist)
+    row = hist.iloc[-1].copy()
+    return row
+
+
+def _backfill_completed_close_bars(
     data_dict: dict[str, pd.DataFrame],
     max_retries: int = 3,
     retry_delay_base: float = 0.5,
     retry_delay_mult: float = 2.0,
-) -> dict[str, dict[str, float]]:
+) -> dict[str, float]:
     """
-    对 data_dict 中所有标的，检查目标日期（最新日期）是否有 OHL 但无 Close，
-    若无 Close 且当前已过美股收盘时间，则用 fast_info.last_price 补全。
-    仅补全"昨天"及更早的日期（避免盘中运行时用实时价冒充收盘价）。
-
-    返回 {ticker: close_price} 的字典（包含所有尝试补全的标的，含失败）。
+    仅对已完成历史交易日缺失 close 的行重新拉取日线并写入。
+    不使用 fast_info.last_price 写历史，避免实时价污染历史 close。
     """
-    result: dict[str, dict[str, float]] = {}
+    result: dict[str, float] = {}
     if not data_dict:
         return result
 
-    # 目标日期：昨天（最近一个已收盘交易日）
-    today = pd.Timestamp(datetime.today().date())
-    yesterday = today - pd.Timedelta(days=1)
-    # 若昨天是周末，往前回溯到最近交易日
-    while yesterday.weekday() >= 5:
-        yesterday -= pd.Timedelta(days=1)
-
-    # 若目标日期的收盘尚未确认（盘中运行），跳过 backfill
-    if not _is_target_date_session_closed(yesterday):
-        print(f"  [Backfill 跳过] 目标日期 {yesterday.date()} 的收盘尚未确认（可能仍在盘中），不对其做收盘价补全")
+    target_date = _latest_completed_business_date()
+    if not _is_target_date_session_closed(target_date):
+        print(f"  [Backfill 跳过] {target_date.date()} 收盘尚未确认，不写入历史 close")
         return result
 
-    print(f"  [Backfill] 美股已收盘，开始检查 {yesterday.date()} 收盘价缺失情况...")
-
-    # 统计缺失 Close 的标的
-    need_fetch: list[str] = []
-    for ticker, df in data_dict.items():
-        missing_idx = _find_missing_close_rows(df, yesterday)
-        if missing_idx:
-            need_fetch.append(ticker)
-
+    need_fetch = [
+        ticker
+        for ticker, df in data_dict.items()
+        if _find_missing_close_rows(df, target_date)
+    ]
     if not need_fetch:
-        print(f"  [Backfill] 无收盘价缺失标的，跳过")
+        print("  [Backfill] 无收盘价缺失标的，跳过")
         return result
 
-    print(f"  [Backfill] 发现 {len(need_fetch)} 只标的收盘价缺失，正在获取 fast_info.last_price...")
-
-    # 批量获取收盘价
-    fetched: dict[str, float] = {}
+    print(f"  [Backfill] 发现 {len(need_fetch)} 只标的缺失 {target_date.date()} close，重新拉取完成日线")
     for sym in need_fetch:
         delay = retry_delay_base
+        row = None
         for attempt in range(max_retries):
-            try:
-                ticker = yf.Ticker(sym)
-                fi = ticker.fast_info
-                last_p = getattr(fi, "last_price", None)
-                if last_p is not None:
-                    fetched[sym] = float(last_p)
-                    break
-            except Exception:
-                pass
+            row = _fetch_completed_daily_bar(sym, target_date)
+            if row is not None:
+                break
             if attempt < max_retries - 1:
                 time.sleep(delay)
                 delay *= retry_delay_mult
-        if sym not in fetched:
-            print(f"    WARNING: {sym} 收盘价获取失败")
+        if row is None:
+            print(f"    WARNING: {sym} 完成日线回补失败，未写入实时价")
+            continue
 
-    if not fetched:
-        print(f"  [Backfill] 所有标的收盘价获取均失败，跳过")
-        return result
-
-    # 写入 data_dict（原地修改，to_excel 时一并保存）
-    for ticker, close_val in fetched.items():
-        df = data_dict[ticker]
-        missing_idx = _find_missing_close_rows(df, yesterday)
+        df = data_dict[sym]
+        missing_idx = _find_missing_close_rows(df, target_date)
         for idx in missing_idx:
-            if "Adj Close" in df.columns:
-                df.at[idx, "Adj Close"] = close_val
-            if "Close" in df.columns:
-                df.at[idx, "Close"] = close_val
-        result[ticker] = close_val
+            for col in ("Open", "High", "Low", "Close", "Adj Close", "Volume"):
+                if col in df.columns and col in row.index and pd.notna(row[col]):
+                    df.at[idx, col] = row[col]
+        data_dict[sym] = _add_adjusted_ohlc(df)
+        if "Adj Close" in row.index and pd.notna(row["Adj Close"]):
+            result[sym] = float(row["Adj Close"])
+        elif "Close" in row.index and pd.notna(row["Close"]):
+            result[sym] = float(row["Close"])
 
-    print(f"  [Backfill] 完成，共补全 {len(result)} 只")
+    print(f"  [Backfill] 完成，共补全 {len(result)} 只；失败项未使用实时价污染历史文件")
     return result
 
 
-# ── 收盘价 Backfill（仅已收盘日）─────────────────────────────────────────────
-_backfill_close_fast_info(data_dict)
+def _download_one_symbol(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    df = yf.download(
+        symbol,
+        start=start_date,
+        end=end_date,
+        auto_adjust=YFINANCE_DOWNLOAD_AUTO_ADJUST,
+        progress=YFINANCE_DOWNLOAD_PROGRESS,
+    )
+    if df.empty:
+        return df
+    df = _normalize_yfinance_columns(df)
+    df.reset_index(inplace=True)
+    df["Ticker"] = symbol
+    return _add_adjusted_ohlc(df)
 
-# ── 主流程 ────────────────────────────────────────────────────────────────────
 
-if not data_dict:
-    raise RuntimeError("没有成功下载任何股票数据，请检查网络或股票代码")
+def main() -> str:
+    """下载行情并写入 Excel，返回输出文件路径。"""
+    offset = _resolve_offset()
+    start_date = yfinance_pull_start_date()
+    if offset > 0:
+        print(f"DATA_START_OFFSET_DAYS={offset}，NYSE 起始日提前至 {start_date}")
 
-_run_dir = os.environ.get("REBALANCE_RUN_DIR")
-_price_name = _price_filename()
-if _run_dir:
-    _out_path = os.path.join(_run_dir, "data", _price_name)
-    os.makedirs(os.path.dirname(_out_path), exist_ok=True)
-else:
-    # 必须按当前 offset 写入对应文件名；勿用 PRICE_FILE（offset 文件不存在时会回退到基线路径并覆盖）
-    _out_path = os.path.join(_ROOT, "data", _price_filename())
-    os.makedirs(os.path.dirname(_out_path), exist_ok=True)
+    end_date = (datetime.today() + timedelta(days=1)).strftime("%Y-%m-%d")
+    codes = YFINANCE_TICKERS
+    data_dict: dict[str, pd.DataFrame] = {}
 
-with pd.ExcelWriter(_out_path, engine="xlsxwriter") as writer:
-    for sheet_name, df in data_dict.items():
-        df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+    print(f"开始下载 {len(codes)} 只标的...")
+    for i, code in enumerate(codes, 1):
+        df = _download_one_symbol(code, start_date, end_date)
+        if df.empty:
+            print(f"  [{i}/{len(codes)}] {code} ✗ (无数据)")
+            continue
+        data_dict[code] = df
 
-print(f"Excel 写入完成，共写入 {len(data_dict)} 个 sheet → {_price_name}")
+    print(f"下载完成，成功获取 {len(data_dict)}/{len(codes)} 只")
+    _backfill_completed_close_bars(data_dict)
 
-print("Data download completed.")
+    if not data_dict:
+        raise RuntimeError("没有成功下载任何股票数据，请检查网络或股票代码")
+
+    run_dir = os.environ.get("REBALANCE_RUN_DIR")
+    price_name = _price_filename()
+    if run_dir:
+        out_path = os.path.join(run_dir, "data", price_name)
+    else:
+        out_path = os.path.join(_ROOT, "data", price_name)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    with pd.ExcelWriter(out_path, engine="xlsxwriter") as writer:
+        for sheet_name, df in data_dict.items():
+            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
+    print(f"Excel 写入完成，共写入 {len(data_dict)} 个 sheet → {price_name}")
+    print("Data download completed.")
+    return out_path
+
+
+if __name__ == "__main__":
+    main()

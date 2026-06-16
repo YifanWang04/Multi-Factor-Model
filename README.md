@@ -128,13 +128,15 @@ Common input keys:
 | `returns` | `close.pct_change()` |
 | `vwap` | approximate VWAP, `(high + low + close) / 3` |
 
+When yfinance is pulled with `auto_adjust=False`, the raw workbook keeps original OHLC/Close/Adj Close and derives `Adj Open`, `Adj High`, and `Adj Low` from the `Adj Close / Close` adjustment ratio. Factor construction defaults to the legacy research-compatible OHLC convention (`Open/High/Low` raw, `close` adjusted). Set `FACTOR_USE_ADJUSTED_OHLC=True` in `data/data_config.py` to opt into adjusted OHLC for split-consistent factor construction; this will change historical backtest results. Factor, price, and return loaders filter Excel sheets to `YFINANCE_TICKERS` in `data/data_config.py`, so stale or experimental extra sheets in a price workbook do not silently change the cross-sectional universe.
+
 Core helper operations include cross-sectional rank, lag/delay, delta, rolling sum/min/max/rank, rolling correlation/covariance, signed power, scaling, and linear decay.
 
 ### Factor Processing
 
 `pipeline/data_process.py` processes factors cross-sectionally by date:
 
-- winsorization, currently percentile clipping by date
+- winsorization, currently median MAD clipping by date
 - z-score standardization by date
 - output as one processed Excel file per factor
 
@@ -169,6 +171,8 @@ Method meanings:
 - `m1`: full-period mean. This is an oracle/research baseline and contains look-ahead bias.
 - `m2`: expanding historical mean up to the current date.
 - `m3`: rolling historical mean over N or M windows.
+
+`m1` sheets intentionally use full-sample statistics and must be treated as look-ahead/oracle baselines only. They are useful for research comparison, not for live deployment decisions.
 
 `inspect_ols_weights.py` is only useful for `ols_*` composite sheets.
 
@@ -228,6 +232,9 @@ Rules:
 
 - `offset=0` uses default folders and files.
 - `offset=N` uses `_offset{N}d` folders and filenames.
+- Offset price files no longer fall back to the baseline price file. If `offset=N` is requested and `data/us_top100_daily_2023_present_offset{N}d.xlsx` is missing, data consumers fail fast so backtests cannot silently mix calendars.
+- Offset factor and composite directories no longer fall back to baseline directories. Generate matching offset factor/composite files before running offset research.
+- Offset start-date calculation uses the NYSE trading calendar, not generic weekdays.
 - `run_rebalance_day.py` propagates the offset to subprocesses through `REBALANCE_OFFSET_DAYS`.
 - After changing the offset, rerun pull, factor build, factor processing, and composite factor generation.
 
@@ -241,6 +248,10 @@ Composite factor selection is resolved in this order:
 For temporary experiments, edit `MANUALLY_SELECTED_FACTOR_INDICES`. For long-term strategy changes, also sync `STRATEGY_SELECTED_FACTOR_INDICES` in `analysis/strategy/strategy_config.py`.
 
 `config/selected_factors_reference.py` is a human reference for selected factor metadata and is not imported by the pipeline.
+
+Single-factor tests read `SingleFactorConfig.FACTOR_SHEET`; use this when testing a multi-sheet factor file instead of relying on the first sheet.
+
+Composite factor loading only falls back to the standard path when the primary file is absent. If the primary file exists but is missing the requested sheet or is unreadable, the run fails fast.
 
 ## Rebalance-Day Reporting
 
@@ -264,7 +275,9 @@ Discord messages include:
 - today's buy/sell operations with tiny weights filtered out
 - next rebalance date
 
-Live price fallback uses local prices first. If a completed historical bar is missing close data, yfinance is queried with retry/backoff. Today's intraday bar is not used to pollute historical close data.
+Discord delivery is disabled unless `REBALANCE_DISCORD_WEBHOOK_URL` is set in the environment. Webhook URLs should not be committed to the repository.
+
+Live price fallback uses local prices first. If a completed historical bar is missing close data, yfinance is queried for the completed daily bar with retry/backoff. `fast_info.last_price` is not written into historical close data.
 
 ## Strategy Review
 
@@ -299,6 +312,8 @@ This is the preferred tool for checking overfitting and parameter stability afte
 - `MarkToMarket` uses vectorized masks, skips invalid rows where both buy value and weight are missing, and recomputes period return, sell value, and shares for open positions.
 - If a period has no valid composite weights, the composite row remains missing instead of being silently set to zero.
 - Rebalance-day status handles intraday runs: a future date is not treated as a valid rebalance day unless the factor data and calendar state support it; when today is a valid rebalance day, operations are computed from the latest available factor and live/local prices.
+- Single-factor and composite-factor period returns are annualized with `252 / rebalance_period`, while strategy backtests based on daily returns still use 252 trading days per year. Reports generated before this convention are not directly comparable.
+- Factor processing no longer deletes raw all-empty/all-zero factors; skipped files are recorded in `factor_processing_skip_manifest.csv`.
 
 ## Reference Docs
 

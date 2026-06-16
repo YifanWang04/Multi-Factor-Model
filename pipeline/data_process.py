@@ -22,7 +22,13 @@ if _PROJECT_ROOT not in sys.path:
 import numpy as np
 import pandas as pd
 
-from data.data_config import PRICE_FILE, _price_filename, FACTOR_RAW_DIR, FACTOR_PROCESSED_DIR
+from data.data_config import (
+    PRICE_FILE,
+    _price_filename,
+    FACTOR_RAW_DIR,
+    FACTOR_PROCESSED_DIR,
+    require_price_file_exists,
+)
 
 def mad_winsorize(df, n=3):
     """
@@ -170,7 +176,7 @@ if __name__ == "__main__":
     else:
         input_dir = FACTOR_RAW_DIR
         output_dir = FACTOR_PROCESSED_DIR
-        reference_file = PRICE_FILE
+        reference_file = require_price_file_exists(PRICE_FILE)
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -185,7 +191,7 @@ if __name__ == "__main__":
     print("因子数据处理（去极值 + 标准化）")
     print("=" * 60)
 
-    removed_empty_factors = []
+    skipped_empty_factors = []
 
     for file in os.listdir(input_dir):
         if file.startswith("factor_") and file.endswith(".xlsx"):
@@ -197,22 +203,16 @@ if __name__ == "__main__":
                 file.replace(".xlsx", "_processed.xlsx")
             )
 
-            # 检查是否全为空/NaN/0，若是则删除并跳过
+            # 检查是否全为空/NaN/0，若是则跳过并记录，不删除原始文件以保留可追溯性
             if is_factor_all_empty_nan_or_zero(input_path):
                 factor_name = file.replace("factor_", "").replace(".xlsx", "")
-                removed_empty_factors.append(factor_name)
-                print(f"\n[跳过] {file}：因子值全为空/NaN/0，已删除")
-                try:
-                    os.remove(input_path)
-                    print(f"  已删除: {input_path}")
-                except OSError as e:
-                    print(f"  删除输入文件失败: {e}")
-                try:
-                    if os.path.exists(output_path):
-                        os.remove(output_path)
-                        print(f"  已删除: {output_path}")
-                except OSError as e:
-                    print(f"  删除输出文件失败: {e}")
+                skipped_empty_factors.append({
+                    "factor_name": factor_name,
+                    "input_path": input_path,
+                    "output_path": output_path,
+                    "reason": "all_empty_nan_or_zero",
+                })
+                print(f"\n[跳过] {file}：因子值全为空/NaN/0，已保留原始文件并写入 skip manifest")
                 continue
 
             print(f"\n处理 {file} ...")
@@ -231,10 +231,24 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 60)
     print("所有因子文件处理完成")
-    if removed_empty_factors:
+    if skipped_empty_factors:
         print("-" * 60)
-        print("已删除的空因子（全为空/NaN/0）:")
-        for name in removed_empty_factors:
-            print(f"  - {name}")
+        print("已跳过的空因子（全为空/NaN/0，未删除）:")
+        for rec in skipped_empty_factors:
+            print(f"  - {rec['factor_name']}")
+        manifest_path = os.path.join(output_dir, "factor_processing_skip_manifest.csv")
+        pd.DataFrame(skipped_empty_factors).to_csv(manifest_path, index=False, encoding="utf-8-sig")
+        print(f"Skip manifest: {manifest_path}")
         print("-" * 60)
     print("=" * 60)
+
+
+def main():
+    """可导入入口；通过脚本路径执行历史主流程。"""
+    import runpy
+    return runpy.run_path(__file__, run_name="__main__")
+
+
+def run():
+    """可导入入口，供 run_rebalance_day --inline 复用。"""
+    return main()

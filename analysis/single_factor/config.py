@@ -32,6 +32,8 @@ class SingleFactorConfig:
     # 指定单因子测试时使用的因子文件（运行 run_single_factor_test.py 时生效）
     # 批量测试（run_all_factors_backtest.py）会自动扫描 factor_processed 目录，忽略此项
     FACTOR_FILE = os.path.join(_FACTOR_PROCESSED_DIR, "factor_alpha001_processed.xlsx")
+    # 单因子文件 sheet；多 sheet 因子可指定如 "N20"，默认 0 表示第一个 sheet
+    FACTOR_SHEET = 0
     PRICE_FILE = _PRICE_FILE
     # 收益率：从 PRICE_FILE 读。若某 sheet 有 RETURN_COLUMN 列（如 "Return"）则直接用，否则用该 sheet 的收盘价 pct_change() 计算
     RETURN_COLUMN = "Return"
