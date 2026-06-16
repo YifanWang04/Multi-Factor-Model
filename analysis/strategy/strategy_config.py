@@ -4,7 +4,7 @@
 定义复合因子多头策略网格回测的所有输入输出路径与参数。
 
 运行前检查：
-  STRATEGY_SELECTED_FACTOR_INDICES — 策略使用的因子编号（与 composite_config 独立）
+  STRATEGY_SELECTED_FACTOR_INDICES — active profile 中的因子编号
   COMPOSITE_FACTOR_SHEET         — 复合因子合成方法 sheet 名
   GROUP_NUMS                     — 根据标的池数量设定（88 只股票建议 [5, 10]）
   REBALANCE_PERIODS       — 交易日数；系统从因子日期序列中取间隔 ≥ 该交易日数的节点
@@ -24,23 +24,20 @@ from data.data_config import (
     DATA_START_OFFSET_DAYS,
     _offset_dir_suffix,
 )
+from qqq_config.strategy_profiles import get_active_profile
 
-# ── 输入 ──────────────────────────────────────────────────────────────────────
+# ── Active profile 派生配置 ───────────────────────────────────────────────────
 
-# 选定的复合因子方法（Excel sheet 名），对应用户选择的 ols_m3_M5
-# COMPOSITE_FACTOR_SHEET = "ic_m3_N20" #3/17
-# COMPOSITE_FACTOR_SHEET = "pca_pc1" #3/25
-COMPOSITE_FACTOR_SHEET = "ols_m3_M10" #4/15
+ACTIVE_PROFILE = get_active_profile()
+ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
+COMPOSITE_FACTOR_SHEET = ACTIVE_PROFILE.composite_sheet
+STRATEGY_PARAM = ACTIVE_PROFILE.strategy_param
 
-# 选定因子（策略专用，与 composite_config 独立）
-# ⚠️ 切换因子后需先运行 run_composite_factor.py 生成新的复合因子 Excel
-# STRATEGY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-# STRATEGY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25
-# STRATEGY_SELECTED_FACTOR_INDICES =  [23, 43, 66, 45, 31]  # 4/15
-STRATEGY_SELECTED_FACTOR_INDICES = [95, 99, 27, 75, 19]  # June 8, 2026
+# 切换策略时修改 qqq_config/strategy_profiles.py 的 ACTIVE_STRATEGY_PROFILE，
+# 或临时设置环境变量 QQQ_STRATEGY_PROFILE；不要在本文件硬编码因子列表。
+STRATEGY_SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
 
-# 因子名称列表（由索引推导）
-STRATEGY_SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in STRATEGY_SELECTED_FACTOR_INDICES]
+STRATEGY_SELECTED_FACTOR_NAMES = list(ACTIVE_PROFILE.factor_names)
 
 # 复合因子文件名后缀（如 f95-101-62-65-32）
 def build_strategy_factor_suffix(factor_indices=None):

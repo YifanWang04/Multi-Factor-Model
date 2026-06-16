@@ -164,6 +164,32 @@ class RiskFixTests(unittest.TestCase):
             self.assertEqual(list(prices.columns), ["AAPL"])
             self.assertEqual(list(returns.columns), ["AAPL"])
 
+    def test_strategy_and_composite_configs_share_active_profile(self):
+        from qqq_config.strategy_profiles import get_active_profile
+        import analysis.strategy.strategy_config as sc
+        import analysis.multi_factor.composite_config as cc
+
+        profile = get_active_profile()
+        self.assertEqual(sc.ACTIVE_STRATEGY_PROFILE, profile.name)
+        self.assertEqual(sc.COMPOSITE_FACTOR_SHEET, profile.composite_sheet)
+        self.assertEqual(sc.STRATEGY_PARAM, profile.strategy_param)
+        self.assertEqual(sc.STRATEGY_SELECTED_FACTOR_INDICES, list(profile.factor_indices))
+        self.assertEqual(cc.SELECTED_FACTOR_INDICES, list(profile.factor_indices))
+        self.assertEqual(cc.SELECTED_FACTOR_NAMES, list(profile.factor_names))
+
+    def test_strategy_entrypoints_use_active_profile_config(self):
+        from qqq_config.strategy_profiles import get_active_profile
+        import analysis.strategy.run_rebalance_day as rd
+        import analysis.strategy.run_detailed_backtest_report as detailed
+
+        profile = get_active_profile()
+        self.assertEqual(rd.ACTIVE_STRATEGY_PROFILE, profile.name)
+        self.assertEqual(rd.COMPOSITE_FACTOR_SHEET, profile.composite_sheet)
+        self.assertEqual(rd.STRATEGY_PARAM, profile.strategy_param)
+        self.assertEqual(rd.SELECTED_FACTOR_INDICES, list(profile.factor_indices))
+        self.assertEqual(detailed.COMPOSITE_FACTOR_SHEET, profile.composite_sheet)
+        self.assertEqual(detailed.STRATEGY_PARAM, profile.strategy_param)
+
     def test_composite_fallback_does_not_hide_primary_sheet_error(self):
         from analysis.strategy.strategy_utils import load_composite_factor_with_fallback
 

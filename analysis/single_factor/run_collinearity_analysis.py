@@ -571,6 +571,7 @@ def run_collinearity_analysis(
     factor_list = list(iter_factors_from_files(factor_files, get_factor_display_name))
     if not factor_list:
         raise ValueError("未找到任何有效因子数据，请检查因子 Excel 文件。")
+    candidate_factor_count = len(factor_list)
     # 若配置了共线性分析因子，只保留这些因子（编号为 factor_library 中的因子编号，如 95 → alpha095）
     if COLLINEARITY_FACTOR_INDICES:
         name_to_factors = {}  # base_name -> [(name, factor), ...]
@@ -593,7 +594,15 @@ def run_collinearity_analysis(
             )
     factor_dict = {name: factor for name, factor in factor_list}
 
-    print(f"因子数量  : {len(factor_dict)}")
+    print(f"候选因子数: {candidate_factor_count}")
+    if COLLINEARITY_FACTOR_INDICES:
+        selected_targets = [f"alpha{idx:03d}" for idx in COLLINEARITY_FACTOR_INDICES]
+        print(f"分析范围  : 仅使用 COLLINEARITY_FACTOR_INDICES={COLLINEARITY_FACTOR_INDICES}")
+        print(f"目标因子  : {', '.join(selected_targets)}")
+    else:
+        print("分析范围  : COLLINEARITY_FACTOR_INDICES 为空，使用全部候选因子")
+    print(f"实际因子数: {len(factor_dict)}")
+    print(f"实际因子  : {', '.join(factor_dict.keys())}")
     print(f"调仓周期  : {rebalance_period} 交易日")
     print(f"输出目录  : {output_dir}")
 
@@ -642,23 +651,49 @@ def main():
         FACTOR_PROCESSED_DIR,
         OUTPUT_DIR,
         REBALANCE_PERIODS,
+        COLLINEARITY_FACTOR_INDICES,
+        get_factor_display_name,
         get_all_factor_files,
     )
 
     factor_list = FACTOR_FILES if FACTOR_FILES else get_all_factor_files(FACTOR_PROCESSED_DIR)
+    selected_targets = [f"alpha{idx:03d}" for idx in COLLINEARITY_FACTOR_INDICES]
+    selected_target_set = set(selected_targets)
+    selected_factor_files = []
+    if selected_target_set:
+        for path in factor_list:
+            base_name = get_factor_display_name(path).split("_")[0].split(" ")[0]
+            if base_name in selected_target_set:
+                selected_factor_files.append(path)
+    else:
+        selected_factor_files = list(factor_list)
+    matched_names = {
+        get_factor_display_name(path).split("_")[0].split(" ")[0]
+        for path in selected_factor_files
+    }
+    missing_targets = [name for name in selected_targets if name not in matched_names]
 
     print("=" * 60)
     print("因子共线性分析（多调仓周期）")
     print("=" * 60)
-    print(f"因子文件数: {len(factor_list)}")
-    print(f"调仓周期  : {REBALANCE_PERIODS}")
-    print(f"输出目录  : {OUTPUT_DIR}")
-    for i, p in enumerate(factor_list, 1):
+    print(f"候选因子文件数: {len(factor_list)}")
+    if COLLINEARITY_FACTOR_INDICES:
+        print(f"分析范围      : 仅分析 COLLINEARITY_FACTOR_INDICES={COLLINEARITY_FACTOR_INDICES}")
+        print(f"目标因子      : {', '.join(selected_targets)}")
+    else:
+        print("分析范围      : COLLINEARITY_FACTOR_INDICES 为空，使用全部候选因子")
+    print(f"匹配分析文件数: {len(selected_factor_files)}")
+    if missing_targets:
+        print(f"未匹配目标因子: {', '.join(missing_targets)}")
+    print(f"调仓周期      : {REBALANCE_PERIODS}")
+    print(f"输出目录      : {OUTPUT_DIR}")
+    print("实际用于分析的因子文件:")
+    for i, p in enumerate(selected_factor_files, 1):
         print(f"  [{i}] {os.path.basename(p)}")
 
     for period in REBALANCE_PERIODS:
         print(f"\n{'=' * 60}")
-        print(f"调仓周期: {period} 天")
+        print(f"调仓周期: {period} 交易日")
         print("=" * 60)
         run_collinearity_analysis(
             factor_files=factor_list,

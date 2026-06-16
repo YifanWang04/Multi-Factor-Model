@@ -32,7 +32,8 @@ OUTPUT_DIR = MULTI_FACTOR_REPORTS_DIR
 OUTPUT_EXCEL_NAME = "multi_factor_test_report.xlsx"  # 可改为 factor_test_report.xlsx 等
 
 # 调仓周期列表（交易日数）：每个周期生成一份独立报表，在此处统一配置
-REBALANCE_PERIODS = [5, 10]
+# REBALANCE_PERIODS = [3, 5, 10, 20]
+REBALANCE_PERIODS = [ 5, 10]
 
 # 共线性分析：仅对指定因子运行（编号为 factor_library 中的因子编号，如 95 → alpha095）
 # 例如 [95, 7, 21, 32, 65] 表示 alpha095、alpha007、alpha021、alpha032、alpha065。留空 [] 表示使用全部因子
@@ -41,7 +42,8 @@ REBALANCE_PERIODS = [5, 10]
 # COLLINEARITY_FACTOR_INDICES = [95, 101, 62, 65, 32] #3.17
 # COLLINEARITY_FACTOR_INDICES = [95, 24, 64, 65, 32] #3.25
 # COLLINEARITY_FACTOR_INDICES = [ 23, 43, 66, 45, 31] #4.15
-COLLINEARITY_FACTOR_INDICES = [95, 99, 27, 75, 19] #June 8, 2026
+# COLLINEARITY_FACTOR_INDICES = [95, 99, 27, 75, 19] #June 8, 2026
+COLLINEARITY_FACTOR_INDICES = [95, 99, 27, 46, 19] #June 8, 2026
 
 # 共线性分析输出文件名前缀（调仓周期后缀由代码自动追加，如 _P5.xlsx）
 OUTPUT_COLLINEARITY_NAME = "factor_collinearity_report"

@@ -214,6 +214,7 @@ Important config files:
 
 | File | Purpose |
 | --- | --- |
+| `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, selected factors, composite sheet, and live strategy parameter |
 | `data/data_config.py` | data start date, ticker universe, offset-aware paths |
 | `analysis/single_factor/config.py` | single-factor test settings |
 | `analysis/single_factor/multi_factor_config.py` | multi-factor test settings |
@@ -240,12 +241,12 @@ Rules:
 
 ### Factor Selection
 
+Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/multi_factor/composite_config.py` derive their default selected factors, composite sheet, and strategy parameter from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses.
+
 Composite factor selection is resolved in this order:
 
-1. `REBALANCE_SELECTED_FACTOR_INDICES`, set by `run_rebalance_day.py`
-2. `MANUALLY_SELECTED_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`
-
-For temporary experiments, edit `MANUALLY_SELECTED_FACTOR_INDICES`. For long-term strategy changes, also sync `STRATEGY_SELECTED_FACTOR_INDICES` in `analysis/strategy/strategy_config.py`.
+1. `REBALANCE_SELECTED_FACTOR_INDICES`, set by the rebalance pipeline for a single run
+2. the active profile in `qqq_config/strategy_profiles.py`
 
 `config/selected_factors_reference.py` is a human reference for selected factor metadata and is not imported by the pipeline.
 

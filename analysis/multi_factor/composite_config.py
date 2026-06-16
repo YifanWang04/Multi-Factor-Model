@@ -1,13 +1,11 @@
 """
-因子复合配置文件 (composite_config.py)
+复合因子配置兼容导出层 (composite_config.py)
 
 因子选择机制（优先级从高到低）：
   1. 环境变量 REBALANCE_SELECTED_FACTOR_INDICES
-     —— 由 run_rebalance_day.py 在启动 pipeline 子进程时设置，
-        保证整个流程（build_factors → data_process → run_composite_factor）使用一致的因子
-  2. 本文件中的 MANUALLY_SELECTED_FACTOR_INDICES（手动配置）
-     —— 直接在本文件修改，适合临时测试其他因子组合，不依赖 strategy_config
-  ⚠️ 注意：若需长期换因子，建议同步更新 strategy_config.py 以保持一致性
+     —— 由 run_rebalance_day.py 启动 pipeline 时设置，用于保证单次运行一致。
+  2. qqq_config/strategy_profiles.py 中的 active profile
+     —— 默认权威配置源，与 strategy_config.py 保持一致。
 """
 import os
 import sys
@@ -17,15 +15,17 @@ _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
 
 # ── 路径注册（从 strategy_utils 导入统一实现前需先注册）─────────────
 _STRATEGY_UTILS_DIR = os.path.join(PROJECT_ROOT, "analysis", "strategy")
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 if os.path.isdir(_STRATEGY_UTILS_DIR) and _STRATEGY_UTILS_DIR not in sys.path:
     sys.path.insert(0, _STRATEGY_UTILS_DIR)
 
-# ── 手动因子配置区 ─────────────────────────────────────────────────────────────
-# ⚠️ 如需切换因子，直接修改此列表（如 [95, 101, 62, 65, 32]），无需改其他文件
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25
-# MANUALLY_SELECTED_FACTOR_INDICES =  [23, 43, 66, 45, 31]  # 4/15
-MANUALLY_SELECTED_FACTOR_INDICES = [95, 99, 27, 75, 19]  # June 8, 2026
+from qqq_config.strategy_profiles import get_active_profile, parse_factor_indices_csv
+
+# ── Active profile 派生配置 ───────────────────────────────────────────────────
+ACTIVE_PROFILE = get_active_profile()
+# 保留旧变量名供历史调用方兼容；不要在此处手动改因子列表。
+MANUALLY_SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -34,13 +34,13 @@ def _resolve_selected_factor_indices():
     """
     解析选定的因子编号。
     优先级：
-      1. REBALANCE_SELECTED_FACTOR_INDICES（环境变量，run_rebalance_day.py 设置）
-      2. MANUALLY_SELECTED_FACTOR_INDICES（本文件手动配置）
-      3. 抛出异常（必须配置）
+      1. REBALANCE_SELECTED_FACTOR_INDICES（运行时环境变量）
+      2. active profile（通过兼容变量 MANUALLY_SELECTED_FACTOR_INDICES 暴露）
+      3. 抛出异常
     """
     env_val = os.environ.get("REBALANCE_SELECTED_FACTOR_INDICES")
     if env_val:
-        indices = [int(x.strip()) for x in env_val.split(",") if x.strip()]
+        indices = list(parse_factor_indices_csv(env_val))
         if indices:
             return indices
 
@@ -48,8 +48,8 @@ def _resolve_selected_factor_indices():
         return list(MANUALLY_SELECTED_FACTOR_INDICES)
 
     raise ValueError(
-        "未找到因子配置：请在 composite_config.py 中设置 MANUALLY_SELECTED_FACTOR_INDICES，"
-        "或通过 run_rebalance_day.py 启动以自动设置环境变量。"
+        "未找到因子配置：请检查 qqq_config/strategy_profiles.py 的 active profile，"
+        "或通过 REBALANCE_SELECTED_FACTOR_INDICES 提供运行时覆盖。"
     )
 
 
@@ -83,7 +83,7 @@ else:
     OUTPUT_DIR = _comp_out
 RETURN_COLUMN = "Return"
 
-# 选定因子编号（自动从环境变量或 strategy_config 解析，勿硬编码）
+# 选定因子编号（自动从运行时环境变量或 active profile 解析，勿硬编码）
 SELECTED_FACTOR_INDICES = _resolve_selected_factor_indices()
 SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
 

@@ -41,14 +41,14 @@ YFINANCE_TICKERS = [
     "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
     "SANM", "ANET", 
     # ## June 8, 2026 add new stocks
-    # "AMAT", "LRCX", "CRDO", "ARM", 
-    # "AAOI",
-    # "MRVL", "NBIS",
-    # "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
-    # "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "SNPS", "CDNS",
-    # "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
-    # "MDB", "PANW", "CRWD",
-    # "KLAC" #June 12, 2026拆股一拆十
+    "AMAT", "LRCX", "CRDO", "ARM", 
+    "AAOI",
+    "MRVL", "NBIS",
+    "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
+    "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "SNPS", "CDNS",
+    "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
+    "MDB", "PANW", "CRWD",
+    "KLAC" #June 12, 2026拆股一拆十
 ]
 
 

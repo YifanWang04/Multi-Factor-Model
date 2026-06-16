@@ -4,10 +4,9 @@
 基于 strategy 模块的回测逻辑，生成单策略的明细报表。
 
 配置：
-  - 因子选择：来自 strategy_config.STRATEGY_SELECTED_FACTOR_INDICES（与 composite_config 独立）
-  - 复合因子方法：由 COMPOSITE_FACTOR_SHEET 指定（如 ic_m3_N20）
-  - 策略参数：整串配置，如 max_return_5G_Top1_P10d
-    格式 {weight_method}_{N}G_Top{R}_P{D}d
+  - 因子选择、复合因子 sheet、策略参数均来自 strategy_config。
+  - strategy_config 默认从 qqq_config/strategy_profiles.py 的 active profile 派生。
+  - 策略参数格式：{weight_method}_{N}G_Top{R}_P{D}d
 
 输出 Excel（多 Sheet）：
   - 调仓操作明细：每期调仓的股票、买卖价格、权重、收益率等
@@ -59,12 +58,12 @@ from rebalance.rebalance_report import _describe_composite_method
 
 
 # ---------------------------------------------------------------------------
-# 配置（本脚本专用）
+# 配置（策略字段从 strategy_config 派生）
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = r"D:\qqq"
 from data.data_config import PRICE_FILE, DATA_START_OFFSET_DAYS, STRATEGY_REPORTS_DIR
-COMPOSITE_FACTOR_SHEET = "ic_m3_N20"  # beta_m3 方法，N=10 窗口
+COMPOSITE_FACTOR_SHEET = cfg.COMPOSITE_FACTOR_SHEET
 
 # Period_Summary 中标注的股票权重展示阈值（仅标注 weight > 此值的标的）
 PERIOD_SUMMARY_DISPLAY_WEIGHT_THRESHOLD: float = 0.01
@@ -74,12 +73,11 @@ def _get_data_offset():
 OUTPUT_DIR = STRATEGY_REPORTS_DIR
 OUTPUT_EXCEL_NAME = "strategy_detailed_backtest_report.xlsx"
 
-# 策略参数：整串配置，格式 {weight_method}_{N}G_Top{R}_P{D}d
-# 例：max_return_5G_Top1_P10d、mvo_10G_Top2_P30d、min_variance_5G_Top3_P20d
-STRATEGY_PARAM = "max_return_5G_Top1_P10d"
+# 策略参数：来自 active profile，格式 {weight_method}_{N}G_Top{R}_P{D}d
+STRATEGY_PARAM = cfg.STRATEGY_PARAM
 
-# 因子索引来自 strategy_config.STRATEGY_SELECTED_FACTOR_INDICES
-# ⚠️ 切换因子后需先运行 run_composite_factor.py 确保 composite_factors.xlsx 存在且含指定 sheet
+# 因子索引来自 strategy_config.STRATEGY_SELECTED_FACTOR_INDICES。
+# 切换 active profile 后需先生成匹配的 composite_factors 文件和 sheet。
 
 
 

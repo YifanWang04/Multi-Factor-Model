@@ -94,7 +94,7 @@ PIPELINE_SUBPROCESS_TIMEOUT: int = 600
 
 
 # ---------------------------------------------------------------------------
-# 配置（本脚本独立配置，策略相关参数从 strategy_config 派生）
+# 配置（路径/offset 在本脚本维护，策略字段从 strategy_config 派生）
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = r"D:\qqq"
@@ -116,19 +116,11 @@ def _offset_dir_suffix() -> str:
         return ""
     return f"_offset{DATA_START_OFFSET_DAYS}d"
 
-COMPOSITE_FACTOR_SHEET = "ic_m3_N20" # 3/17 + 3/25 
-# COMPOSITE_FACTOR_SHEET = "ols_m3_M10" # June 8, 2026
-
-MANUALLY_SELECTED_FACTOR_INDICES = [95, 101, 62, 65, 32]  # 3/17
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 24, 64, 65, 32]  # 3/25 
-# MANUALLY_SELECTED_FACTOR_INDICES = [95, 99, 27, 75, 19]  # June 8, 2026
-
-STRATEGY_PARAM = "max_return_5G_Top1_P10d"  # 3/17
-# STRATEGY_PARAM = "max_return_10G_Top1_P20d"  # 3/25
-# STRATEGY_PARAM = "max_return_5G_Top2_P20d" # June 8, 2026
-
-SELECTED_FACTOR_INDICES = MANUALLY_SELECTED_FACTOR_INDICES
-SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
+ACTIVE_STRATEGY_PROFILE = getattr(cfg, "ACTIVE_STRATEGY_PROFILE", "")
+COMPOSITE_FACTOR_SHEET = cfg.COMPOSITE_FACTOR_SHEET
+STRATEGY_PARAM = cfg.STRATEGY_PARAM
+SELECTED_FACTOR_INDICES = list(cfg.STRATEGY_SELECTED_FACTOR_INDICES)
+SELECTED_FACTOR_NAMES = list(cfg.STRATEGY_SELECTED_FACTOR_NAMES)
 
 _parsed = parse_strategy_param(STRATEGY_PARAM)
 STRATEGY_PARAMS = {

@@ -214,6 +214,7 @@ qqq/
 
 | 文件 | 用途 |
 | --- | --- |
+| `qqq_config/strategy_profiles.py` | active strategy profile、选定因子、复合 sheet、实盘策略参数的唯一权威配置源 |
 | `data/data_config.py` | 数据起始日、股票池、offset 路径 |
 | `analysis/single_factor/config.py` | 单因子测试配置 |
 | `analysis/single_factor/multi_factor_config.py` | 多因子测试配置 |
@@ -240,12 +241,12 @@ qqq/
 
 ### 因子选择
 
+核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/multi_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet 和策略参数。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。
+
 复合因子选择按以下优先级解析：
 
-1. `REBALANCE_SELECTED_FACTOR_INDICES`，由 `run_rebalance_day.py` 设置
-2. `analysis/multi_factor/composite_config.py` 中的 `MANUALLY_SELECTED_FACTOR_INDICES`
-
-临时实验可以只改 `MANUALLY_SELECTED_FACTOR_INDICES`。长期策略变更还需要同步 `analysis/strategy/strategy_config.py` 中的 `STRATEGY_SELECTED_FACTOR_INDICES`。
+1. `REBALANCE_SELECTED_FACTOR_INDICES`，由调仓日 pipeline 为单次运行设置
+2. `qqq_config/strategy_profiles.py` 中的 active profile
 
 `config/selected_factors_reference.py` 只是已选因子的人工参考，不会被流水线导入。
 
