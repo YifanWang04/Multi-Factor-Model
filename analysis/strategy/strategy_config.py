@@ -24,20 +24,45 @@ from data.data_config import (
     DATA_START_OFFSET_DAYS,
     _offset_dir_suffix,
 )
-from qqq_config.strategy_profiles import get_active_profile
+from qqq_config.strategy_profiles import get_active_profile, parse_factor_indices_csv
 
 # ── Active profile 派生配置 ───────────────────────────────────────────────────
 
 ACTIVE_PROFILE = get_active_profile()
 ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
-COMPOSITE_FACTOR_SHEET = ACTIVE_PROFILE.composite_sheet
+
+# Research-only overrides for direct runs of run_strategy.py before a profile is finalized.
+# Only set the factor group and composite sheet here; strategy grids stay below.
+# Leave values as None to use the active profile.
+# Reset them to None before live/rebalance-day runs.
+# STRATEGY_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19]          # Example: [95, 99, 27, 46, 19]
+# STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
+STRATEGY_RESEARCH_FACTOR_INDICES = None         # Example: [95, 99, 27, 46, 19]
+STRATEGY_RESEARCH_COMPOSITE_SHEET = None       # Example: "rank_ic_m3_N20"
+
+def _coerce_factor_indices(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return list(parse_factor_indices_csv(value))
+    return [int(i) for i in value]
+
+
+COMPOSITE_FACTOR_SHEET = (
+    STRATEGY_RESEARCH_COMPOSITE_SHEET or ACTIVE_PROFILE.composite_sheet
+)
 STRATEGY_PARAM = ACTIVE_PROFILE.strategy_param
 
 # 切换策略时修改 qqq_config/strategy_profiles.py 的 ACTIVE_STRATEGY_PROFILE，
 # 或临时设置环境变量 QQQ_STRATEGY_PROFILE；不要在本文件硬编码因子列表。
-STRATEGY_SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
+_research_factor_indices = _coerce_factor_indices(STRATEGY_RESEARCH_FACTOR_INDICES)
+STRATEGY_SELECTED_FACTOR_INDICES = (
+    _research_factor_indices or list(ACTIVE_PROFILE.factor_indices)
+)
 
-STRATEGY_SELECTED_FACTOR_NAMES = list(ACTIVE_PROFILE.factor_names)
+STRATEGY_SELECTED_FACTOR_NAMES = [
+    f"alpha{i:03d}" for i in STRATEGY_SELECTED_FACTOR_INDICES
+]
 
 # 复合因子文件名后缀（如 f95-101-62-65-32）
 def build_strategy_factor_suffix(factor_indices=None):
@@ -83,10 +108,10 @@ GROUP_NUMS = [5, 10]
 # ⚠️ 建议：使用与 composite_config.REBALANCE_PERIOD 一致的值（10），或其整数倍（20, 30）
 # 当前 composite_config.REBALANCE_PERIOD = 10 交易日
 # 注：调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制，已移除 REBALANCE_DATE_OFFSET
-REBALANCE_PERIODS = [10, 20, 30, 60]
+REBALANCE_PERIODS = [5, 10, 20]
 
 # 目标组排名（从高到低）：1=买最高分组，2=买第二高分组，3=买第三高分组
-TARGET_GROUP_RANKS = [1, 2, 3]
+TARGET_GROUP_RANKS = [1, 2]
 
 # 资产配置方式
 #   equal         : 等权配置

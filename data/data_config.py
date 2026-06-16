@@ -40,7 +40,7 @@ YFINANCE_TICKERS = [
     "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
     "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
     "SANM", "ANET", 
-    # ## June 8, 2026 add new stocks
+    ## June 8, 2026 add new stocks
     "AMAT", "LRCX", "CRDO", "ARM", 
     "AAOI",
     "MRVL", "NBIS",

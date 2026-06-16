@@ -241,12 +241,15 @@ qqq/
 
 ### 因子选择
 
-核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/multi_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet 和策略参数。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。
+核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/multi_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet 和策略参数。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。在新 profile 尚未定稿、需要直接探索复合方法时，可在 `analysis/multi_factor/composite_config.py` 中设置 `COMPOSITE_RESEARCH_FACTOR_INDICES`。
 
 复合因子选择按以下优先级解析：
 
 1. `REBALANCE_SELECTED_FACTOR_INDICES`，由调仓日 pipeline 为单次运行设置
-2. `qqq_config/strategy_profiles.py` 中的 active profile
+2. `analysis/multi_factor/composite_config.py` 中的 `COMPOSITE_RESEARCH_FACTOR_INDICES`，用于手动直接运行 `run_composite_factor.py`
+3. `qqq_config/strategy_profiles.py` 中的 active profile
+
+新策略尚未定稿前，`analysis/strategy/strategy_config.py` 也支持 `run_strategy.py` 的研究覆盖：只设置 `STRATEGY_RESEARCH_FACTOR_INDICES` 和 `STRATEGY_RESEARCH_COMPOSITE_SHEET`。策略参数网格仍使用普通固定配置区的 `GROUP_NUMS`、`REBALANCE_PERIODS`、`TARGET_GROUP_RANKS`、`WEIGHT_METHODS`。研究覆盖保持为 `None` 时继续使用 active profile 默认值；实盘/调仓日前应恢复为 `None`。
 
 `config/selected_factors_reference.py` 只是已选因子的人工参考，不会被流水线导入。
 

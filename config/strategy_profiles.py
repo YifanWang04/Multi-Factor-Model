@@ -66,9 +66,17 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         strategy_param="max_return_5G_Top2_P20d",
         description="Strategy3 June 2026 strategy profile.",
     ),
+
+    "Strategy4": StrategyProfile(
+        name="Strategy4",
+        factor_indices=(95, 99, 27, 46, 19),
+        composite_sheet="ic_m3_N10",
+        strategy_param="max_return_5G_Top2_P20d",
+        description="Strategy4 June 2026 strategy profile.",
+    ),
 }
 
-ACTIVE_STRATEGY_PROFILE = "Strategy1"
+ACTIVE_STRATEGY_PROFILE = "Strategy4"
 PROFILE_ENV_VAR = "QQQ_STRATEGY_PROFILE"
 
 

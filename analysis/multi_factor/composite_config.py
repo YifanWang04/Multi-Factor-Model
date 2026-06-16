@@ -27,7 +27,21 @@ ACTIVE_PROFILE = get_active_profile()
 # 保留旧变量名供历史调用方兼容；不要在此处手动改因子列表。
 MANUALLY_SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
 
+# Research-only override for running run_composite_factor.py directly.
+# Set to a list like [95, 99, 27, 46, 19], or leave as None to use the active profile.
+# The rebalance-day pipeline still takes precedence through REBALANCE_SELECTED_FACTOR_INDICES.
+# COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]
+COMPOSITE_RESEARCH_FACTOR_INDICES = None
+
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def _coerce_factor_indices(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return list(parse_factor_indices_csv(value))
+    return [int(i) for i in value]
 
 
 def _resolve_selected_factor_indices():
@@ -43,6 +57,10 @@ def _resolve_selected_factor_indices():
         indices = list(parse_factor_indices_csv(env_val))
         if indices:
             return indices
+
+    research_indices = _coerce_factor_indices(COMPOSITE_RESEARCH_FACTOR_INDICES)
+    if research_indices:
+        return research_indices
 
     if MANUALLY_SELECTED_FACTOR_INDICES:
         return list(MANUALLY_SELECTED_FACTOR_INDICES)

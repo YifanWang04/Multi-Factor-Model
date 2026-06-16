@@ -241,12 +241,15 @@ Rules:
 
 ### Factor Selection
 
-Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/multi_factor/composite_config.py` derive their default selected factors, composite sheet, and strategy parameter from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses.
+Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/multi_factor/composite_config.py` derive their default selected factors, composite sheet, and strategy parameter from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses. For direct composite-method research before a profile is finalized, set `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`.
 
 Composite factor selection is resolved in this order:
 
 1. `REBALANCE_SELECTED_FACTOR_INDICES`, set by the rebalance pipeline for a single run
-2. the active profile in `qqq_config/strategy_profiles.py`
+2. `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`, for manual direct runs of `run_composite_factor.py`
+3. the active profile in `qqq_config/strategy_profiles.py`
+
+Before a strategy profile is finalized, `analysis/strategy/strategy_config.py` also supports direct research overrides for `run_strategy.py`: set only `STRATEGY_RESEARCH_FACTOR_INDICES` and `STRATEGY_RESEARCH_COMPOSITE_SHEET`. The strategy parameter grid remains the normal fixed `GROUP_NUMS`, `REBALANCE_PERIODS`, `TARGET_GROUP_RANKS`, and `WEIGHT_METHODS` section. Leave research overrides as `None` for the active profile defaults, and reset them to `None` before live/rebalance-day runs.
 
 `config/selected_factors_reference.py` is a human reference for selected factor metadata and is not imported by the pipeline.
 
