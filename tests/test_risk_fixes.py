@@ -190,6 +190,58 @@ class RiskFixTests(unittest.TestCase):
         self.assertEqual(detailed.COMPOSITE_FACTOR_SHEET, profile.composite_sheet)
         self.assertEqual(detailed.STRATEGY_PARAM, profile.strategy_param)
 
+    def test_legacy_config_strategy_profiles_reexports_authority(self):
+        import config.strategy_profiles as legacy
+        import qqq_config.strategy_profiles as authority
+
+        self.assertIs(legacy.get_active_profile, authority.get_active_profile)
+        self.assertEqual(legacy.ACTIVE_STRATEGY_PROFILE, authority.ACTIVE_STRATEGY_PROFILE)
+        self.assertIn("Strategy4", authority.STRATEGY_PROFILES)
+
+    def test_project_paths_offset_and_run_dir_layout(self):
+        from qqq_core.paths import ProjectPaths, resolve_output_path
+
+        paths = ProjectPaths.from_env(offset=0)
+        self.assertEqual(paths.price_filename, "us_top100_daily_2023_present.xlsx")
+        self.assertTrue(str(paths.research_composite_factor_dir).endswith(os.path.join("output", "research", "composite_factor")))
+        self.assertTrue(str(paths.strategy_backtest_dir).endswith(os.path.join("output", "strategy", "backtest")))
+
+        offset_paths = ProjectPaths.from_env(offset=7)
+        self.assertEqual(offset_paths.price_filename, "us_top100_daily_2023_present_offset7d.xlsx")
+        self.assertTrue(str(offset_paths.factor_raw_dir).endswith("factor_raw_offset7d"))
+
+        run_dir = os.path.join(ROOT, "output", "rebalance_runs", "sample")
+        self.assertTrue(str(resolve_output_path("price_file", offset=0, run_dir=run_dir)).endswith(
+            os.path.join("sample", "data", "us_top100_daily_2023_present.xlsx")
+        ))
+        self.assertTrue(str(resolve_output_path("rebalance_report_file", offset=0, run_dir=run_dir)).endswith(
+            os.path.join("sample", "reports", "rebalance_day_report.xlsx")
+        ))
+
+    def test_excel_io_filters_sheets_and_requires_sheet(self):
+        from qqq_core.excel_io import read_price_workbook, require_sheet, atomic_excel_writer
+        from data.data_config import should_use_price_sheet
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "prices.xlsx")
+            df = pd.DataFrame(
+                {
+                    "Date": pd.to_datetime(["2026-01-02", "2026-01-05"]),
+                    "Adj Close": [100.0, 101.0],
+                }
+            )
+            with atomic_excel_writer(path) as writer:
+                df.to_excel(writer, sheet_name="AAPL", index=False)
+                df.to_excel(writer, sheet_name="NOT_IN_UNIVERSE", index=False)
+
+            prices = read_price_workbook(path, "Adj Close", sheet_filter=should_use_price_sheet)
+            self.assertEqual(list(prices.columns), ["AAPL"])
+            require_sheet(path, "AAPL")
+            with self.assertRaises(ValueError):
+                require_sheet(path, "missing_sheet")
+            leftovers = [name for name in os.listdir(tmp) if name != "prices.xlsx"]
+            self.assertEqual(leftovers, [])
+
     def test_composite_fallback_does_not_hide_primary_sheet_error(self):
         from analysis.strategy.strategy_utils import load_composite_factor_with_fallback
 

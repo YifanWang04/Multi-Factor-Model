@@ -70,6 +70,7 @@ The local virtual environment is expected at `.venv/`.
 
 ```text
 qqq/
+├── qqq_core/                    # Shared path, run-context, and Excel I/O helpers
 ├── data/                         # Data config and yfinance puller
 ├── pipeline/                     # Raw factor build and processed factor pipeline
 ├── factors/                      # WorldQuant 101-style alpha library
@@ -83,11 +84,15 @@ qqq/
 ├── factor_raw*/                  # Generated raw factor Excel files
 ├── factor_processed*/            # Generated processed factor Excel files
 ├── output/                       # Reports and timestamped run directories
+│   ├── research/                 # Single/multi/composite/walk-forward research reports
+│   ├── strategy/                 # Strategy backtest, detailed, and review reports
+│   └── rebalance_runs/           # New rebalance-day run directories
+├── tools/                        # Utility scripts; root wrappers are kept for compatibility
 ├── docs/                         # Design/code checklists
 ├── notes_markdown/               # Research notes exported from Notion
 ├── World Quant 101 Factors.pdf   # Factor reference document
-├── analyze_report.py             # Console preview for rebalance reports
-├── backfill_close.py             # Utility for filling missing close data
+├── analyze_report.py             # Compatibility wrapper for tools/analyze_report.py
+├── backfill_close.py             # Compatibility wrapper for tools/backfill_close.py
 └── README.md / README_zh.md
 ```
 
@@ -111,7 +116,7 @@ Temporary `_debug_*.py` and `_test_*.py` files are ad hoc diagnostics for recent
 | Rebalance day | `analysis/strategy/run_rebalance_day.py` | full pipeline or existing run dir | `rebalance_day_report.xlsx` and Discord message |
 | Walk-forward | `analysis/walk_forward/run_walk_forward.py` | walk-forward config | report, charts, stability analysis |
 
-Offset-aware paths use suffixes such as `factor_raw_offset7d/`, `factor_processed_offset7d/`, `output/composite_factor_reports_offset7d/`, `output/strategy_reports_offset7d/`, and `output/rebalance_day_offset7d_YYYY-MM-DD_HHMMSS/`.
+Offset-aware paths use suffixes such as `factor_raw_offset7d/`, `factor_processed_offset7d/`, `output/research/composite_factor_offset7d/`, `output/strategy/backtest_offset7d/`, and `output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offset7/`. Legacy `output/composite_factor_reports*`, `output/strategy_reports*`, and `output/rebalance_day_*` directories remain readable for existing workbooks and run directories.
 
 ## Core Concepts
 
@@ -214,6 +219,9 @@ Important config files:
 
 | File | Purpose |
 | --- | --- |
+| `qqq_core/paths.py` | single source of truth for project root, offset-aware paths, and output layout |
+| `qqq_core/run_context.py` | resolved profile/offset/run-dir context for one run |
+| `qqq_core/excel_io.py` | shared Excel sheet validation, price workbook loading, and atomic Excel writing |
 | `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, selected factors, composite sheet, and live strategy parameter |
 | `data/data_config.py` | data start date, ticker universe, offset-aware paths |
 | `analysis/single_factor/config.py` | single-factor test settings |
@@ -253,6 +261,8 @@ Before a strategy profile is finalized, `analysis/strategy/strategy_config.py` a
 
 `config/selected_factors_reference.py` is a human reference for selected factor metadata and is not imported by the pipeline.
 
+`config/strategy_profiles.py` is now only a compatibility wrapper that re-exports `qqq_config/strategy_profiles.py`; do not edit it as a second strategy-profile source.
+
 Single-factor tests read `SingleFactorConfig.FACTOR_SHEET`; use this when testing a multi-sheet factor file instead of relying on the first sheet.
 
 Composite factor loading only falls back to the standard path when the primary file is absent. If the primary file exists but is missing the requested sheet or is unreadable, the run fails fast.
@@ -268,6 +278,8 @@ Main steps:
 3. determine current, previous, and next rebalance dates
 4. generate `rebalance_day_report.xlsx`
 5. optionally send a Discord notification
+
+New rebalance-day runs are created under `output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offsetN/`. Intermediate data remains in `data/`, `factor_raw/`, `factor_processed/`, and `composite_factor_reports/` inside the run directory; the final workbook is written to `reports/rebalance_day_report.xlsx`. Existing `output/rebalance_day_*` run directories can still be passed with `--run-dir`.
 
 The report includes configuration, operations, return series, cumulative returns, period summaries, current holdings, mark-to-market fields, and next-rebalance information.
 
@@ -310,6 +322,7 @@ This is the preferred tool for checking overfitting and parameter stability afte
 
 - Use the same price data file for comparable runs. Corporate actions can change adjusted historical prices across yfinance pulls; BKNG's 1:25 split is a known example that can materially affect cross-sectional z-scores and holdings.
 - `run_rebalance_day.py --inline` is usually faster and easier to monitor than subprocess mode.
+- Path and output layout rules are centralized in `qqq_core.paths.ProjectPaths`; avoid hard-coding new `output/...` paths in business scripts.
 - The pipeline filters operations with `Weight <= 0.0001` to reduce noise and speed reports.
 - Shared utilities in `analysis/strategy/strategy_utils.py` centralize price loading, composite loading, strategy parameter parsing, factor suffix construction, small-weight filtering, and mark-to-market patching.
 - `build_factor_suffix` is centralized through `strategy_utils` and reused by composite/strategy scripts.

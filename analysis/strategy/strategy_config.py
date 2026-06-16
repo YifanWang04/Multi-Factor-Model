@@ -13,8 +13,9 @@
 """
 
 import os
+from qqq_core.paths import ProjectPaths
 
-PROJECT_ROOT = r"D:\qqq"
+PROJECT_ROOT = str(ProjectPaths.from_env().root)
 
 # 日频收益率文件：根据 data_config 按 offset 分子目录
 from data.data_config import (
@@ -37,7 +38,7 @@ ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
 # Reset them to None before live/rebalance-day runs.
 # STRATEGY_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19]          # Example: [95, 99, 27, 46, 19]
 # STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
-STRATEGY_RESEARCH_FACTOR_INDICES = None         # Example: [95, 99, 27, 46, 19]
+STRATEGY_RESEARCH_FACTOR_INDICES = None          # Example: [95, 99, 27, 46, 19]
 STRATEGY_RESEARCH_COMPOSITE_SHEET = None       # Example: "rank_ic_m3_N20"
 
 def _coerce_factor_indices(value):
@@ -83,12 +84,17 @@ def get_composite_factor_file() -> str:
     offset_path = os.path.join(offset_dir, fname)
     if os.path.isfile(offset_path):
         return offset_path
-    if DATA_START_OFFSET_DAYS != 0:
-        return offset_path
-    base_dir = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
-    base_path = os.path.join(base_dir, fname)
-    if os.path.isfile(base_path):
-        return base_path
+    legacy_offset_dir = os.path.join(
+        PROJECT_ROOT, "output", f"composite_factor_reports{_offset_dir_suffix()}"
+    )
+    legacy_offset_path = os.path.join(legacy_offset_dir, fname)
+    if os.path.isfile(legacy_offset_path):
+        return legacy_offset_path
+    if DATA_START_OFFSET_DAYS == 0:
+        base_dir = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
+        base_path = os.path.join(base_dir, fname)
+        if os.path.isfile(base_path):
+            return base_path
     # 均不存在时返回 offset 路径（让调用方报 FileNotFoundError）
     return offset_path
 

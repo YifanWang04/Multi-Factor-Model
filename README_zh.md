@@ -327,3 +327,13 @@ Discord 发送默认关闭，只有设置环境变量 `REBALANCE_DISCORD_WEBHOOK
 - `notes_markdown/notion_notes_ZH.md`：中文研究/设计笔记
 
 本 README 是项目的简明地图。生产调仓前，请以对应配置文件和脚本中的实际参数为准。
+
+## 2026-06 路径与入口重构说明
+
+- `qqq_core/paths.py` 统一管理项目根目录、offset 路径和输出目录；新增脚本不要再手写新的 `output/...` 路径。
+- `qqq_core/run_context.py` 表示一次运行的 profile、offset 和 run-dir 上下文。
+- `qqq_core/excel_io.py` 统一提供 Excel sheet 校验、价格 workbook 读取和原子写入。
+- `qqq_config/strategy_profiles.py` 是唯一策略 profile 配置源；`config/strategy_profiles.py` 只做兼容转发，不再维护第二份配置。
+- 新研究输出写入 `output/research/`，策略输出写入 `output/strategy/`，新的调仓日运行目录写入 `output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offsetN/`。
+- 调仓日最终报告现在位于 run 目录的 `reports/rebalance_day_report.xlsx`；旧的 `output/rebalance_day_*` 目录仍可通过 `--run-dir` 复用。
+- 根目录 `analyze_report.py`、`backfill_close.py` 已变为兼容 wrapper，长期实现位于 `tools/`。

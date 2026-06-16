@@ -14,9 +14,12 @@ import os
 
 import pandas as pd
 import pandas_market_calendars as mcal
+from qqq_core.paths import ProjectPaths, offset_dir_suffix, price_filename
 
 # 项目根目录（data 的上级）
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PATHS = ProjectPaths.from_env()
+_PROJECT_ROOT = str(_PATHS.root)
+PROJECT_ROOT = _PROJECT_ROOT
 
 # 数据起始日提前的交易日数：0=不提前，正数=提前 N 个交易日
 # 注：此值只从配置文件读取（不再支持通过环境变量覆盖）
@@ -41,14 +44,14 @@ YFINANCE_TICKERS = [
     "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
     "SANM", "ANET", 
     ## June 8, 2026 add new stocks
-    "AMAT", "LRCX", "CRDO", "ARM", 
-    "AAOI",
-    "MRVL", "NBIS",
-    "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
-    "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "SNPS", "CDNS",
-    "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
-    "MDB", "PANW", "CRWD",
-    "KLAC" #June 12, 2026拆股一拆十
+    # "AMAT", "LRCX", "CRDO", "ARM", 
+    # "AAOI",
+    # "MRVL", "NBIS",
+    # "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
+    # "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "SNPS", "CDNS",
+    # "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
+    # "MDB", "PANW", "CRWD",
+    # "KLAC" #June 12, 2026拆股一拆十
 ]
 
 
@@ -105,17 +108,11 @@ def _resolve_offset() -> int:
 
 # 价格文件名（不含路径）
 def _price_filename() -> str:
-    offset = _resolve_offset()
-    if offset == 0:
-        return "us_top100_daily_2023_present.xlsx"
-    return f"us_top100_daily_2023_present_offset{offset}d.xlsx"
+    return price_filename(_resolve_offset())
 
 # 目录后缀：offset=0 为空，offset!=0 为 _offset{N}d
 def _offset_dir_suffix() -> str:
-    offset = _resolve_offset()
-    if offset == 0:
-        return ""
-    return f"_offset{offset}d"
+    return offset_dir_suffix(_resolve_offset())
 
 # 默认价格文件路径（项目 data 目录下）
 # offset 文件不存在时不再回退到基线文件，读取方必须 fail fast。
@@ -147,13 +144,11 @@ def require_price_file_exists(price_file: str | None = None) -> str:
     )
 
 # 因子目录（按 offset 分子目录，不覆盖）
-FACTOR_RAW_DIR = os.path.join(_PROJECT_ROOT, f"factor_raw{_offset_dir_suffix()}")
-FACTOR_PROCESSED_DIR = os.path.join(_PROJECT_ROOT, f"factor_processed{_offset_dir_suffix()}")
+FACTOR_RAW_DIR = str(_PATHS.factor_raw_dir)
+FACTOR_PROCESSED_DIR = str(_PATHS.factor_processed_dir)
 
 # 复合因子输出目录（按 offset 分子目录，不覆盖）
-COMPOSITE_FACTOR_OUTPUT_DIR = os.path.join(
-    _PROJECT_ROOT, "output", f"composite_factor_reports{_offset_dir_suffix()}"
-)
+COMPOSITE_FACTOR_OUTPUT_DIR = str(_PATHS.research_composite_factor_dir)
 
 # 复合因子文件（不带后缀，仅指向目录；实际文件名由各调用方根据因子索引推导）
 # 保留此变量供向后兼容（如 pipeline 中直接引用），但不从 composite_config 推导后缀
@@ -163,10 +158,19 @@ _COMPOSITE_BASE_FILE = os.path.join(
 _BASE_DIR_FILE = os.path.join(
     _PROJECT_ROOT, "output", "composite_factor_reports", "composite_factors.xlsx"
 )
-COMPOSITE_FACTOR_FILE = _COMPOSITE_BASE_FILE if os.path.isfile(_COMPOSITE_BASE_FILE) else _BASE_DIR_FILE
+_LEGACY_OFFSET_FILE = os.path.join(
+    str(_PATHS.legacy_composite_factor_dir), "composite_factors.xlsx"
+)
+COMPOSITE_FACTOR_FILE = (
+    _COMPOSITE_BASE_FILE
+    if os.path.isfile(_COMPOSITE_BASE_FILE)
+    else _LEGACY_OFFSET_FILE
+    if os.path.isfile(_LEGACY_OFFSET_FILE)
+    else _BASE_DIR_FILE
+)
 
 # 其他输出目录（按 offset 分子目录，不覆盖）
-STRATEGY_REPORTS_DIR = os.path.join(_PROJECT_ROOT, "output", f"strategy_reports{_offset_dir_suffix()}")
-WALK_FORWARD_REPORTS_DIR = os.path.join(_PROJECT_ROOT, "output", f"walk_forward_reports{_offset_dir_suffix()}")
-SINGLE_FACTOR_REPORTS_DIR = os.path.join(_PROJECT_ROOT, "output", f"single_factor_reports{_offset_dir_suffix()}")
-MULTI_FACTOR_REPORTS_DIR = os.path.join(_PROJECT_ROOT, "output", f"multi_factor_reports{_offset_dir_suffix()}")
+STRATEGY_REPORTS_DIR = str(_PATHS.strategy_backtest_dir)
+WALK_FORWARD_REPORTS_DIR = str(_PATHS.research_walk_forward_dir)
+SINGLE_FACTOR_REPORTS_DIR = str(_PATHS.research_single_factor_dir)
+MULTI_FACTOR_REPORTS_DIR = str(_PATHS.research_multi_factor_dir)

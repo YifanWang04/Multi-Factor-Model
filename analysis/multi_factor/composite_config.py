@@ -9,8 +9,9 @@
 """
 import os
 import sys
+from qqq_core.paths import ProjectPaths
 
-PROJECT_ROOT = r"D:\qqq"
+PROJECT_ROOT = str(ProjectPaths.from_env().root)
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
 
 # ── 路径注册（从 strategy_utils 导入统一实现前需先注册）─────────────
@@ -31,7 +32,7 @@ MANUALLY_SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
 # Set to a list like [95, 99, 27, 46, 19], or leave as None to use the active profile.
 # The rebalance-day pipeline still takes precedence through REBALANCE_SELECTED_FACTOR_INDICES.
 # COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]
-COMPOSITE_RESEARCH_FACTOR_INDICES = None
+COMPOSITE_RESEARCH_FACTOR_INDICES = None #June 16, 2026
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ from data.data_config import (
     PRICE_FILE as _DEFAULT_PRICE_FILE,
     _price_filename,
     FACTOR_PROCESSED_DIR as _DEFAULT_FACTOR_PROCESSED_DIR,
+    COMPOSITE_FACTOR_OUTPUT_DIR as _DEFAULT_COMPOSITE_OUTPUT_DIR,
 )
 
 if _RUN_DIR:
@@ -94,11 +96,9 @@ if _RUN_DIR:
     PRICE_FILE = os.path.join(_RUN_DIR, "data", _price_filename())
     OUTPUT_DIR = os.path.join(_RUN_DIR, "composite_factor_reports")
 else:
-    _pfx = _offset_suffix()
-    FACTOR_PROCESSED_DIR = os.path.join(PROJECT_ROOT, f"factor_processed{_pfx}")
+    FACTOR_PROCESSED_DIR = _DEFAULT_FACTOR_PROCESSED_DIR
     PRICE_FILE = _DEFAULT_PRICE_FILE
-    _comp_out = os.path.join(PROJECT_ROOT, "output", f"composite_factor_reports{_pfx}")
-    OUTPUT_DIR = _comp_out
+    OUTPUT_DIR = _DEFAULT_COMPOSITE_OUTPUT_DIR
 RETURN_COLUMN = "Return"
 
 # 选定因子编号（自动从运行时环境变量或 active profile 解析，勿硬编码）

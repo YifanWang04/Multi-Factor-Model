@@ -65,6 +65,20 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         strategy_param="max_return_5G_Top2_P20d",
         description="Strategy3 June 2026 strategy profile.",
     ),
+    "Strategy4": StrategyProfile(
+        name="Strategy4",
+        factor_indices=(95, 99, 27, 46, 19),
+        composite_sheet="ic_m3_N10",
+        strategy_param="max_return_5G_Top2_P20d",
+        description="Strategy4 June 2026 strategy profile.",
+    ),
+    "Strategy5": StrategyProfile(
+        name="Strategy5",
+        factor_indices=(95, 99, 27, 19, 46),
+        composite_sheet="ic_m3_N10",
+        strategy_param="max_return_5G_Top2_P20d",
+        description="Strategy5 June 2026 strategy profile.",
+    ),
 }
 
 
