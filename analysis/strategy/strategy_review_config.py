@@ -53,12 +53,14 @@ PARAM_GRID = [
 
 # ── 6. 路径（None 时使用默认）────────────────────────────────────────────────
 import os
+from qqq_core.paths import ProjectPaths
 from data.data_config import (
     FACTOR_PROCESSED_DIR as _DEFAULT_FACTOR_PROCESSED_DIR,
 )
 
-PROJECT_ROOT = r"D:\qqq"
-OUTPUT_BASE = os.path.join(PROJECT_ROOT, "output")
+_PATHS = ProjectPaths.from_env()
+PROJECT_ROOT = str(_PATHS.root)
+OUTPUT_BASE = str(_PATHS.strategy_review_dir)
 FACTOR_DIR: str | None = None
 OUTPUT_DIR: str | None = None
 

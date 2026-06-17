@@ -13,11 +13,15 @@
 """
 import os
 
+from qqq_core.paths import ProjectPaths
 from data.data_config import (
     PRICE_FILE as _PRICE_FILE,
     FACTOR_PROCESSED_DIR as _FACTOR_PROCESSED_DIR,
     SINGLE_FACTOR_REPORTS_DIR as _SINGLE_FACTOR_REPORTS_DIR,
 )
+
+_PATHS = ProjectPaths.from_env()
+
 
 class SingleFactorConfig:
     """
@@ -25,8 +29,8 @@ class SingleFactorConfig:
     """
     
     # ==================== 路径配置 ====================
-    # 项目根目录（手动指定）
-    PROJECT_ROOT = r"D:\qqq"
+    # 项目根目录
+    PROJECT_ROOT = str(_PATHS.root)
     
     # 数据路径
     # 指定单因子测试时使用的因子文件（运行 run_single_factor_test.py 时生效）

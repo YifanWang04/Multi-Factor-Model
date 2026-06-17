@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 import numpy as np
 import pandas as pd
@@ -27,6 +26,14 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from data.data_config import should_use_price_sheet
+from qqq_core.excel_io import read_price_workbook, read_sheet_with_datetime_index
+from qqq_core.strategy_params import (
+    build_factor_suffix,
+    composite_factors_path,
+    parse_strategy_param,
+    safe_tag,
+    strategy_param_from_params,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -41,19 +48,9 @@ def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.Data
     if not os.path.isfile(price_file):
         raise FileNotFoundError(f"价格文件不存在: {price_file}")
 
-    price_data = pd.read_excel(price_file, sheet_name=None)
-    columns_dict = {}
-    skipped_extra_sheets = []
-    for ticker, df in price_data.items():
-        if not should_use_price_sheet(ticker):
-            skipped_extra_sheets.append(ticker)
-            continue
-        if "Date" not in df.columns or price_column not in df.columns:
-            continue
-        df = df.copy()
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date")
-        columns_dict[ticker] = df[price_column]
+    with pd.ExcelFile(price_file) as xl:
+        all_sheets = list(xl.sheet_names)
+    skipped_extra_sheets = [name for name in all_sheets if not should_use_price_sheet(name)]
 
     if skipped_extra_sheets:
         preview = ", ".join(skipped_extra_sheets[:10])
@@ -63,16 +60,11 @@ def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.Data
             f"outside YFINANCE_TICKERS: {preview}{suffix}"
         )
 
-    if not columns_dict:
-        raise ValueError(
-            f"No usable {price_column} data found in {price_file}; "
-            "check sheet names against YFINANCE_TICKERS and required columns."
-        )
-
-    price_df = pd.concat(columns_dict, axis=1)
-    price_df = price_df.apply(pd.to_numeric, errors="coerce")
-    price_df.sort_index(inplace=True)
-    return price_df
+    return read_price_workbook(
+        price_file,
+        price_column=price_column,
+        sheet_filter=should_use_price_sheet,
+    )
 
 
 def _get_price_on_date(
@@ -104,19 +96,15 @@ def load_composite_factor(file_path: str, sheet_name: str) -> pd.DataFrame:
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"复合因子文件不存在: {file_path}")
 
-    with pd.ExcelFile(file_path) as xl:
-        available = xl.sheet_names
-    if sheet_name not in available:
+    try:
+        return read_sheet_with_datetime_index(file_path, sheet_name=sheet_name, index_col=0)
+    except ValueError as exc:
+        with pd.ExcelFile(file_path) as xl:
+            available = xl.sheet_names
         raise ValueError(
             f"Sheet '{sheet_name}' 不存在于 {os.path.basename(file_path)}。\n"
             f"可用 sheet: {available}"
-        )
-
-    df = pd.read_excel(file_path, sheet_name=sheet_name, index_col=0)
-    df.index = pd.to_datetime(df.index)
-    df = df.apply(pd.to_numeric, errors="coerce")
-    df.sort_index(inplace=True)
-    return df
+        ) from exc
 
 
 def load_composite_factor_with_fallback(
@@ -173,71 +161,6 @@ def _build_groups(factor_signal: pd.Series, group_num: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 因子后缀
-# ---------------------------------------------------------------------------
-
-def build_factor_suffix(factor_indices: list[int] | None = None, default_indices: list[int] | None = None) -> str:
-    """
-    基于因子编号列表生成简短后缀，如 f95-24-64-65-32。
-    未提供时优先使用 default_indices；两者均无则返回空字符串。
-    """
-    if factor_indices is None:
-        factor_indices = default_indices
-    if factor_indices is None:
-        return ""
-    nums = [str(int(i)) for i in factor_indices]
-    return "f" + "-".join(nums)
-
-
-def composite_factors_path(base_dir: str, factor_indices: list[int]) -> str:
-    """
-    返回 composite_factor_reports 目录下带因子后缀的文件路径。
-    base_dir：完整路径（可含 composite_factor_reports/ 子目录）
-    当 base_dir 已含 composite_factor_reports 子目录时，直接在其下生成文件；
-    否则自动追加该子目录。
-    """
-    suffix = build_factor_suffix(factor_indices)
-    name = f"composite_factors_{suffix}.xlsx"
-    # 若 base_dir 已为完整目录（已含 composite_factor_reports 子目录），直接使用
-    if os.path.basename(base_dir) == "composite_factor_reports":
-        return os.path.join(base_dir, name)
-    return os.path.join(base_dir, "composite_factor_reports", name)
-
-
-# ---------------------------------------------------------------------------
-# 策略参数字符串解析
-# ---------------------------------------------------------------------------
-
-def parse_strategy_param(param: str) -> tuple:
-    """
-    解析策略参数字符串，格式：{weight_method}_{N}G_Top{R}_P{D}d
-    例：max_return_10G_Top1_P20d -> (weight_method, group_num, target_rank, rebalance_days)
-    """
-    m = re.match(r"^(.+)_(\d+)G_Top(\d+)_P(\d+)d$", param.strip())
-    if not m:
-        raise ValueError(
-            f"策略参数格式错误: '{param}'，应为 {{weight_method}}_{{N}}G_Top{{R}}_P{{D}}d，"
-            "例：max_return_10G_Top1_P10d"
-        )
-    weight_method = m.group(1)
-    group_num = int(m.group(2))
-    target_rank = int(m.group(3))
-    rebalance_days = int(m.group(4))
-    return weight_method, group_num, target_rank, rebalance_days
-
-
-def strategy_param_from_params(params: dict) -> str:
-    """从 params 字典还原策略参数字符串。"""
-    w = params.get("weight_method", "")
-    g = params.get("group_num", "")
-    r = params.get("target_rank", "")
-    p = params.get("rebalance_period", "")
-    if w != "" and g != "" and r != "" and p != "":
-        return f"{w}_{g}G_Top{r}_P{p}d"
-    return ""
-
-
-# ---------------------------------------------------------------------------
 # 操作数据过滤
 # ---------------------------------------------------------------------------
 
@@ -275,13 +198,6 @@ def truncate_text(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 3] + "..."
-
-
-def safe_tag(s: str) -> str:
-    """将字符串转成适合文件名的 tag（尽量保持可读性）。"""
-    s = str(s)
-    s = s.strip().replace(" ", "")
-    return "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in s)
 
 
 # ---------------------------------------------------------------------------

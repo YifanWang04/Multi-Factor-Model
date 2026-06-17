@@ -333,8 +333,13 @@ def main(
     inline_pipeline : bool
         若为 True，pipeline 在同一进程中执行（更快）
     """
-    run_dir = _get_run_dir(run_dir_arg, skip_pipeline)
-    os.makedirs(run_dir, exist_ok=True)
+    from analysis.strategy.rebalance.rebalance_pipeline import (
+        RebalancePipelineOptions,
+        resolve_rebalance_run_dir,
+        run_rebalance_pipeline,
+    )
+
+    run_dir = resolve_rebalance_run_dir(run_dir_arg, skip_pipeline)
 
     # 确定复合因子文件和价格文件路径
     if skip_pipeline:
@@ -358,11 +363,15 @@ def main(
     # 阶段 1：执行 Pipeline
     if not skip_pipeline:
         print("\n[阶段 1] 执行 Pipeline...")
-        if inline_pipeline:
-            _run_pipeline_inline(run_dir, skip_pull=skip_pull)
-        else:
-            _run_pipeline_subprocess(run_dir, skip_pull=skip_pull)
-        _sync_composite_factor_to_standard(run_dir=run_dir, sheet=COMPOSITE_FACTOR_SHEET)
+        run_rebalance_pipeline(
+            RebalancePipelineOptions(
+                skip_pipeline=False,
+                skip_pull=skip_pull,
+                inline_pipeline=inline_pipeline,
+                run_dir_arg=run_dir,
+                sync_sheet=COMPOSITE_FACTOR_SHEET,
+            )
+        )
     else:
         print("\n[阶段 1] 跳过 Pipeline")
 

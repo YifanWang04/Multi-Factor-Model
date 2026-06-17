@@ -47,7 +47,7 @@ python analysis/strategy/run_detailed_backtest_report.py
 python analysis/strategy/run_strategy_review.py
 python analysis/strategy/test_discord_notification.py
 python analysis/walk_forward/run_walk_forward.py
-python analyze_report.py
+python analyze_report.py [rebalance_day_report.xlsx]
 python backfill_close.py
 ```
 
@@ -70,6 +70,8 @@ python backfill_close.py
 
 ```text
 qqq/
+├── qqq_core/                    # 共享路径、运行上下文、Excel I/O、命名与参数解析
+├── qqq_config/                  # 策略 profile、股票池和实盘配置权威来源
 ├── data/                         # 数据配置和 yfinance 拉取脚本
 ├── pipeline/                     # 原始因子构建和处理流水线
 ├── factors/                      # WorldQuant 101 风格 Alpha 因子库
@@ -83,11 +85,15 @@ qqq/
 ├── factor_raw*/                  # 生成的原始因子 Excel
 ├── factor_processed*/            # 生成的处理后因子 Excel
 ├── output/                       # 报告和带时间戳的运行目录
+│   ├── research/                 # 单因子、多因子、复合因子、Walk-Forward 报告
+│   ├── strategy/                 # 策略回测、详细报告、复盘报告
+│   └── rebalance_runs/           # 新调仓日运行目录
+├── tools/                        # 长期工具脚本；根目录保留兼容 wrapper
 ├── docs/                         # 设计/代码检查清单
 ├── notes_markdown/               # 从 Notion 导出的研究笔记
 ├── World Quant 101 Factors.pdf   # 因子参考文档
-├── analyze_report.py             # 调仓日报告命令行预览工具
-├── backfill_close.py             # 缺失 close 数据补全工具
+├── analyze_report.py             # tools/analyze_report.py 的兼容 wrapper
+├── backfill_close.py             # tools/backfill_close.py 的兼容 wrapper
 └── README.md / README_zh.md
 ```
 
@@ -111,7 +117,7 @@ qqq/
 | 调仓日 | `analysis/strategy/run_rebalance_day.py` | 全流水线或已有运行目录 | `rebalance_day_report.xlsx` 和 Discord 消息 |
 | Walk-Forward | `analysis/walk_forward/run_walk_forward.py` | Walk-Forward 配置 | 报告、图表、稳定性分析 |
 
-带 offset 的路径会使用后缀，例如 `factor_raw_offset7d/`、`factor_processed_offset7d/`、`output/composite_factor_reports_offset7d/`、`output/strategy_reports_offset7d/`、`output/rebalance_day_offset7d_YYYY-MM-DD_HHMMSS/`。
+带 offset 的路径会使用后缀，例如 `factor_raw_offset7d/`、`factor_processed_offset7d/`、`output/research/composite_factor_offset7d/`、`output/strategy/backtest_offset7d/`、`output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offset7/`。旧的 `output/composite_factor_reports*`、`output/strategy_reports*` 和 `output/rebalance_day_*` 目录仍可读取，用于兼容历史工作簿和运行目录。
 
 ## 核心概念
 
@@ -214,6 +220,10 @@ qqq/
 
 | 文件 | 用途 |
 | --- | --- |
+| `qqq_core/paths.py` | 项目根目录、offset 路径和输出目录布局的统一入口 |
+| `qqq_core/run_context.py` | 一次运行的 profile、offset、run-dir 上下文 |
+| `qqq_core/excel_io.py` | Excel sheet 校验、价格 workbook 读取、因子 sheet 读取和原子写入 |
+| `qqq_core/strategy_params.py` | 因子后缀、复合因子文件名、策略参数解析和安全文件名标签 |
 | `qqq_config/strategy_profiles.py` | active strategy profile、股票池、选定因子、复合 sheet、实盘策略参数的唯一权威配置源 |
 | `data/data_config.py` | 数据起始日、直接拉取默认股票池、offset 路径 |
 | `analysis/single_factor/config.py` | 单因子测试配置 |
@@ -223,7 +233,7 @@ qqq/
 | `analysis/strategy/strategy_review_config.py` | 自包含策略复盘配置 |
 | `analysis/walk_forward/walk_forward_config.py` | Walk-Forward 窗口和网格 |
 
-各配置中的 `PROJECT_ROOT` 需要保持一致。当前项目根目录是 `D:\qqq`。
+各配置中的 `PROJECT_ROOT` 由 `qqq_core.paths.ProjectPaths` 派生；只有迁移项目根目录时才需要显式设置 `QQQ_PROJECT_ROOT`。当前项目根目录是 `D:\qqq`。
 
 ### 数据 Offset
 
@@ -314,6 +324,9 @@ Discord 发送默认关闭，只有设置环境变量 `REBALANCE_DISCORD_WEBHOOK
 
 - 对比不同运行结果时应使用同一个价格数据文件。公司行动可能导致 yfinance 不同日期拉取的历史复权价格不同；BKNG 1:25 拆股就是已知例子，会明显影响截面 z-score 和持仓。
 - `run_rebalance_day.py --inline` 通常比子进程模式更快，也更容易观察进度。
+- 路径和输出布局规则集中在 `qqq_core.paths.ProjectPaths`；新增脚本不要再手写新的 `output/...` 路径。
+- 单次运行的 profile、offset、run-dir 路径集中在 `qqq_core.run_context.RunContext`；新的流程编排代码应使用这个 Interface，而不是重复解析环境变量。
+- 因子后缀、复合因子工作簿名和策略参数解析集中在 `qqq_core.strategy_params`；`analysis/strategy/strategy_utils.py` 保留旧导入兼容。
 - 流水线会过滤 `Weight <= 0.0001` 的操作，减少噪音并提升报告速度。
 - `analysis/strategy/strategy_utils.py` 集中管理价格加载、复合因子加载、策略参数解析、因子后缀构建、小权重过滤和市值重估修补。
 - `build_factor_suffix` 已统一由 `strategy_utils` 提供，并被复合/策略脚本复用。
@@ -322,6 +335,7 @@ Discord 发送默认关闭，只有设置环境变量 `REBALANCE_DISCORD_WEBHOOK
 - 调仓日状态支持盘中运行：除非因子数据和日历状态支持，否则不会把未来日期误判为有效调仓日；若今天确实是调仓日，会用最近可用因子和实时/本地价格计算操作。
 - 单因子和复合因子中基于调仓期收益的指标使用 `252 / rebalance_period` 年化；基于日收益的策略回测仍使用 252 个交易日年化。旧报告与新口径报告不可直接比较。
 - 因子处理不再删除全空/全零原始因子；跳过记录会写入 `factor_processing_skip_manifest.csv`。
+- `python analyze_report.py` 默认检查最新的标准调仓日报告；也可以传入某个 `rebalance_day_report.xlsx` 路径检查指定历史报告。
 
 ## 参考文档
 
@@ -336,7 +350,8 @@ Discord 发送默认关闭，只有设置环境变量 `REBALANCE_DISCORD_WEBHOOK
 
 - `qqq_core/paths.py` 统一管理项目根目录、offset 路径和输出目录；新增脚本不要再手写新的 `output/...` 路径。
 - `qqq_core/run_context.py` 表示一次运行的 profile、offset 和 run-dir 上下文。
-- `qqq_core/excel_io.py` 统一提供 Excel sheet 校验、价格 workbook 读取和原子写入。
+- `qqq_core/excel_io.py` 统一提供 Excel sheet 校验、价格 workbook 读取、因子 sheet 读取和原子写入。
+- `qqq_core/strategy_params.py` 统一提供因子后缀、复合因子文件名、策略参数解析和安全文件名标签。
 - `qqq_config/strategy_profiles.py` 是唯一策略 profile 配置源；`config/strategy_profiles.py` 只做兼容转发，不再维护第二份配置。
 - 新研究输出写入 `output/research/`，策略输出写入 `output/strategy/`，新的调仓日运行目录写入 `output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offsetN/`。
 - 调仓日最终报告现在位于 run 目录的 `reports/rebalance_day_report.xlsx`；旧的 `output/rebalance_day_*` 目录仍可通过 `--run-dir` 复用。

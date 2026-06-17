@@ -47,7 +47,7 @@ python analysis/strategy/run_detailed_backtest_report.py
 python analysis/strategy/run_strategy_review.py
 python analysis/strategy/test_discord_notification.py
 python analysis/walk_forward/run_walk_forward.py
-python analyze_report.py
+python analyze_report.py [rebalance_day_report.xlsx]
 python backfill_close.py
 ```
 
@@ -222,6 +222,7 @@ Important config files:
 | `qqq_core/paths.py` | single source of truth for project root, offset-aware paths, and output layout |
 | `qqq_core/run_context.py` | resolved profile/offset/run-dir context for one run |
 | `qqq_core/excel_io.py` | shared Excel sheet validation, price workbook loading, and atomic Excel writing |
+| `qqq_core/strategy_params.py` | shared factor suffix, composite workbook path, strategy-param parsing, and safe filename tags |
 | `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, ticker universe, selected factors, composite sheet, and live strategy parameter |
 | `data/data_config.py` | data start date, direct-pull ticker universe, offset-aware paths |
 | `analysis/single_factor/config.py` | single-factor test settings |
@@ -231,7 +232,7 @@ Important config files:
 | `analysis/strategy/strategy_review_config.py` | self-contained strategy review settings |
 | `analysis/walk_forward/walk_forward_config.py` | walk-forward windows and grid |
 
-Keep `PROJECT_ROOT` consistent across configs. The current project root is `D:\qqq`.
+Config modules derive `PROJECT_ROOT` from `qqq_core.paths.ProjectPaths`; set `QQQ_PROJECT_ROOT` only when intentionally running from a relocated checkout. The current project root is `D:\qqq`.
 
 ### Data Offset
 
@@ -327,6 +328,8 @@ This is the preferred tool for checking overfitting and parameter stability afte
 - Use the same price data file for comparable runs. Corporate actions can change adjusted historical prices across yfinance pulls; BKNG's 1:25 split is a known example that can materially affect cross-sectional z-scores and holdings.
 - `run_rebalance_day.py --inline` is usually faster and easier to monitor than subprocess mode.
 - Path and output layout rules are centralized in `qqq_core.paths.ProjectPaths`; avoid hard-coding new `output/...` paths in business scripts.
+- Per-run profile/offset/run-dir paths are centralized in `qqq_core.run_context.RunContext`; new orchestration code should cross this Interface instead of re-parsing environment variables.
+- Factor suffixes, composite workbook names, and strategy parameter parsing are centralized in `qqq_core.strategy_params`; `analysis/strategy/strategy_utils.py` keeps compatibility exports for older imports.
 - The pipeline filters operations with `Weight <= 0.0001` to reduce noise and speed reports.
 - Shared utilities in `analysis/strategy/strategy_utils.py` centralize price loading, composite loading, strategy parameter parsing, factor suffix construction, small-weight filtering, and mark-to-market patching.
 - `build_factor_suffix` is centralized through `strategy_utils` and reused by composite/strategy scripts.
@@ -335,6 +338,7 @@ This is the preferred tool for checking overfitting and parameter stability afte
 - Rebalance-day status handles intraday runs: a future date is not treated as a valid rebalance day unless the factor data and calendar state support it; when today is a valid rebalance day, operations are computed from the latest available factor and live/local prices.
 - Single-factor and composite-factor period returns are annualized with `252 / rebalance_period`, while strategy backtests based on daily returns still use 252 trading days per year. Reports generated before this convention are not directly comparable.
 - Factor processing no longer deletes raw all-empty/all-zero factors; skipped files are recorded in `factor_processing_skip_manifest.csv`.
+- `python analyze_report.py` now inspects the newest standard rebalance report by default; pass a workbook path to inspect a specific historical report.
 
 ## Reference Docs
 

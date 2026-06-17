@@ -43,17 +43,44 @@ def require_sheet(file_path: str | os.PathLike[str], sheet_name: str) -> None:
 
 def read_sheet_with_datetime_index(
     file_path: str | os.PathLike[str],
-    sheet_name: str,
+    sheet_name: str | int,
     index_col: int | str = 0,
 ) -> pd.DataFrame:
     """Read one sheet and normalize its index to sorted ``DatetimeIndex``."""
 
-    require_sheet(file_path, sheet_name)
+    if not isinstance(sheet_name, int):
+        require_sheet(file_path, sheet_name)
     df = pd.read_excel(file_path, sheet_name=sheet_name, index_col=index_col)
     df.index = pd.to_datetime(df.index)
     df = df.apply(pd.to_numeric, errors="coerce")
     df.sort_index(inplace=True)
     return df
+
+
+def read_factor_sheet(
+    file_path: str | os.PathLike[str],
+    sheet_name: str | int = 0,
+) -> pd.DataFrame:
+    """Read a factor-like wide sheet with a normalized datetime index."""
+
+    return read_sheet_with_datetime_index(file_path, sheet_name=sheet_name, index_col=0)
+
+
+def read_factor_workbook(
+    file_path: str | os.PathLike[str],
+    sheet_filter: Callable[[str], bool] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Read every factor sheet and normalize each sheet to numeric time series."""
+
+    sheets = read_workbook_sheets(file_path, sheet_filter=sheet_filter, index_col=0)
+    out: dict[str, pd.DataFrame] = {}
+    for name, df in sheets.items():
+        tmp = df.copy()
+        tmp.index = pd.to_datetime(tmp.index)
+        tmp = tmp.apply(pd.to_numeric, errors="coerce")
+        tmp.sort_index(inplace=True)
+        out[name] = tmp
+    return out
 
 
 def read_price_workbook(

@@ -4,15 +4,10 @@
 定义多因子测试的输入输出路径与参数。
 """
 import os
-import sys
-
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+from qqq_core.paths import ProjectPaths
 
 # 项目根目录
-PROJECT_ROOT = r"D:\qqq"
+PROJECT_ROOT = str(ProjectPaths.from_env().root)
 
 # 因子数据目录：按 data_config 的 offset 分子目录
 from data.data_config import FACTOR_PROCESSED_DIR

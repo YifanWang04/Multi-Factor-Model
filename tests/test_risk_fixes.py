@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -266,6 +267,7 @@ class RiskFixTests(unittest.TestCase):
 
     def test_project_paths_offset_and_run_dir_layout(self):
         from qqq_core.paths import ProjectPaths, resolve_output_path
+        from qqq_core.run_context import RunContext
 
         paths = ProjectPaths.from_env(offset=0)
         self.assertEqual(paths.price_filename, "us_top100_daily_2023_present.xlsx")
@@ -284,8 +286,49 @@ class RiskFixTests(unittest.TestCase):
             os.path.join("sample", "reports", "rebalance_day_report.xlsx")
         ))
 
+        ctx = RunContext(paths=paths, profile="Strategy1", run_dir=os.path.join(ROOT, "output", "rebalance_runs", "sample"))
+        self.assertTrue(str(ctx.price_file).endswith(
+            os.path.join("sample", "data", "us_top100_daily_2023_present.xlsx")
+        ))
+        self.assertTrue(str(ctx.factor_processed_dir).endswith(os.path.join("sample", "factor_processed")))
+        self.assertTrue(str(ctx.rebalance_report_file).endswith(
+            os.path.join("sample", "reports", "rebalance_day_report.xlsx")
+        ))
+
+    def test_strategy_param_helpers_are_core_interfaces(self):
+        from qqq_core.strategy_params import (
+            build_factor_suffix,
+            composite_factors_path,
+            parse_strategy_param,
+            safe_tag,
+            strategy_param_from_params,
+        )
+
+        self.assertEqual(build_factor_suffix([95, 101, 32]), "f95-101-32")
+        parsed = parse_strategy_param("max_return_5G_Top2_P20d")
+        self.assertEqual(parsed, ("max_return", 5, 2, 20))
+        self.assertEqual(
+            strategy_param_from_params({
+                "weight_method": parsed[0],
+                "group_num": parsed[1],
+                "target_rank": parsed[2],
+                "rebalance_period": parsed[3],
+            }),
+            "max_return_5G_Top2_P20d",
+        )
+        self.assertTrue(composite_factors_path("run_dir", [95]).endswith(
+            os.path.join("run_dir", "composite_factor_reports", "composite_factors_f95.xlsx")
+        ))
+        self.assertEqual(safe_tag("ic/m3 N20"), "ic_m3N20")
+
     def test_excel_io_filters_sheets_and_requires_sheet(self):
-        from qqq_core.excel_io import read_price_workbook, require_sheet, atomic_excel_writer
+        from qqq_core.excel_io import (
+            atomic_excel_writer,
+            read_factor_sheet,
+            read_factor_workbook,
+            read_price_workbook,
+            require_sheet,
+        )
         from data.data_config import should_use_price_sheet
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -307,6 +350,37 @@ class RiskFixTests(unittest.TestCase):
                 require_sheet(path, "missing_sheet")
             leftovers = [name for name in os.listdir(tmp) if name != "prices.xlsx"]
             self.assertEqual(leftovers, [])
+
+            factor_path = os.path.join(tmp, "factor.xlsx")
+            factor_df = pd.DataFrame(
+                {"AAPL": [1.0, 2.0]},
+                index=pd.to_datetime(["2026-01-05", "2026-01-02"]),
+            )
+            with atomic_excel_writer(factor_path) as writer:
+                factor_df.to_excel(writer, sheet_name="N5")
+                (factor_df * 2).to_excel(writer, sheet_name="N10")
+
+            one_sheet = read_factor_sheet(factor_path, "N5")
+            self.assertEqual(list(one_sheet.index), sorted(one_sheet.index))
+            workbook = read_factor_workbook(factor_path)
+            self.assertEqual(set(workbook), {"N5", "N10"})
+
+    def test_analyze_report_finds_latest_standard_report(self):
+        from qqq_core.paths import ProjectPaths
+        from tools.analyze_report import find_latest_rebalance_report
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = ProjectPaths(root=Path(tmp), offset=0)
+            old_report = paths.rebalance_runs_dir / "old" / "reports" / "rebalance_day_report.xlsx"
+            new_report = paths.rebalance_runs_dir / "new" / "reports" / "rebalance_day_report.xlsx"
+            old_report.parent.mkdir(parents=True)
+            new_report.parent.mkdir(parents=True)
+            old_report.write_text("old", encoding="utf-8")
+            new_report.write_text("new", encoding="utf-8")
+            os.utime(old_report, (1, 1))
+            os.utime(new_report, (2, 2))
+
+            self.assertEqual(find_latest_rebalance_report(paths), new_report)
 
     def test_composite_fallback_does_not_hide_primary_sheet_error(self):
         from analysis.strategy.strategy_utils import load_composite_factor_with_fallback

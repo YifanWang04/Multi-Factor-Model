@@ -6,8 +6,10 @@ Walk-Forward Validation Configuration
 
 import os
 
+from qqq_core.paths import ProjectPaths
+
 # ==================== 项目路径 ====================
-PROJECT_ROOT = r"D:\qqq"
+PROJECT_ROOT = str(ProjectPaths.from_env().root)
 
 # ==================== 数据文件（按 offset 分子目录，不覆盖）====================
 from data.data_config import PRICE_FILE, FACTOR_RAW_DIR, FACTOR_PROCESSED_DIR, WALK_FORWARD_REPORTS_DIR
