@@ -200,6 +200,40 @@ qqq/
 
 绩效报告包括年化收益、年化波动、夏普、胜率、盈亏比、最大回撤、Calmar 比率和单周期最坏回撤。单周期最坏回撤是所有调仓持仓区间内最差的一次区间内回撤。
 
+### 动态止盈止损研究
+
+`run_strategy.py` 可以在同一次策略网格回测中比较两种退出方式：
+
+- `fixed_rebalance`：现有固定调仓日卖出逻辑，作为 baseline，不参与 TP/SL 参数网格。
+- `dynamic_tp_sl`：持仓期内每日用 adjusted close 检查单只股票是否触发动态止盈或止损；提前退出后该资金留现金，到下一次 rebalance 再重新分配。
+
+`qqq_config/strategy_profiles.py` 中的 active profile 保存详细回测和调仓日流程默认使用的退出参数：
+
+```python
+exit_policy = "fixed_rebalance"  # 或 "dynamic_tp_sl"
+tp_base = 0.08
+sl_base = 0.05
+tp_sl_probability = 1.0
+```
+
+`analysis/strategy/strategy_config.py` 中的研究网格控制 `run_strategy.py` 批量搜索：
+
+```python
+EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
+TP_BASE_GRID = [0.04, 0.06, 0.08, 0.10, 0.12]
+SL_BASE_GRID = [0.02, 0.03, 0.05, 0.07]
+TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability
+```
+
+以 10 个交易日持仓周期为例，阈值为：
+
+```text
+TP = tp_base * (10 - TD) / 10 * P
+SL = sl_base * (10 - TD) / 10 * P
+```
+
+v1 尚未训练机器学习分类器，因此 `P=1.0` 是中性默认值，不应解释为模型概率。详细报告和调仓日报告会输出 `Exit_Date`、`Exit_Reason`、`TP_Threshold`、`SL_Threshold`、`Signal_Probability` 等字段。
+
 ### 调仓日历与时间对齐
 
 `analysis/strategy/rebalance_calendar.py` 是历史调仓日选择的唯一权威实现。
@@ -283,7 +317,7 @@ qqq/
 4. 生成 `rebalance_day_report.xlsx`
 5. 可选发送 Discord 通知
 
-报告包含配置、操作明细、收益序列、累计收益、周期汇总、当前持仓、市值重估字段和下一调仓日信息。
+报告包含配置、当前操作、历史操作、收益序列、累计收益、周期汇总、当前持仓、市值重估字段和下一调仓日信息。`Current_Operations_All` 不再输出；`All_Operations_All` 会过滤 `Weight < 0.01` 的行。
 
 Discord 消息包含：
 
@@ -327,7 +361,7 @@ Discord 发送默认关闭，只有设置环境变量 `REBALANCE_DISCORD_WEBHOOK
 - 路径和输出布局规则集中在 `qqq_core.paths.ProjectPaths`；新增脚本不要再手写新的 `output/...` 路径。
 - 单次运行的 profile、offset、run-dir 路径集中在 `qqq_core.run_context.RunContext`；新的流程编排代码应使用这个 Interface，而不是重复解析环境变量。
 - 因子后缀、复合因子工作簿名和策略参数解析集中在 `qqq_core.strategy_params`；`analysis/strategy/strategy_utils.py` 保留旧导入兼容。
-- 流水线会过滤 `Weight <= 0.0001` 的操作，减少噪音并提升报告速度。
+- 调仓日报告会在当前操作中筛掉 `Weight < 0.0001` 的行，并在历史 `All_Operations_All` sheet 中筛掉 `Weight < 0.01` 的行，以减少噪音。
 - `analysis/strategy/strategy_utils.py` 集中管理价格加载、复合因子加载、策略参数解析、因子后缀构建、小权重过滤和市值重估修补。
 - `build_factor_suffix` 已统一由 `strategy_utils` 提供，并被复合/策略脚本复用。
 - `MarkToMarket` 使用向量化掩码，跳过买入金额和权重都缺失的无效行，并为未到期持仓重算区间收益、卖出价值和股数。

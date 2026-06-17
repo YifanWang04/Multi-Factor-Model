@@ -51,6 +51,16 @@ _PARAM_COLS = [
 ]
 
 # 指标列（中文列头，方便阅读）
+_PARAM_COLS.extend([
+    ("exit_policy", "Exit Policy"),
+    ("tp_base", "TP Base"),
+    ("sl_base", "SL Base"),
+    ("probability", "Signal Probability"),
+    ("tp_count", "TP Count"),
+    ("sl_count", "SL Count"),
+    ("forced_close_count", "Forced Close Count"),
+])
+
 _METRIC_COLS = [
     ("ret_1d",             "近1日收益"),
     ("ret_1w",             "近1周收益"),
@@ -83,6 +93,7 @@ _PCT_KEYS = {
     "ret_1y", "ret_last_year", "annual_return", "annual_vol",
     "open_win_rate", "max_drawdown", "worst_period_drawdown",
 }
+_PCT_KEYS.update({"tp_base", "sl_base", "probability"})
 
 # 越大越好（绿）/ 越小越好（红：max_drawdown）
 _HIGHER_BETTER = {
@@ -148,6 +159,13 @@ class StrategyReporter:
             row["target_group"] = m.get("target_group", np.nan)
             row["rebalance_period"] = m.get("rebalance_period", np.nan)
             row["weight_method"] = m.get("weight_method", "")
+            row["exit_policy"] = m.get("exit_policy", "")
+            row["tp_base"] = m.get("tp_base", np.nan)
+            row["sl_base"] = m.get("sl_base", np.nan)
+            row["probability"] = m.get("probability", np.nan)
+            row["tp_count"] = m.get("tp_count", np.nan)
+            row["sl_count"] = m.get("sl_count", np.nan)
+            row["forced_close_count"] = m.get("forced_close_count", np.nan)
             for key, _ in _METRIC_COLS:
                 row[key] = m.get(key, np.nan)
             rows.append(row)
@@ -179,6 +197,13 @@ class StrategyReporter:
             ("Rebalance_Periods", str(getattr(self.config, "REBALANCE_PERIODS", ""))),
             ("Target_Group_Ranks", str(getattr(self.config, "TARGET_GROUP_RANKS", ""))),
             ("Weight_Methods", str(getattr(self.config, "WEIGHT_METHODS", ""))),
+            ("Exit_Policy_Grid", str(getattr(self.config, "EXIT_POLICY_GRID", ""))),
+            ("TP_Base_Grid", str(getattr(self.config, "TP_BASE_GRID", ""))),
+            ("SL_Base_Grid", str(getattr(self.config, "SL_BASE_GRID", ""))),
+            ("TP_SL_Probability", str(getattr(self.config, "TP_SL_PROBABILITY", ""))),
+            ("Active_Profile_Exit_Policy", str(getattr(self.config, "EXIT_POLICY", ""))),
+            ("Active_Profile_TP_Base", str(getattr(self.config, "TP_BASE", ""))),
+            ("Active_Profile_SL_Base", str(getattr(self.config, "SL_BASE", ""))),
         ]
         return pd.DataFrame(rows, columns=["Key", "Value"])
 

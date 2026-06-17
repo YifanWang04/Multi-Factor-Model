@@ -29,6 +29,7 @@ from .discord_notifier import compute_extended_metrics as _compute_extended_metr
 
 
 WEIGHT_FILTER_THRESHOLD: float = 0.0001
+ALL_OPERATIONS_WEIGHT_FILTER_THRESHOLD: float = 0.01
 
 
 def _describe_composite_method(sheet_name: str) -> str:
@@ -206,6 +207,13 @@ def write_rebalance_day_report(
         ["Weight_Method", params.get("weight_method", strategy_params.get("weight_method", ""))],
         ["Group_Num", params.get("group_num", strategy_params.get("group_num", ""))],
         ["Target_Rank", params.get("target_rank", strategy_params.get("target_rank", ""))],
+        ["Exit_Policy", params.get("exit_policy", strategy_params.get("exit_policy", ""))],
+        ["TP_Base", params.get("tp_base", "")],
+        ["SL_Base", params.get("sl_base", "")],
+        ["Signal_Probability", params.get("probability", "")],
+        ["TP_Count", params.get("tp_count", "")],
+        ["SL_Count", params.get("sl_count", "")],
+        ["Forced_Close_Count", params.get("forced_close_count", "")],
         ["---", "---"],
         ["Total_Return", _fmt(total_ret, "{:.4f}")],
         ["Annual_Return", _fmt(ann_ret, "{:.4f}")],
@@ -221,7 +229,11 @@ def write_rebalance_day_report(
     # 过滤低权重操作
     filtered_ops = filter_weight_lt(current_ops, WEIGHT_FILTER_THRESHOLD, logger=print)
     df_ops_raw = result["operations_df"]
-    df_ops_filtered = filter_weight_lt(df_ops_raw, WEIGHT_FILTER_THRESHOLD, logger=print)
+    df_ops_all_filtered = filter_weight_lt(
+        df_ops_raw,
+        ALL_OPERATIONS_WEIGHT_FILTER_THRESHOLD,
+        logger=print,
+    )
 
     def _nan_to_dash(df: pd.DataFrame) -> pd.DataFrame:
         return df.replace({np.nan: "-"}, inplace=False)
@@ -248,18 +260,9 @@ def write_rebalance_day_report(
                 writer, sheet_name="Future_Rebalance_Dates", index=False
             )
 
-        # ---- 新增：包含所有权重的 sheet（不过滤）----
-        # Current_Operations_All：当前调仓日所有操作（含 weight < 0.0001）
-        if not current_ops.empty:
-            _nan_to_dash(current_ops).to_excel(writer, sheet_name="Current_Operations_All", index=False)
-        else:
-            pd.DataFrame({"Note": ["无当前调仓日操作（今日非调仓日或数据不足）"]}).to_excel(
-                writer, sheet_name="Current_Operations_All", index=False
-            )
-
-        # All_Operations_All：历史所有操作（含 weight < 0.0001）
-        if len(df_ops_raw) > 0:
-            _nan_to_dash(df_ops_raw).to_excel(writer, sheet_name="All_Operations_All", index=False)
+        # All_Operations_All：历史操作明细，过滤 1% 以下的小权重噪音。
+        if len(df_ops_all_filtered) > 0:
+            _nan_to_dash(df_ops_all_filtered).to_excel(writer, sheet_name="All_Operations_All", index=False)
 
         df_period = result["period_summary_df"]
         if len(df_period) > 0:

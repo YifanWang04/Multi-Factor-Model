@@ -38,8 +38,8 @@ ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
 # Reset them to None before live/rebalance-day runs.
 # STRATEGY_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19]          # Example: [95, 99, 27, 46, 19]
 # STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
-STRATEGY_RESEARCH_FACTOR_INDICES = None          # Example: [95, 99, 27, 46, 19]
-STRATEGY_RESEARCH_COMPOSITE_SHEET = None       # Example: "rank_ic_m3_N20"
+STRATEGY_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]          # Example: [95, 99, 27, 46, 19]
+STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N20"       # Example: "rank_ic_m3_N20"
 
 def _coerce_factor_indices(value):
     if value is None:
@@ -114,10 +114,12 @@ GROUP_NUMS = [5, 10]
 # ⚠️ 建议：使用与 composite_config.REBALANCE_PERIOD 一致的值（10），或其整数倍（20, 30）
 # 当前 composite_config.REBALANCE_PERIOD = 10 交易日
 # 注：调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制，已移除 REBALANCE_DATE_OFFSET
-REBALANCE_PERIODS = [5, 10, 20]
+# REBALANCE_PERIODS = [5, 10, 20]
+REBALANCE_PERIODS = [5, 10]
 
 # 目标组排名（从高到低）：1=买最高分组，2=买第二高分组，3=买第三高分组
-TARGET_GROUP_RANKS = [1, 2]
+# TARGET_GROUP_RANKS = [1, 2]
+TARGET_GROUP_RANKS = [1]
 
 # 资产配置方式
 #   equal         : 等权配置
@@ -125,7 +127,21 @@ TARGET_GROUP_RANKS = [1, 2]
 #   mvo           : 马科维兹最优（最大化夏普比率；高风险高收益）
 #   max_return    : 最大化预期收益
 #   factor_score  : 因子值打分加权
-WEIGHT_METHODS = ["equal", "min_variance", "mvo", "max_return", "factor_score"]
+# WEIGHT_METHODS = ["equal", "min_variance", "mvo", "max_return", "factor_score"]
+WEIGHT_METHODS = ["max_return"]
+
+# Exit policy grid:
+# - fixed_rebalance keeps the historical behavior and does not use TP/SL grids.
+# - dynamic_tp_sl scans TP_BASE_GRID x SL_BASE_GRID using Adj Close exits.
+EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
+TP_BASE_GRID = [0.75, 0.8, 0.85, 0.9]
+SL_BASE_GRID = [0.5, 0.55, 0.6, 0.65, 0.75, 0.8, 0.95, 1]
+TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability
+
+# Active-profile defaults used by detailed backtest and rebalance-day reports.
+EXIT_POLICY = ACTIVE_PROFILE.exit_policy
+TP_BASE = ACTIVE_PROFILE.tp_base
+SL_BASE = ACTIVE_PROFILE.sl_base
 
 # ── 回测参数 ──────────────────────────────────────────────────────────────────
 

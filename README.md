@@ -199,6 +199,40 @@ Optimization uses SLSQP and falls back to equal weights when data is insufficien
 
 Performance reports include annualized return, annualized volatility, Sharpe, win rate, profit/loss ratio, max drawdown, Calmar ratio, and worst-period drawdown. Worst-period drawdown is the worst drawdown inside any single holding interval from one rebalance date to the next.
 
+### Dynamic TP/SL Exit Research
+
+Strategy backtests can compare two exit policies in one `run_strategy.py` run:
+
+- `fixed_rebalance`: the existing fixed rebalance-date exit. This remains the baseline and does not scan TP/SL parameters.
+- `dynamic_tp_sl`: each open long position is checked with adjusted close during `(T, T_next]`. If a position hits the dynamic take-profit or stop-loss threshold before the next rebalance date, that position exits and its capital stays in cash until the next rebalance.
+
+The active profile in `qqq_config/strategy_profiles.py` owns the default live/detailed-report parameters:
+
+```python
+exit_policy = "fixed_rebalance"  # or "dynamic_tp_sl"
+tp_base = 0.08
+sl_base = 0.05
+tp_sl_probability = 1.0
+```
+
+`analysis/strategy/strategy_config.py` owns the research grid used by `run_strategy.py`:
+
+```python
+EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
+TP_BASE_GRID = [0.04, 0.06, 0.08, 0.10, 0.12]
+SL_BASE_GRID = [0.02, 0.03, 0.05, 0.07]
+TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability
+```
+
+For a 10-trading-day holding period, the dynamic thresholds are:
+
+```text
+TP = tp_base * (10 - TD) / 10 * P
+SL = sl_base * (10 - TD) / 10 * P
+```
+
+There is no machine-learning classifier in v1, so `P=1.0` is the neutral default. Do not interpret it as a learned signal probability until a real probability matrix is added. Detailed and rebalance-day reports use the active profile defaults and include exit fields such as `Exit_Date`, `Exit_Reason`, `TP_Threshold`, `SL_Threshold`, and `Signal_Probability`.
+
 ### Rebalance Calendar and Timing
 
 `analysis/strategy/rebalance_calendar.py` is the single source of truth for historical rebalance-date selection.
@@ -286,7 +320,7 @@ Main steps:
 
 New rebalance-day runs are created under `output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offsetN/`. Intermediate data remains in `data/`, `factor_raw/`, `factor_processed/`, and `composite_factor_reports/` inside the run directory; the final workbook is written to `reports/rebalance_day_report.xlsx`. Existing `output/rebalance_day_*` run directories can still be passed with `--run-dir`.
 
-The report includes configuration, operations, return series, cumulative returns, period summaries, current holdings, mark-to-market fields, and next-rebalance information.
+The report includes configuration, current operations, historical operations, return series, cumulative returns, period summaries, current holdings, mark-to-market fields, and next-rebalance information. `Current_Operations_All` is no longer emitted; `All_Operations_All` filters out rows with `Weight < 0.01`.
 
 Discord messages include:
 
@@ -330,7 +364,7 @@ This is the preferred tool for checking overfitting and parameter stability afte
 - Path and output layout rules are centralized in `qqq_core.paths.ProjectPaths`; avoid hard-coding new `output/...` paths in business scripts.
 - Per-run profile/offset/run-dir paths are centralized in `qqq_core.run_context.RunContext`; new orchestration code should cross this Interface instead of re-parsing environment variables.
 - Factor suffixes, composite workbook names, and strategy parameter parsing are centralized in `qqq_core.strategy_params`; `analysis/strategy/strategy_utils.py` keeps compatibility exports for older imports.
-- The pipeline filters operations with `Weight <= 0.0001` to reduce noise and speed reports.
+- The rebalance-day report filters current operations with `Weight < 0.0001`, and filters the historical `All_Operations_All` sheet with `Weight < 0.01` to reduce noise.
 - Shared utilities in `analysis/strategy/strategy_utils.py` centralize price loading, composite loading, strategy parameter parsing, factor suffix construction, small-weight filtering, and mark-to-market patching.
 - `build_factor_suffix` is centralized through `strategy_utils` and reused by composite/strategy scripts.
 - `MarkToMarket` uses vectorized masks, skips invalid rows where both buy value and weight are missing, and recomputes period return, sell value, and shares for open positions.

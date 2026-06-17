@@ -67,7 +67,7 @@ def build_strategy_report_filename(base_name: str, composite_sheet: str, data_st
 # 数据加载
 # ---------------------------------------------------------------------------
 
-from strategy_utils import load_composite_factor, safe_tag
+from strategy_utils import load_composite_factor, load_price_data, safe_tag
 
 
 # ---------------------------------------------------------------------------
@@ -99,12 +99,14 @@ def main():
           f"日期范围: {ret_df.index[0].date()} ~ {ret_df.index[-1].date()}")
 
     # ── 参数组合数预览 ─────────────────────────────────────────────────
-    n_combos = (
-        len(cfg.GROUP_NUMS)
-        * len(cfg.REBALANCE_PERIODS)
-        * len(cfg.TARGET_GROUP_RANKS)
-        * len(cfg.WEIGHT_METHODS)
-    )
+    print(f"\n[3/5] Loading Adj Close prices: {os.path.basename(cfg.PRICE_FILE)}")
+    price_df = load_price_data(cfg.PRICE_FILE, "Adj Close")
+    price_df.sort_index(inplace=True)
+    print(f"      Price shape: {price_df.shape}  "
+          f"date range: {price_df.index[0].date()} ~ {price_df.index[-1].date()}")
+
+    backtester = StrategyBacktester(factor_df, ret_df, cfg, price_df=price_df)
+    n_combos = len(backtester._all_combinations())
     print(f"\n      参数组合数: {n_combos}")
     print(f"      分层数量: {cfg.GROUP_NUMS}")
     print(f"      调仓周期: {cfg.REBALANCE_PERIODS} 天")
@@ -112,8 +114,7 @@ def main():
     print(f"      资产配置方式: {cfg.WEIGHT_METHODS}")
 
     # ── 3. 网格回测 ────────────────────────────────────────────────────
-    print(f"\n[3/4] 开始网格回测（共 {n_combos} 个组合）...")
-    backtester = StrategyBacktester(factor_df, ret_df, cfg)
+    print(f"\n[4/5] 开始网格回测（共 {n_combos} 个组合）...")
     results = backtester.run_grid()
 
     # 统计有效策略数
@@ -123,7 +124,7 @@ def main():
     print(f"\n      完成：{valid}/{n_combos} 个策略有效")
 
     # ── 4. 计算绩效指标 ────────────────────────────────────────────────
-    print("\n[4/4] 计算绩效指标并生成报表...")
+    print("\n[5/5] 计算绩效指标并生成报表...")
     all_metrics = compute_all_metrics(results, rf=cfg.RISK_FREE_RATE)
 
     # ── 5. 输出 Excel ─────────────────────────────────────────────────

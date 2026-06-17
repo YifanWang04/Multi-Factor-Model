@@ -55,6 +55,13 @@ from portfolio_optimizer import compute_weights
 import strategy_config as cfg
 from rebalance.rebalance_operations import _nth_nyse_trading_day
 from rebalance.rebalance_report import _describe_composite_method
+from tp_sl_exit import (
+    EXIT_DYNAMIC_TP_SL,
+    EXIT_FORCED_REBALANCE,
+    build_exit_events,
+    event_counts,
+    normalize_exit_policy,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +146,11 @@ def run_detailed_backtest(
     lookback = getattr(config, "OPTIMIZATION_LOOKBACK", 252)
     rf = getattr(config, "RISK_FREE_RATE", 0.02)
     max_weight = getattr(config, "MAX_WEIGHT", 0.4)
+    exit_policy = normalize_exit_policy(getattr(config, "EXIT_POLICY", "fixed_rebalance"))
+    tp_base = float(getattr(config, "TP_BASE", 0.08))
+    sl_base = float(getattr(config, "SL_BASE", 0.05))
+    probability = float(getattr(config, "TP_SL_PROBABILITY", 1.0))
+    exit_stats = {"tp_count": 0, "sl_count": 0, "forced_close_count": 0}
 
     # 判断是否为最后一期调仓（需要特殊处理）
     last_rb_index = len(rebalance_dates) - 2  # -2 因为延伸后的 rebalance_dates 最后一个是 next_rb_date
@@ -215,6 +227,104 @@ def run_detailed_backtest(
         if not np.isfinite(common_sum) or abs(common_sum) < 1e-12:
             continue
         w_common = w[common] / common_sum
+
+        if exit_policy == EXIT_DYNAMIC_TP_SL:
+            events = build_exit_events(
+                price_df=price_df,
+                entry_prices=buy_p.reindex(common),
+                rb_date=rb_date,
+                exit_end_date=actual_sell_rb,
+                rebalance_period=rebalance_period,
+                tp_base=tp_base,
+                sl_base=sl_base,
+                probability=probability,
+            )
+            common = pd.Index([str(sym) for sym in common if str(sym) in events])
+            if len(common) == 0:
+                continue
+            w_common = w_common.reindex(common)
+
+            period_ret_port = period_df[common].copy()
+            for sym in common:
+                event = events[str(sym)]
+                period_ret_port.loc[period_ret_port.index > event.exit_date, sym] = 0.0
+
+            port_ret_series = (
+                period_ret_port.fillna(0.0)
+                .mul(w_common, axis=1)
+                .sum(axis=1)
+                .dropna()
+            )
+            period_daily = port_ret_series.to_list()
+            if period_daily:
+                period_daily[0] -= 2 * trans_cost
+            all_daily_rets.extend(period_daily)
+            all_dates.extend(port_ret_series.index.tolist())
+
+            if not period_daily:
+                continue
+
+            period_cum = float(pd.Series(period_daily).add(1.0).prod() - 1.0)
+            period_rets.append(period_cum)
+            period_dates.append(rb_date)
+            period_cum_ret *= 1.0 + period_cum
+
+            counts = event_counts({str(sym): events[str(sym)] for sym in common})
+            for key, value in counts.items():
+                exit_stats[key] += int(value)
+
+            period_days = (actual_sell_rb - rb_date).days
+            for sym in common:
+                event = events[str(sym)]
+                bp = buy_prices[sym] if sym in buy_prices.index else np.nan
+                factor_val = factor_signal[sym] if sym in factor_signal.index else np.nan
+                wt = w_common[sym]
+                buy_value = wt * 1.0
+                stk_ret = event.exit_return
+                sell_value = buy_value * (1 + stk_ret) if not np.isnan(stk_ret) else np.nan
+                shares = buy_value / bp if (not np.isnan(bp) and bp > 0) else np.nan
+                operations_records.append({
+                    "Rebalance_Date": rb_date,
+                    "Next_Rebalance_Date": next_rb,
+                    "Holding_Days": period_days,
+                    "Symbol": sym,
+                    "Weight": wt,
+                    "Buy_Price_Close": bp,
+                    "Sell_Price_Close": event.exit_price,
+                    "Period_Return": stk_ret,
+                    "Buy_Value": buy_value,
+                    "Sell_Value": sell_value,
+                    "Shares": shares,
+                    "Factor_Value": factor_val,
+                    "Exit_Date": event.exit_date,
+                    "Exit_Reason": event.exit_reason,
+                    "Exit_TD": event.exit_td,
+                    "Exit_Price_Close": event.exit_price,
+                    "Exit_Return": event.exit_return,
+                    "TP_Threshold": event.tp_threshold,
+                    "SL_Threshold": event.sl_threshold,
+                    "Signal_Probability": event.signal_probability,
+                })
+
+            symbols_with_weight = [
+                f"{sym}:{w_common[sym] * 100:.1f}%"
+                for sym in sorted(common)
+                if w_common[sym] > PERIOD_SUMMARY_DISPLAY_WEIGHT_THRESHOLD
+            ]
+            symbols_str = ", ".join(symbols_with_weight)
+            period_summary_records.append({
+                "Rebalance_Date": rb_date,
+                "Next_Rebalance_Date": next_rb,
+                "Holding_Days": period_days,
+                "Position_Count": len(common),
+                "Period_Return": period_cum,
+                "Period_Cumulative_Return": period_cum_ret - 1.0,
+                "Symbols": symbols_str,
+                "TP_Count": counts.get("tp_count", 0),
+                "SL_Count": counts.get("sl_count", 0),
+                "Forced_Close_Count": counts.get("forced_close_count", 0),
+            })
+            continue
         # 卖出价格需要单独处理（最后一期可能为空）
 
         # ── 持仓期收益（向量化替代 iterrows）─────────────────────────
@@ -274,6 +384,14 @@ def run_detailed_backtest(
                 "Sell_Value": sell_value,
                 "Shares": shares,
                 "Factor_Value": factor_val,
+                "Exit_Date": actual_sell_rb,
+                "Exit_Reason": EXIT_FORCED_REBALANCE,
+                "Exit_TD": rebalance_period,
+                "Exit_Price_Close": sp,
+                "Exit_Return": stk_ret,
+                "TP_Threshold": np.nan,
+                "SL_Threshold": np.nan,
+                "Signal_Probability": np.nan,
             })
 
         # Symbols: 仅保留 weight > PERCENT_THRESHOLD 的股票，并标注权重（格式：SYM:weight%）
@@ -316,6 +434,11 @@ def run_detailed_backtest(
             "rebalance_period": rebalance_period,
             "weight_method": weight_method,
             "data_start_offset_days": _get_data_offset(),
+            "exit_policy": exit_policy,
+            "tp_base": tp_base,
+            "sl_base": sl_base,
+            "probability": probability,
+            **exit_stats,
         },
     }
 
@@ -351,6 +474,13 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["Group_Num", params.get("group_num", "")],
             ["Target_Rank", params.get("target_rank", "")],
             ["Rebalance_Period_TradingDays", params.get("rebalance_period", "")],
+            ["Exit_Policy", params.get("exit_policy", "")],
+            ["TP_Base", params.get("tp_base", "")],
+            ["SL_Base", params.get("sl_base", "")],
+            ["Signal_Probability", params.get("probability", "")],
+            ["TP_Count", params.get("tp_count", "")],
+            ["SL_Count", params.get("sl_count", "")],
+            ["Forced_Close_Count", params.get("forced_close_count", "")],
             ["Data_Start_Offset_TradingDays", params.get("data_start_offset_days", _get_data_offset())],
             ["Transaction_Cost_OneSide", f"{getattr(cfg, 'TRANSACTION_COST', 0.001):.3f}"],
             ["Timing_Convention", "Trade at T close, holding period (T, T_next]"],

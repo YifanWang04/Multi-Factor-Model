@@ -66,6 +66,10 @@ class StrategyProfile:
     strategy_param: str
     ticker_universe: str
     description: str = ""
+    exit_policy: str = "fixed_rebalance"
+    tp_base: float = 0.08
+    sl_base: float = 0.05
+    tp_sl_probability: float = 1.0
 
     @property
     def ticker_symbols(self) -> tuple[str, ...]:
@@ -104,7 +108,23 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
         ticker_universe="US_108",
-        description="Strategy1 75 2.6_annual_return Legacy 2026-03/17 live profile.",
+        exit_policy="fixed_rebalance",
+        # tp_base=0.08,
+        # sl_base=0.05,
+        # tp_sl_probability=1.0,
+        description="Strategy1 with fixed_rebalance profile.",
+    ),    
+    "Strategy11": StrategyProfile(
+        name="Strategy11",
+        factor_indices=(95, 101, 62, 65, 32),
+        composite_sheet="ic_m3_N20",
+        strategy_param="max_return_5G_Top1_P5d",
+        ticker_universe="US_108",
+        exit_policy="dynamic_tp_sl",
+        tp_base=0.8,
+        sl_base=0.65,
+        tp_sl_probability=1.0,
+        description="Strategy11 with dynamic TP/SL research profile.",
     ),
     "Strategy2": StrategyProfile(
         name="Strategy2",
@@ -141,7 +161,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
 }
 
 
-ACTIVE_STRATEGY_PROFILE = "Strategy1"
+ACTIVE_STRATEGY_PROFILE = "Strategy11"
 PROFILE_ENV_VAR = "QQQ_STRATEGY_PROFILE"
 
 

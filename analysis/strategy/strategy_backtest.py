@@ -33,9 +33,16 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 # 从共享工具模块导入（保持 _build_groups 独立定义以兼容已有调用）
-from strategy_utils import _build_groups
+from strategy_utils import _build_groups, _get_price_on_date
 from portfolio_optimizer import compute_weights
 from rebalance_calendar import get_rebalance_calendar as _get_rebalance_calendar
+from tp_sl_exit import (
+    EXIT_DYNAMIC_TP_SL,
+    EXIT_FIXED_REBALANCE,
+    build_exit_events,
+    event_counts,
+    normalize_exit_policy,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -69,10 +76,17 @@ class StrategyBacktester:
     config     : strategy_config 模块（提供 GROUP_NUMS / REBALANCE_PERIODS 等）
     """
 
-    def __init__(self, factor_df: pd.DataFrame, ret_df: pd.DataFrame, config):
+    def __init__(
+        self,
+        factor_df: pd.DataFrame,
+        ret_df: pd.DataFrame,
+        config,
+        price_df: pd.DataFrame | None = None,
+    ):
         self.factor_df = factor_df
         self.ret_df = ret_df
         self.config = config
+        self.price_df = price_df
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -86,18 +100,41 @@ class StrategyBacktester:
         total = len(combinations)
         results = {}
 
-        for idx, (group_num, target_rank, rebalance_period, weight_method) in enumerate(
-            combinations, start=1
-        ):
+        for idx, combo in enumerate(combinations, start=1):
+            (
+                group_num,
+                target_rank,
+                rebalance_period,
+                weight_method,
+                exit_policy,
+                tp_base,
+                sl_base,
+                probability,
+            ) = combo
             target_group = group_num - (target_rank - 1)
-            strategy_name = (
+            base_name = (
                 f"{weight_method}_{group_num}G_Top{target_rank}_P{rebalance_period}d"
             )
+            if exit_policy == EXIT_DYNAMIC_TP_SL:
+                strategy_name = (
+                    f"{base_name}__{exit_policy}__"
+                    f"tp{int(round(float(tp_base) * 100)):02d}_"
+                    f"sl{int(round(float(sl_base) * 100)):02d}"
+                )
+            else:
+                strategy_name = f"{base_name}__{exit_policy}"
             print(f"  [{idx:>3}/{total}] {strategy_name}", flush=True)
 
             try:
                 result = self._run_single(
-                    group_num, target_group, rebalance_period, weight_method
+                    group_num,
+                    target_group,
+                    rebalance_period,
+                    weight_method,
+                    exit_policy=exit_policy,
+                    tp_base=tp_base,
+                    sl_base=sl_base,
+                    probability=probability,
                 )
                 result["params"] = {
                     "group_num": group_num,
@@ -105,6 +142,11 @@ class StrategyBacktester:
                     "target_rank": target_rank,
                     "rebalance_period": rebalance_period,
                     "weight_method": weight_method,
+                    "exit_policy": exit_policy,
+                    "tp_base": tp_base,
+                    "sl_base": sl_base,
+                    "probability": probability,
+                    **result.get("exit_stats", {}),
                 }
                 results[strategy_name] = result
             except Exception as exc:
@@ -117,6 +159,10 @@ class StrategyBacktester:
                         "target_rank": target_rank,
                         "rebalance_period": rebalance_period,
                         "weight_method": weight_method,
+                        "exit_policy": exit_policy,
+                        "tp_base": tp_base,
+                        "sl_base": sl_base,
+                        "probability": probability,
                     },
                 }
 
@@ -132,6 +178,10 @@ class StrategyBacktester:
         target_group: int,
         rebalance_period: int,
         weight_method: str,
+        exit_policy: str = EXIT_FIXED_REBALANCE,
+        tp_base: float | None = None,
+        sl_base: float | None = None,
+        probability: float = 1.0,
     ) -> dict:
         """
         运行单一参数组合的策略，返回日频收益率序列和期间收益序列。
@@ -150,10 +200,12 @@ class StrategyBacktester:
         if rebalance_dates[-1] < end_date:
             rebalance_dates = list(rebalance_dates) + [end_date]
 
+        exit_policy = normalize_exit_policy(exit_policy)
         all_daily_rets: list[float] = []
         all_dates: list = []
         period_rets: list[float] = []
         period_dates: list = []
+        exit_stats = {"tp_count": 0, "sl_count": 0, "forced_close_count": 0}
 
         cfg = self.config
 
@@ -212,6 +264,77 @@ class StrategyBacktester:
             # ── 持仓期收益（向量化）───────────────────────────────
             # 取本组合的权重索引（仅目标分组内的标的）
             # period_df 中只有 port_stocks 列有实际意义
+            if exit_policy == EXIT_DYNAMIC_TP_SL:
+                if self.price_df is None or self.price_df.empty:
+                    raise ValueError("dynamic_tp_sl requires an Adj Close price_df")
+
+                buy_prices = _get_price_on_date(self.price_df, rb_date, list(port_stocks))
+                common = (
+                    pd.Index(port_stocks)
+                    .intersection(buy_prices.index)
+                    .intersection(period_df.columns)
+                    .intersection(self.price_df.columns)
+                )
+                if len(common) == 0:
+                    continue
+
+                w_common = weights.reindex(common).fillna(0.0)
+                w_sum = float(w_common.sum())
+                if not np.isfinite(w_sum) or abs(w_sum) < 1e-12:
+                    continue
+                w_common = w_common / w_sum
+
+                buy_p = buy_prices.reindex(common).dropna()
+                common = w_common.index.intersection(buy_p.index)
+                if len(common) == 0:
+                    continue
+                w_common = w_common.reindex(common)
+                buy_p = buy_p.reindex(common)
+
+                events = build_exit_events(
+                    price_df=self.price_df,
+                    entry_prices=buy_p,
+                    rb_date=rb_date,
+                    exit_end_date=next_rb,
+                    rebalance_period=rebalance_period,
+                    tp_base=float(tp_base),
+                    sl_base=float(sl_base),
+                    probability=float(probability),
+                )
+                common = pd.Index([str(sym) for sym in common if str(sym) in events])
+                if len(common) == 0:
+                    continue
+
+                ret_port = period_df[common].copy()
+                for sym in common:
+                    event = events[str(sym)]
+                    ret_port.loc[ret_port.index > event.exit_date, sym] = 0.0
+
+                port_ret_all = (
+                    ret_port.fillna(0.0)
+                    .mul(w_common.reindex(common), axis=1)
+                    .sum(axis=1)
+                    .dropna()
+                )
+                if port_ret_all.empty:
+                    continue
+
+                period_daily_vals = port_ret_all.values.copy()
+                period_dates_list = port_ret_all.index.tolist()
+                period_daily_vals[0] -= 2 * getattr(cfg, "TRANSACTION_COST", 0.001)
+
+                all_daily_rets.extend(period_daily_vals.tolist())
+                all_dates.extend(period_dates_list)
+
+                period_cum = float(pd.Series(period_daily_vals).add(1.0).prod() - 1.0)
+                period_rets.append(period_cum)
+                period_dates.append(rb_date)
+
+                counts = event_counts({str(sym): events[str(sym)] for sym in common})
+                for key, value in counts.items():
+                    exit_stats[key] += int(value)
+                continue
+
             ret_port = period_df[port_stocks].copy()
 
             # 重索引权重（不在组合内的标的 → NaN，乘以 0 掩码后不影响结果）
@@ -267,6 +390,7 @@ class StrategyBacktester:
             "nav": nav,
             "rebalance_dates": period_dates,
             "rebalance_returns": rebalance_returns,
+            "exit_stats": exit_stats,
         }
 
     # ------------------------------------------------------------------
@@ -280,7 +404,23 @@ class StrategyBacktester:
             for rp in cfg.REBALANCE_PERIODS:
                 for tr in cfg.TARGET_GROUP_RANKS:
                     for wm in cfg.WEIGHT_METHODS:
-                        combos.append((gn, tr, rp, wm))
+                        for ep in getattr(cfg, "EXIT_POLICY_GRID", [EXIT_FIXED_REBALANCE]):
+                            ep = normalize_exit_policy(ep)
+                            if ep == EXIT_DYNAMIC_TP_SL:
+                                for tp in getattr(cfg, "TP_BASE_GRID", [getattr(cfg, "TP_BASE", 0.08)]):
+                                    for sl in getattr(cfg, "SL_BASE_GRID", [getattr(cfg, "SL_BASE", 0.05)]):
+                                        combos.append((
+                                            gn,
+                                            tr,
+                                            rp,
+                                            wm,
+                                            ep,
+                                            float(tp),
+                                            float(sl),
+                                            float(getattr(cfg, "TP_SL_PROBABILITY", 1.0)),
+                                        ))
+                            else:
+                                combos.append((gn, tr, rp, wm, ep, np.nan, np.nan, np.nan))
         return combos
 
     @staticmethod
@@ -290,4 +430,5 @@ class StrategyBacktester:
             "nav": pd.Series(dtype=float),
             "rebalance_dates": [],
             "rebalance_returns": pd.Series(dtype=float),
+            "exit_stats": {"tp_count": 0, "sl_count": 0, "forced_close_count": 0},
         }
