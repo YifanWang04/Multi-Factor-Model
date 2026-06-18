@@ -543,7 +543,9 @@ def _compute_last_rebalance_ops(
         return pd.DataFrame()
     group_stocks = groups[target_group]
 
-    hist_ret = ret_df.loc[ret_df.index < rb_date, :].tail(lookback)
+    # T close is the signal/entry timestamp; future holding returns still start
+    # after T, so <= rb_date is not look-ahead.
+    hist_ret = ret_df.loc[ret_df.index <= rb_date, :].tail(lookback)
     weights = compute_weights(
         method=weight_method,
         stocks=group_stocks,

@@ -1,12 +1,14 @@
 """
 因子复合+回测主流程 (run_composite_factor.py)
 =============================================
-输出1: composite_factors_{fXX-XX-...}.xlsx  — 每个sheet为一个复合因子(行=日期, 列=股票)
+输出1: composite_factors_P{period}_{fXX-XX-...}.xlsx  — 每个sheet为一个复合因子(行=日期, 列=股票)
+       composite_factors_{fXX-XX-...}.xlsx 保留为主周期兼容文件
 输出2: composite_backtest_report_P{REBALANCE_PERIOD}_{fXX-XX-...}.xlsx — 4个sheet的集中回测报表
 文件名由 composite_config.SELECTED_FACTOR_INDICES 自动推导因子后缀。
 """
 import os
 import sys
+import tempfile
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
@@ -27,7 +29,7 @@ for p in [_DIR, os.path.join(_ROOT, "analysis", "single_factor"), _ROOT]:
         sys.path.insert(0, p)
 
 from composite_config import (
-    PRICE_FILE, RETURN_COLUMN, OUTPUT_DIR, REBALANCE_PERIOD,
+    PRICE_FILE, RETURN_COLUMN, OUTPUT_DIR, REBALANCE_PERIOD, COMPOSITE_REBALANCE_PERIODS,
     N_WINDOWS, M_WINDOWS, GROUP_NUM, WEIGHT_METHOD, RISK_FREE_RATE,
     TRANSACTION_COST, get_selected_factor_files, get_factor_display_name,
     SELECTED_FACTOR_INDICES, build_factor_suffix,
@@ -93,10 +95,26 @@ def align_to_rebalance_periods(factor_dict, ret, rebalance_period):
 
 def write_composite_factors_excel(composite_dict, out_path):
     """每个sheet为一个复合因子 DataFrame(date×stock)。"""
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-        for name, df in composite_dict.items():
-            sheet = name[:31]  # Excel sheet名最长31字符
-            df.to_excel(writer, sheet_name=sheet)
+    out_path = os.path.abspath(out_path)
+    out_dir = os.path.dirname(out_path)
+    os.makedirs(out_dir, exist_ok=True)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=".xlsx",
+            delete=False,
+            dir=out_dir,
+        ) as tf:
+            tmp_path = tf.name
+        with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+            for name, df in composite_dict.items():
+                sheet = name[:31]  # Excel sheet名最长31字符
+                df.to_excel(writer, sheet_name=sheet)
+        os.replace(tmp_path, out_path)
+        tmp_path = None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
     print(f"复合因子数据已写入: {out_path}")
 
 
@@ -107,6 +125,13 @@ def _build_factor_suffix():
     """
     suffix = build_factor_suffix(SELECTED_FACTOR_INDICES)
     return suffix if suffix else "fall"
+
+
+def _resolve_rebalance_periods() -> list[int]:
+    periods = [int(p) for p in COMPOSITE_REBALANCE_PERIODS]
+    if not periods:
+        periods = [int(REBALANCE_PERIOD)]
+    return sorted(dict.fromkeys(periods))
 
 
 # ---------------------------------------------------------------------------
@@ -128,10 +153,27 @@ def main():
 
     ret = load_return_data(PRICE_FILE, RETURN_COLUMN)
     factor_dict = load_selected_factors(factor_files)
+    factor_suffix = _build_factor_suffix()
+    periods = _resolve_rebalance_periods()
+    print(f"复合因子调仓周期: {periods}")
+
+    for rebalance_period in periods:
+        _run_one_rebalance_period(
+            factor_dict=factor_dict,
+            ret=ret,
+            factor_suffix=factor_suffix,
+            rebalance_period=rebalance_period,
+        )
+
+
+def _run_one_rebalance_period(factor_dict, ret, factor_suffix: str, rebalance_period: int):
+    print("\n" + "=" * 64)
+    print(f"生成 P{rebalance_period} 复合因子")
+    print("=" * 64)
 
     # 2. 对齐到调仓期
     factor_periods_dict, ret_periods = align_to_rebalance_periods(
-        factor_dict, ret, REBALANCE_PERIOD
+        factor_dict, ret, rebalance_period
     )
     print(f"调仓期数量: {len(ret_periods)}")
 
@@ -140,7 +182,7 @@ def main():
     #       因此最后一个调仓日 r_k 被排除（无 next_date）。但 r_k 的因子截面值已经可得，
     #       用前 N 期 IC 权重即可合成当期复合因子，确保复合因子时序与最新数据同步。
     _first_daily = next(iter(factor_dict.values()))
-    _mgr_last = RebalancePeriodManager(_first_daily, ret, REBALANCE_PERIOD)
+    _mgr_last = RebalancePeriodManager(_first_daily, ret, rebalance_period)
     _all_daily_rb = _mgr_last.get_rebalance_dates()
     if _all_daily_rb:
         _last_rb = pd.Timestamp(_all_daily_rb[-1])
@@ -179,9 +221,11 @@ def main():
     print(f"复合因子数量: {len(composite_dict)}")
 
     # 4. 输出1：复合因子 Excel
-    factor_suffix = _build_factor_suffix()
-    out1 = os.path.join(OUTPUT_DIR, f"composite_factors_{factor_suffix}.xlsx")
+    out1 = os.path.join(OUTPUT_DIR, f"composite_factors_P{rebalance_period}_{factor_suffix}.xlsx")
     write_composite_factors_excel(composite_dict, out1)
+    if rebalance_period == int(REBALANCE_PERIOD):
+        compat_out = os.path.join(OUTPUT_DIR, f"composite_factors_{factor_suffix}.xlsx")
+        write_composite_factors_excel(composite_dict, compat_out)
 
     # 5. 对每个复合因子跑回测（复合因子已在调仓期截面，直接作为 factor_periods 传入）
     config = CompositeBacktestConfig(
@@ -201,14 +245,14 @@ def main():
         # 但该函数内部会再做一次 RebalancePeriodManager 对齐，
         # 所以我们传入 rebalance_period=1 并确保 comp_df 的 index 与 ret_periods 一致
         # 更直接：复用 run_one_factor_one_period 的内部逻辑，传入已对齐的数据
-        rec = _run_composite_backtest(comp_df, ret_periods, config)
+        rec = _run_composite_backtest(comp_df, ret_periods, config, rebalance_period)
         factor_names.append(name)
         records.append(rec)
 
         # 近期 3M / 6M / 1Y 的 factor_test_statistics
         for lb_months, rec_list in [(3, records_3M), (6, records_6M), (12, records_1Y)]:
             comp_filt, ret_filt = filter_factor_ret_by_lookback(comp_df, ret_periods, lb_months)
-            rec_lb = _run_composite_backtest(comp_filt, ret_filt, config)
+            rec_lb = _run_composite_backtest(comp_filt, ret_filt, config, rebalance_period)
             rec_list.append(rec_lb)
 
     # 6. 输出2：集中回测报表 Excel（前四个 sheet 每行按 long_annual_return 降序）
@@ -224,7 +268,7 @@ def main():
     sheet4_df = build_long_cumret_df(records, factor_names)
 
     out2 = os.path.join(
-        OUTPUT_DIR, f"composite_backtest_report_P{REBALANCE_PERIOD}_{factor_suffix}.xlsx"
+        OUTPUT_DIR, f"composite_backtest_report_P{rebalance_period}_{factor_suffix}.xlsx"
     )
     write_excel_with_format(
         out2, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
@@ -233,7 +277,7 @@ def main():
     print(f"回测报表已写入: {out2}")
 
 
-def _run_composite_backtest(comp_df, ret_periods, config):
+def _run_composite_backtest(comp_df, ret_periods, config, rebalance_period: int):
     """
     对已对齐到调仓期的复合因子直接跑回测，复用 run_multi_factor_test 的内部逻辑。
     comp_df: DataFrame(rebalance_date × stock) — 复合因子截面值
@@ -258,7 +302,7 @@ def _run_composite_backtest(comp_df, ret_periods, config):
 
     if len(fp) == 0:
         return _empty_factor_record(config)
-    periods_per_year = 252 / REBALANCE_PERIOD if REBALANCE_PERIOD > 0 else 252
+    periods_per_year = 252 / rebalance_period if rebalance_period > 0 else 252
 
     ic_analyzer = ICAnalyzerEnhanced(fp, rp)
     ic_df = ic_analyzer.calculate_ic()

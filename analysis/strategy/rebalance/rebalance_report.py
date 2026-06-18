@@ -17,6 +17,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+import pandas_market_calendars as pmc
 
 # ── 路径注册（strategy_utils 位于同级目录）────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,11 +26,17 @@ if _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 
 from strategy_utils import filter_weight_lt
-from .discord_notifier import compute_extended_metrics as _compute_extended_metrics
+from tp_sl_exit import (
+    EXIT_DYNAMIC_TP_SL,
+    EXIT_STOP_LOSS,
+    EXIT_TAKE_PROFIT,
+    thresholds_for_day,
+)
 
 
 WEIGHT_FILTER_THRESHOLD: float = 0.0001
 ALL_OPERATIONS_WEIGHT_FILTER_THRESHOLD: float = 0.01
+TP_SL_ACTION_LOOKAHEAD_DATES: int = 5
 
 
 def _describe_composite_method(sheet_name: str) -> str:
@@ -49,6 +56,180 @@ def _describe_composite_method(sheet_name: str) -> str:
     if sheet_name.startswith("rank_"):
         return f"{sheet_name}（截面排名复合）"
     return sheet_name
+
+
+def _as_naive_trading_day(value) -> pd.Timestamp:
+    """Normalize NYSE calendar values to timezone-naive midnight timestamps."""
+
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert(None)
+    return ts.normalize()
+
+
+def _future_nyse_trading_days(
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp | None,
+    rebalance_period: int,
+) -> list[pd.Timestamp]:
+    """Return holding trading days after start_date and before end_date."""
+
+    start = pd.Timestamp(start_date).normalize()
+    if pd.isna(start):
+        return []
+
+    if end_date is not None and pd.notna(end_date):
+        end = pd.Timestamp(end_date).normalize()
+    else:
+        end = start + pd.Timedelta(days=max(30, int(rebalance_period) * 4))
+
+    if end <= start:
+        return []
+
+    cal = pmc.get_calendar("NYSE")
+    valid = cal.valid_days(start, end)
+    days = [_as_naive_trading_day(x) for x in valid]
+    return [d for d in days if d > start and d < end]
+
+
+def _active_dynamic_buy_rows(current_ops: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
+    """Select live buy rows eligible for a forward TP/SL schedule."""
+
+    if current_ops is None or current_ops.empty:
+        return pd.DataFrame()
+    if "Action" not in current_ops.columns:
+        return pd.DataFrame()
+
+    ops = current_ops.copy()
+    buy_rows = ops[ops["Action"].astype(str).str.lower() == "buy"].copy()
+    if buy_rows.empty:
+        return pd.DataFrame()
+
+    if "Next_Rebalance_Date" in buy_rows.columns:
+        buy_rows["Next_Rebalance_Date"] = pd.to_datetime(
+            buy_rows["Next_Rebalance_Date"], errors="coerce"
+        )
+        buy_rows = buy_rows[
+            buy_rows["Next_Rebalance_Date"].isna()
+            | (buy_rows["Next_Rebalance_Date"] > as_of)
+        ]
+
+    if "Exit_Reason" in buy_rows.columns:
+        exit_reason = buy_rows["Exit_Reason"].fillna("").astype(str)
+        buy_rows = buy_rows[~exit_reason.isin([EXIT_TAKE_PROFIT, EXIT_STOP_LOSS])]
+
+    return buy_rows
+
+
+def build_tp_sl_schedule(
+    current_ops: pd.DataFrame,
+    as_of_date: pd.Timestamp,
+    exit_policy: str,
+    rebalance_period: int,
+    tp_base: float,
+    sl_base: float,
+    probability: float = 1.0,
+) -> pd.DataFrame:
+    """Build the forward dynamic TP/SL price schedule for current buys."""
+
+    columns = [
+        "Symbol",
+        "Rebalance_Date",
+        "Schedule_Date",
+        "TD",
+        "Next_Rebalance_Date",
+        "Buy_Price_Close",
+        "TP_Return_Threshold",
+        "SL_Return_Threshold",
+        "TP_Price",
+        "SL_Price",
+        "Weight",
+        "Shares",
+    ]
+
+    if exit_policy != EXIT_DYNAMIC_TP_SL:
+        return pd.DataFrame(columns=columns)
+    if rebalance_period <= 1:
+        return pd.DataFrame(columns=columns)
+
+    as_of = pd.Timestamp(as_of_date).normalize()
+    active = _active_dynamic_buy_rows(current_ops, as_of)
+    if active.empty:
+        return pd.DataFrame(columns=columns)
+
+    records = []
+    for _, row in active.iterrows():
+        symbol = row.get("Symbol")
+        rb_date = pd.to_datetime(row.get("Rebalance_Date"), errors="coerce")
+        next_rb = pd.to_datetime(row.get("Next_Rebalance_Date"), errors="coerce")
+        buy_price = pd.to_numeric(row.get("Buy_Price_Close"), errors="coerce")
+        if pd.isna(symbol) or pd.isna(rb_date) or pd.isna(buy_price) or buy_price <= 0:
+            continue
+
+        trading_days = _future_nyse_trading_days(rb_date, next_rb, rebalance_period)
+        for td, schedule_date in enumerate(trading_days, start=1):
+            if td >= rebalance_period:
+                break
+            tp_ret, sl_ret = thresholds_for_day(
+                tp_base,
+                sl_base,
+                rebalance_period,
+                td,
+                probability,
+            )
+            records.append(
+                {
+                    "Symbol": symbol,
+                    "Rebalance_Date": pd.Timestamp(rb_date).normalize(),
+                    "Schedule_Date": schedule_date,
+                    "TD": td,
+                    "Next_Rebalance_Date": (
+                        pd.Timestamp(next_rb).normalize() if pd.notna(next_rb) else pd.NaT
+                    ),
+                    "Buy_Price_Close": float(buy_price),
+                    "TP_Return_Threshold": tp_ret,
+                    "SL_Return_Threshold": sl_ret,
+                    "TP_Price": float(buy_price) * (1.0 + tp_ret),
+                    "SL_Price": float(buy_price) * (1.0 - sl_ret),
+                    "Weight": row.get("Weight", np.nan),
+                    "Shares": row.get("Shares", np.nan),
+                }
+            )
+
+    return pd.DataFrame(records, columns=columns)
+
+
+def build_tp_sl_action_checklist(
+    schedule_df: pd.DataFrame,
+    as_of_date: pd.Timestamp,
+    lookahead_dates: int = TP_SL_ACTION_LOOKAHEAD_DATES,
+) -> pd.DataFrame:
+    """Return the nearest schedule rows for manual alert/check setup."""
+
+    columns = [
+        "Date",
+        "Symbol",
+        "TP_Price",
+        "SL_Price",
+        "Buy_Price_Close",
+        "Weight",
+        "Suggested_Check",
+    ]
+    if schedule_df is None or schedule_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    as_of = pd.Timestamp(as_of_date).normalize()
+    sched = schedule_df.copy()
+    sched["Schedule_Date"] = pd.to_datetime(sched["Schedule_Date"], errors="coerce")
+    future = sched[sched["Schedule_Date"] >= as_of].copy()
+    if future.empty:
+        return pd.DataFrame(columns=columns)
+
+    keep_dates = sorted(future["Schedule_Date"].dropna().unique())[:lookahead_dates]
+    checklist = future[future["Schedule_Date"].isin(keep_dates)].copy()
+    checklist["Date"] = checklist["Schedule_Date"]
+    checklist["Suggested_Check"] = "Set price alert / Check near close"
+    return checklist[columns].sort_values(["Date", "Symbol"]).reset_index(drop=True)
 
 
 def write_rebalance_day_report(
@@ -235,6 +416,42 @@ def write_rebalance_day_report(
         logger=print,
     )
 
+    exit_policy = params.get("exit_policy", strategy_params.get("exit_policy", ""))
+
+    def _as_float(value, default: float) -> float:
+        try:
+            if value == "":
+                return default
+            parsed = float(value)
+            if np.isfinite(parsed):
+                return parsed
+        except (TypeError, ValueError):
+            pass
+        return default
+
+    tp_base = _as_float(params.get("tp_base", strategy_params.get("tp_base", np.nan)), np.nan)
+    sl_base = _as_float(params.get("sl_base", strategy_params.get("sl_base", np.nan)), np.nan)
+    probability = _as_float(
+        params.get("probability", strategy_params.get("probability", strategy_params.get("tp_sl_probability", 1.0))),
+        1.0,
+    )
+    report_rebalance_period = int(strategy_params.get("rebalance_period", rebalance_period))
+    if not np.isfinite(tp_base):
+        tp_base = 0.0
+    if not np.isfinite(sl_base):
+        sl_base = 0.0
+
+    tp_sl_schedule = build_tp_sl_schedule(
+        current_ops=filtered_ops,
+        as_of_date=as_of,
+        exit_policy=str(exit_policy),
+        rebalance_period=report_rebalance_period,
+        tp_base=tp_base,
+        sl_base=sl_base,
+        probability=probability,
+    )
+    tp_sl_checklist = build_tp_sl_action_checklist(tp_sl_schedule, as_of)
+
     def _nan_to_dash(df: pd.DataFrame) -> pd.DataFrame:
         return df.replace({np.nan: "-"}, inplace=False)
 
@@ -248,6 +465,30 @@ def write_rebalance_day_report(
         else:
             pd.DataFrame({"Note": ["无当前调仓日操作（今日非调仓日或数据不足）"]}).to_excel(
                 writer, sheet_name="Current_Operations", index=False
+            )
+
+        if str(exit_policy) == EXIT_DYNAMIC_TP_SL:
+            if not tp_sl_schedule.empty:
+                _nan_to_dash(tp_sl_schedule).to_excel(writer, sheet_name="TP_SL_Schedule", index=False)
+            else:
+                pd.DataFrame({"Note": ["动态 TP/SL 策略当前无可生成 schedule 的持仓"]}).to_excel(
+                    writer, sheet_name="TP_SL_Schedule", index=False
+                )
+
+            if not tp_sl_checklist.empty:
+                _nan_to_dash(tp_sl_checklist).to_excel(
+                    writer, sheet_name="TP_SL_Action_Checklist", index=False
+                )
+            else:
+                pd.DataFrame({"Note": ["当前无今日或近期 TP/SL 人工检查项"]}).to_excel(
+                    writer, sheet_name="TP_SL_Action_Checklist", index=False
+                )
+        else:
+            pd.DataFrame({"Note": [f"Exit_Policy={exit_policy}; TP/SL schedule not applicable"]}).to_excel(
+                writer, sheet_name="TP_SL_Schedule", index=False
+            )
+            pd.DataFrame({"Note": [f"Exit_Policy={exit_policy}; TP/SL checklist not applicable"]}).to_excel(
+                writer, sheet_name="TP_SL_Action_Checklist", index=False
             )
 
         future_rb = status.get("future_rebalance_dates", [])

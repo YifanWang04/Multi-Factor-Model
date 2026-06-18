@@ -196,7 +196,7 @@ qqq/
 | `mvo` | Markowitz 最大夏普组合 |
 | `max_return` | 在约束下最大化预期收益 |
 
-优化使用 SLSQP；当数据不足或求解失败时自动降级为等权。协方差矩阵使用对角正则化降低奇异风险。
+优化使用 SLSQP；当数据不足或求解失败时自动降级为等权。权重优化的历史收益窗口包含调仓日 T 收盘时已经可知的数据；实际持仓收益仍使用 `(T, T_next]`。协方差矩阵使用对角正则化降低奇异风险。
 
 绩效报告包括年化收益、年化波动、夏普、胜率、盈亏比、最大回撤、Calmar 比率和单周期最坏回撤。单周期最坏回撤是所有调仓持仓区间内最差的一次区间内回撤。
 
@@ -233,6 +233,13 @@ SL = sl_base * (10 - TD) / 10 * P
 ```
 
 v1 尚未训练机器学习分类器，因此 `P=1.0` 是中性默认值，不应解释为模型概率。详细报告和调仓日报告会输出 `Exit_Date`、`Exit_Reason`、`TP_Threshold`、`SL_Threshold`、`Signal_Probability` 等字段。
+
+V1 实盘流程不要求每天运行 Python，也不会自动下单。active profile 使用 `dynamic_tp_sl` 时，调仓日报告会新增：
+
+- `TP_SL_Schedule`：按当前持仓和下一次调仓日前的每个未来持仓交易日，预先列出 TP/SL 收益阈值和 TP/SL 价格。
+- `TP_SL_Action_Checklist`：筛出最近几个需要人工设置价格提醒或临近收盘检查的日期和价格。
+
+推荐流程是在调仓日一次性生成完整 schedule，持仓期间用券商、TradingView 或人工表格提醒；只有价格接近或触发 TP/SL 线时，再重新运行调仓日报告做确认和记录。
 
 ### 调仓日历与时间对齐
 
@@ -305,6 +312,8 @@ v1 尚未训练机器学习分类器，因此 `P=1.0` 是中性默认值，不�
 
 复合因子加载只有在主文件不存在时才回退到标准路径。若主文件存在但缺少目标 sheet 或无法读取，流程会直接失败，避免静默使用旧结果。
 
+`analysis/multi_factor/composite_config.py` 的主周期 `REBALANCE_PERIOD` 会从 active strategy profile 的 `strategy_param`（`P{N}d`）派生。多周期研究请设置 `COMPOSITE_REBALANCE_PERIODS`，例如 `[5, 10]`；`run_composite_factor.py` 会写出 `composite_factors_P5_fXX-...xlsx`、`composite_factors_P10_fXX-...xlsx` 等 period-specific 工作簿。`run_strategy.py` 会按策略周期读取匹配的复合因子文件，避免 P5/P10 策略静默共用同一个复合因子日历。兼容用的 `composite_factors_fXX-...xlsx` 仍会为 active profile 主周期写出，供详细回测和调仓日流程使用。
+
 ## 调仓日报告
 
 `analysis/strategy/run_rebalance_day.py` 可以运行完整流水线，也可以复用已有运行目录。
@@ -317,7 +326,7 @@ v1 尚未训练机器学习分类器，因此 `P=1.0` 是中性默认值，不�
 4. 生成 `rebalance_day_report.xlsx`
 5. 可选发送 Discord 通知
 
-报告包含配置、当前操作、历史操作、收益序列、累计收益、周期汇总、当前持仓、市值重估字段和下一调仓日信息。`Current_Operations_All` 不再输出；`All_Operations_All` 会过滤 `Weight < 0.01` 的行。
+报告包含配置、当前操作、历史操作、收益序列、累计收益、周期汇总、当前持仓、市值重估字段和下一调仓日信息。`dynamic_tp_sl` profile 还会输出 `TP_SL_Schedule` 和 `TP_SL_Action_Checklist`，用于提前设置人工/外部价格提醒。`Current_Operations_All` 不再输出；`All_Operations_All` 会过滤 `Weight < 0.01` 的行。
 
 Discord 消息包含：
 

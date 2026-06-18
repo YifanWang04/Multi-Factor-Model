@@ -177,6 +177,108 @@ class RiskFixTests(unittest.TestCase):
         self.assertEqual(sc.STRATEGY_SELECTED_FACTOR_INDICES, list(profile.factor_indices))
         self.assertEqual(cc.SELECTED_FACTOR_INDICES, list(profile.factor_indices))
         self.assertEqual(cc.SELECTED_FACTOR_NAMES, list(profile.factor_names))
+        self.assertEqual(cc.REBALANCE_PERIOD, profile.rebalance_period)
+
+    def test_strategy_rejects_composite_calendar_coarser_than_strategy_period(self):
+        from analysis.strategy.strategy_backtest import (
+            CompositeCalendarError,
+            _select_rebalance_dates,
+        )
+
+        ret_index = pd.bdate_range("2026-01-01", periods=25)
+        p10_factor_index = pd.DatetimeIndex([ret_index[0], ret_index[10], ret_index[20]])
+
+        with self.assertRaisesRegex(CompositeCalendarError, "coarser than the requested strategy"):
+            _select_rebalance_dates(p10_factor_index, ret_index, 5)
+
+        selected = _select_rebalance_dates(p10_factor_index, ret_index, 10)
+        self.assertEqual(selected, list(p10_factor_index))
+
+    def test_strategy_grid_stops_on_coarse_composite_calendar(self):
+        from analysis.strategy.strategy_backtest import (
+            CompositeCalendarError,
+            StrategyBacktester,
+        )
+
+        cfg = type(
+            "Cfg",
+            (),
+            {
+                "GROUP_NUMS": [1],
+                "REBALANCE_PERIODS": [5],
+                "TARGET_GROUP_RANKS": [1],
+                "WEIGHT_METHODS": ["equal"],
+                "EXIT_POLICY_GRID": ["fixed_rebalance"],
+                "OPTIMIZATION_LOOKBACK": 5,
+                "RISK_FREE_RATE": 0.02,
+                "MAX_WEIGHT": 1.0,
+                "TRANSACTION_COST": 0.0,
+            },
+        )
+        ret_index = pd.bdate_range("2026-01-01", periods=25)
+        factor_index = pd.DatetimeIndex([ret_index[0], ret_index[10], ret_index[20]])
+        factor = pd.DataFrame({"AAPL": [1.0, 1.0, 1.0]}, index=factor_index)
+        returns = pd.DataFrame({"AAPL": 0.01}, index=ret_index)
+
+        with self.assertRaises(CompositeCalendarError):
+            StrategyBacktester(factor, returns, cfg).run_grid()
+
+    def test_strategy_grid_uses_matching_composite_for_each_period(self):
+        from analysis.strategy.strategy_backtest import StrategyBacktester
+
+        cfg = type(
+            "Cfg",
+            (),
+            {
+                "GROUP_NUMS": [1],
+                "REBALANCE_PERIODS": [5, 10],
+                "TARGET_GROUP_RANKS": [1],
+                "WEIGHT_METHODS": ["equal"],
+                "EXIT_POLICY_GRID": ["fixed_rebalance"],
+                "OPTIMIZATION_LOOKBACK": 5,
+                "RISK_FREE_RATE": 0.02,
+                "MAX_WEIGHT": 1.0,
+                "TRANSACTION_COST": 0.0,
+            },
+        )
+        ret_index = pd.bdate_range("2026-01-01", periods=25)
+        returns = pd.DataFrame({"AAPL": 0.01}, index=ret_index)
+        p5_index = pd.DatetimeIndex([ret_index[0], ret_index[5], ret_index[10], ret_index[15], ret_index[20]])
+        p10_index = pd.DatetimeIndex([ret_index[0], ret_index[10], ret_index[20]])
+        p5_factor = pd.DataFrame({"AAPL": 1.0}, index=p5_index)
+        p10_factor = pd.DataFrame({"AAPL": 1.0}, index=p10_index)
+
+        results = StrategyBacktester(
+            p5_factor,
+            returns,
+            cfg,
+            factor_dfs_by_period={5: p5_factor, 10: p10_factor},
+        ).run_grid()
+
+        self.assertEqual(
+            len(results["equal_1G_Top1_P5d__fixed_rebalance"]["rebalance_returns"]),
+            5,
+        )
+        self.assertEqual(
+            len(results["equal_1G_Top1_P10d__fixed_rebalance"]["rebalance_returns"]),
+            3,
+        )
+
+    def test_composite_factor_writer_replaces_existing_workbook(self):
+        from analysis.multi_factor.run_composite_factor import write_composite_factors_excel
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "composite.xlsx")
+            old = pd.DataFrame({"AAPL": [1.0]}, index=[pd.Timestamp("2026-01-02")])
+            new = pd.DataFrame({"AAPL": [2.0]}, index=[pd.Timestamp("2026-01-05")])
+
+            write_composite_factors_excel({"ic_m3_N20": old}, path)
+            write_composite_factors_excel({"ic_m3_N20": new}, path)
+
+            got = pd.read_excel(path, sheet_name="ic_m3_N20", index_col=0)
+            self.assertEqual(float(got.iloc[0, 0]), 2.0)
+            leftovers = [name for name in os.listdir(tmp) if name != "composite.xlsx"]
+            self.assertEqual(leftovers, [])
 
     def test_strategy_entrypoints_use_active_profile_config(self):
         from qqq_config.strategy_profiles import get_active_profile

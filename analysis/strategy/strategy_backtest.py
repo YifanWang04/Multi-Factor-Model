@@ -45,6 +45,10 @@ from tp_sl_exit import (
 )
 
 
+class CompositeCalendarError(ValueError):
+    """Raised when a composite factor calendar cannot support a strategy period."""
+
+
 # ---------------------------------------------------------------------------
 # 分组工具（独立函数，与 GrouperEnhanced 逻辑一致）
 # ---------------------------------------------------------------------------
@@ -58,7 +62,51 @@ def _select_rebalance_dates(
     从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点。
     委托至 rebalance_calendar.get_rebalance_calendar 统一实现。
     """
-    return _get_rebalance_calendar(factor_index, ret_index, rebalance_period_days)
+    selected = _get_rebalance_calendar(factor_index, ret_index, rebalance_period_days)
+    _assert_calendar_supports_requested_period(
+        selected,
+        ret_index,
+        rebalance_period_days,
+    )
+    return selected
+
+
+def _assert_calendar_supports_requested_period(
+    rebalance_dates: list,
+    ret_index: pd.DatetimeIndex,
+    rebalance_period_days: int,
+) -> None:
+    """
+    Fail fast when a sparse composite-factor calendar is coarser than the
+    requested strategy period.
+
+    Example: a P10 composite factor file used by a P5 strategy used to produce
+    P10 historical backtests but P5 future extrapolation in rebalance reports.
+    """
+    if len(rebalance_dates) < 2:
+        return
+
+    ret_sorted = pd.DatetimeIndex(ret_index).sort_values()
+    too_long = []
+    for prev_date, cur_date in zip(rebalance_dates[:-1], rebalance_dates[1:]):
+        n_trading_days = int(((ret_sorted > prev_date) & (ret_sorted <= cur_date)).sum())
+        if n_trading_days > int(rebalance_period_days):
+            too_long.append((pd.Timestamp(prev_date), pd.Timestamp(cur_date), n_trading_days))
+
+    if not too_long:
+        return
+
+    examples = ", ".join(
+        f"{start.date()}->{end.date()}={days}d"
+        for start, end, days in too_long[:3]
+    )
+    raise CompositeCalendarError(
+        "Composite factor calendar is coarser than the requested strategy "
+        f"rebalance period P{int(rebalance_period_days)}d. "
+        f"Examples: {examples}. Regenerate composite factors with matching "
+        "REBALANCE_PERIOD or switch to a strategy_param that matches the "
+        "composite factor frequency."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -82,11 +130,15 @@ class StrategyBacktester:
         ret_df: pd.DataFrame,
         config,
         price_df: pd.DataFrame | None = None,
+        factor_dfs_by_period: dict[int, pd.DataFrame] | None = None,
     ):
         self.factor_df = factor_df
         self.ret_df = ret_df
         self.config = config
         self.price_df = price_df
+        self.factor_dfs_by_period = {
+            int(k): v for k, v in (factor_dfs_by_period or {}).items()
+        }
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -149,6 +201,8 @@ class StrategyBacktester:
                     **result.get("exit_stats", {}),
                 }
                 results[strategy_name] = result
+            except CompositeCalendarError:
+                raise
             except Exception as exc:
                 print(f"    [!] 跳过：{exc}")
                 results[strategy_name] = {
@@ -186,8 +240,9 @@ class StrategyBacktester:
         """
         运行单一参数组合的策略，返回日频收益率序列和期间收益序列。
         """
+        factor_df = self.factor_dfs_by_period.get(int(rebalance_period), self.factor_df)
         rebalance_dates = _select_rebalance_dates(
-            self.factor_df.index,
+            factor_df.index,
             self.ret_df.index,
             rebalance_period,
         )
@@ -214,15 +269,15 @@ class StrategyBacktester:
             next_rb = rebalance_dates[i + 1]
 
             # ── 因子信号 ──────────────────────────────────────────────
-            if rb_date in self.factor_df.index:
+            if rb_date in factor_df.index:
                 signal_date = rb_date
             else:
-                avail = self.factor_df.index[self.factor_df.index <= rb_date]
+                avail = factor_df.index[factor_df.index <= rb_date]
                 if len(avail) == 0:
                     continue
                 signal_date = avail[-1]
 
-            factor_signal = self.factor_df.loc[signal_date]
+            factor_signal = factor_df.loc[signal_date]
 
             # ── 分组 ──────────────────────────────────────────────────
             groups = _build_groups(factor_signal, group_num)
@@ -232,8 +287,10 @@ class StrategyBacktester:
 
             # ── 权重 ──────────────────────────────────────────────────
             # 历史收益率：取调仓日之前的最近 lookback 期数据（避免使用全部历史）
+            # T close is the signal/entry timestamp; future holding returns
+            # still start after T, so <= rb_date is not look-ahead.
             hist_ret = self.ret_df.loc[
-                self.ret_df.index < rb_date, :
+                self.ret_df.index <= rb_date, :
             ].tail(getattr(cfg, "OPTIMIZATION_LOOKBACK", 252))
 
             weights = compute_weights(

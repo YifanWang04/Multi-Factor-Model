@@ -73,30 +73,41 @@ def build_strategy_factor_suffix(factor_indices=None):
     return "f" + "-".join(str(int(i)) for i in factor_indices)
 
 # 复合因子 Excel 文件路径（按 offset 分子目录）
-def get_composite_factor_file() -> str:
+def _composite_factor_candidates(period: int | None = None) -> list[str]:
+    """
+    根据 STRATEGY_SELECTED_FACTOR_INDICES 构建复合因子文件候选路径。
+    period 非空时优先使用 period-specific 文件。
+    """
+    suffix = build_strategy_factor_suffix()
+    if period is not None:
+        names = [f"composite_factors_P{int(period)}_{suffix}.xlsx"]
+    else:
+        names = [f"composite_factors_{suffix}.xlsx"]
+
+    offset_dir = COMPOSITE_FACTOR_OUTPUT_DIR  # 来自 data_config，已按 offset 分子目录
+    candidates = [os.path.join(offset_dir, name) for name in names]
+
+    legacy_offset_dir = os.path.join(
+        PROJECT_ROOT, "output", f"composite_factor_reports{_offset_dir_suffix()}"
+    )
+    candidates.extend(os.path.join(legacy_offset_dir, name) for name in names)
+    if DATA_START_OFFSET_DAYS == 0:
+        base_dir = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
+        candidates.extend(os.path.join(base_dir, name) for name in names)
+    return candidates
+
+
+def get_composite_factor_file(period: int | None = None) -> str:
     """
     根据 STRATEGY_SELECTED_FACTOR_INDICES 构建复合因子文件路径。
     优先使用 offset 子目录；offset 非 0 时不回退到基线目录。
     """
-    suffix = build_strategy_factor_suffix()
-    fname = f"composite_factors_{suffix}.xlsx"
-    offset_dir = COMPOSITE_FACTOR_OUTPUT_DIR  # 来自 data_config，已按 offset 分子目录
-    offset_path = os.path.join(offset_dir, fname)
-    if os.path.isfile(offset_path):
-        return offset_path
-    legacy_offset_dir = os.path.join(
-        PROJECT_ROOT, "output", f"composite_factor_reports{_offset_dir_suffix()}"
-    )
-    legacy_offset_path = os.path.join(legacy_offset_dir, fname)
-    if os.path.isfile(legacy_offset_path):
-        return legacy_offset_path
-    if DATA_START_OFFSET_DAYS == 0:
-        base_dir = os.path.join(PROJECT_ROOT, "output", "composite_factor_reports")
-        base_path = os.path.join(base_dir, fname)
-        if os.path.isfile(base_path):
-            return base_path
+    candidates = _composite_factor_candidates(period)
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
     # 均不存在时返回 offset 路径（让调用方报 FileNotFoundError）
-    return offset_path
+    return candidates[0]
 
 COMPOSITE_FACTOR_FILE = get_composite_factor_file()
 
@@ -111,11 +122,15 @@ OUTPUT_EXCEL_NAME = "strategy_backtest_report.xlsx"
 GROUP_NUMS = [5, 10]
 
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
-# ⚠️ 建议：使用与 composite_config.REBALANCE_PERIOD 一致的值（10），或其整数倍（20, 30）
-# 当前 composite_config.REBALANCE_PERIOD = 10 交易日
+# 每个周期优先读取 matching 的 composite_factors_P{N}_*.xlsx。
 # 注：调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制，已移除 REBALANCE_DATE_OFFSET
 # REBALANCE_PERIODS = [5, 10, 20]
 REBALANCE_PERIODS = [5, 10]
+
+COMPOSITE_FACTOR_FILES_BY_PERIOD = {
+    int(period): get_composite_factor_file(int(period))
+    for period in REBALANCE_PERIODS
+}
 
 # 目标组排名（从高到低）：1=买最高分组，2=买第二高分组，3=买第三高分组
 # TARGET_GROUP_RANKS = [1, 2]
@@ -135,7 +150,8 @@ WEIGHT_METHODS = ["max_return"]
 # - dynamic_tp_sl scans TP_BASE_GRID x SL_BASE_GRID using Adj Close exits.
 EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
 TP_BASE_GRID = [0.75, 0.8, 0.85, 0.9]
-SL_BASE_GRID = [0.5, 0.55, 0.6, 0.65, 0.75, 0.8, 0.95, 1]
+SL_BASE_GRID = [0.6, 0.65, 0.75]
+# SL_BASE_GRID = [0.5, 0.55, 0.6, 0.65, 0.75, 0.8, 0.95, 1]
 TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability
 
 # Active-profile defaults used by detailed backtest and rebalance-day reports.

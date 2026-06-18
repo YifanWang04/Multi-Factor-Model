@@ -195,7 +195,7 @@ Supported allocation methods in `portfolio_optimizer.py`:
 | `mvo` | Markowitz max-Sharpe portfolio |
 | `max_return` | maximize expected return under constraints |
 
-Optimization uses SLSQP and falls back to equal weights when data is insufficient or the solver fails. The covariance matrix uses diagonal regularization to reduce singularity risk.
+Optimization uses SLSQP and falls back to equal weights when data is insufficient or the solver fails. The optimizer's historical return window includes returns known by the rebalance-date close T; realized holding returns still use `(T, T_next]`. The covariance matrix uses diagonal regularization to reduce singularity risk.
 
 Performance reports include annualized return, annualized volatility, Sharpe, win rate, profit/loss ratio, max drawdown, Calmar ratio, and worst-period drawdown. Worst-period drawdown is the worst drawdown inside any single holding interval from one rebalance date to the next.
 
@@ -232,6 +232,13 @@ SL = sl_base * (10 - TD) / 10 * P
 ```
 
 There is no machine-learning classifier in v1, so `P=1.0` is the neutral default. Do not interpret it as a learned signal probability until a real probability matrix is added. Detailed and rebalance-day reports use the active profile defaults and include exit fields such as `Exit_Date`, `Exit_Reason`, `TP_Threshold`, `SL_Threshold`, and `Signal_Probability`.
+
+For live use, v1 does not require running a daily Python monitor and does not place broker orders. When the active profile uses `dynamic_tp_sl`, the rebalance-day workbook adds:
+
+- `TP_SL_Schedule`: one row per current holding and future holding trading day before the next rebalance, with precomputed TP/SL return thresholds and TP/SL prices.
+- `TP_SL_Action_Checklist`: the nearest schedule dates for manual price alerts or near-close checks.
+
+The intended workflow is to generate the full schedule on rebalance day, use broker/TradingView/manual alerts between rebalance dates, and rerun the rebalance-day report only when a TP/SL line is near or triggered.
 
 ### Rebalance Calendar and Timing
 
@@ -306,6 +313,8 @@ Single-factor tests read `SingleFactorConfig.FACTOR_SHEET`; use this when testin
 
 Composite factor loading only falls back to the standard path when the primary file is absent. If the primary file exists but is missing the requested sheet or is unreadable, the run fails fast.
 
+`analysis/multi_factor/composite_config.py` derives the primary `REBALANCE_PERIOD` from the active strategy profile's `strategy_param` (`P{N}d`). For multi-period research, set `COMPOSITE_REBALANCE_PERIODS`, for example `[5, 10]`; `run_composite_factor.py` writes period-specific workbooks such as `composite_factors_P5_fXX-...xlsx` and `composite_factors_P10_fXX-...xlsx`. `run_strategy.py` reads the matching workbook for each strategy period, so P5 and P10 strategies do not silently share one composite-factor calendar. The legacy `composite_factors_fXX-...xlsx` file is still written for the primary active-profile period used by detailed/rebalance-day flows.
+
 ## Rebalance-Day Reporting
 
 `analysis/strategy/run_rebalance_day.py` can run the full pipeline or reuse an existing run directory.
@@ -320,7 +329,7 @@ Main steps:
 
 New rebalance-day runs are created under `output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offsetN/`. Intermediate data remains in `data/`, `factor_raw/`, `factor_processed/`, and `composite_factor_reports/` inside the run directory; the final workbook is written to `reports/rebalance_day_report.xlsx`. Existing `output/rebalance_day_*` run directories can still be passed with `--run-dir`.
 
-The report includes configuration, current operations, historical operations, return series, cumulative returns, period summaries, current holdings, mark-to-market fields, and next-rebalance information. `Current_Operations_All` is no longer emitted; `All_Operations_All` filters out rows with `Weight < 0.01`.
+The report includes configuration, current operations, historical operations, return series, cumulative returns, period summaries, current holdings, mark-to-market fields, and next-rebalance information. For `dynamic_tp_sl` profiles it also includes `TP_SL_Schedule` and `TP_SL_Action_Checklist` for precomputed manual TP/SL monitoring. `Current_Operations_All` is no longer emitted; `All_Operations_All` filters out rows with `Weight < 0.01`.
 
 Discord messages include:
 

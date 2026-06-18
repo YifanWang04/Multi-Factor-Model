@@ -31,8 +31,8 @@ MANUALLY_SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
 # Research-only override for running run_composite_factor.py directly.
 # Set to a list like [95, 99, 27, 46, 19], or leave as None to use the active profile.
 # The rebalance-day pipeline still takes precedence through REBALANCE_SELECTED_FACTOR_INDICES.
-# COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]
-COMPOSITE_RESEARCH_FACTOR_INDICES = None #June 16, 2026
+COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]
+# COMPOSITE_RESEARCH_FACTOR_INDICES = None #June 16, 2026
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -105,11 +105,10 @@ RETURN_COLUMN = "Return"
 SELECTED_FACTOR_INDICES = _resolve_selected_factor_indices()
 SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
 
-# 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
-# ⚠️ 重要：此周期决定复合因子的生成频率
-# ⚠️ 必须与策略回测的调仓周期（STRATEGY_PARAM 中的 P{N}d）保持一致！
-#   当前策略: max_return_10G_Top1_P20d → P=20
-REBALANCE_PERIOD = 10
+# 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日。
+# REBALANCE_PERIOD 是兼容旧调用方的主周期；多周期研究使用 COMPOSITE_REBALANCE_PERIODS。
+REBALANCE_PERIOD = ACTIVE_PROFILE.rebalance_period
+COMPOSITE_REBALANCE_PERIODS = [5, 10, 20]
 
 # 一元/IC加权滚动窗口列表 N
 N_WINDOWS = [5, 10, 20]
