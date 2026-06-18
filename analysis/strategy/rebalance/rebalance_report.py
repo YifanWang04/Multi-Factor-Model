@@ -386,6 +386,7 @@ def write_rebalance_day_report(
         ["Composite_Method", _describe_composite_method(composite_factor_sheet)],
         ["Strategy_Param", strategy_param],
         ["Weight_Method", params.get("weight_method", strategy_params.get("weight_method", ""))],
+        ["Max_Weight", params.get("max_weight", strategy_params.get("max_weight", ""))],
         ["Group_Num", params.get("group_num", strategy_params.get("group_num", ""))],
         ["Target_Rank", params.get("target_rank", strategy_params.get("target_rank", ""))],
         ["Exit_Policy", params.get("exit_policy", strategy_params.get("exit_policy", ""))],

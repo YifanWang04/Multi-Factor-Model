@@ -525,7 +525,7 @@ def _compute_last_rebalance_ops(
     target_group = group_num - (target_rank - 1)
     lookback = getattr(config, "OPTIMIZATION_LOOKBACK", 252)
     rf = getattr(config, "RISK_FREE_RATE", 0.02)
-    max_weight = getattr(config, "MAX_WEIGHT", 0.4)
+    max_weight = strategy_params.get("max_weight", getattr(config, "MAX_WEIGHT", 0.4))
 
     if rb_date in factor_df.index:
         signal_date = rb_date

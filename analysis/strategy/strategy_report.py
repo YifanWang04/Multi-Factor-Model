@@ -48,6 +48,7 @@ _PARAM_COLS = [
     ("target_group",      "目标组号"),
     ("rebalance_period",  "调仓周期(交易日)"),
     ("weight_method",     "资产配置方式"),
+    ("max_weight",        "Max Weight"),
 ]
 
 # 指标列（中文列头，方便阅读）
@@ -93,7 +94,7 @@ _PCT_KEYS = {
     "ret_1y", "ret_last_year", "annual_return", "annual_vol",
     "open_win_rate", "max_drawdown", "worst_period_drawdown",
 }
-_PCT_KEYS.update({"tp_base", "sl_base", "probability"})
+_PCT_KEYS.update({"max_weight", "tp_base", "sl_base", "probability"})
 
 # 越大越好（绿）/ 越小越好（红：max_drawdown）
 _HIGHER_BETTER = {
@@ -159,6 +160,7 @@ class StrategyReporter:
             row["target_group"] = m.get("target_group", np.nan)
             row["rebalance_period"] = m.get("rebalance_period", np.nan)
             row["weight_method"] = m.get("weight_method", "")
+            row["max_weight"] = m.get("max_weight", np.nan)
             row["exit_policy"] = m.get("exit_policy", "")
             row["tp_base"] = m.get("tp_base", np.nan)
             row["sl_base"] = m.get("sl_base", np.nan)
@@ -197,6 +199,8 @@ class StrategyReporter:
             ("Rebalance_Periods", str(getattr(self.config, "REBALANCE_PERIODS", ""))),
             ("Target_Group_Ranks", str(getattr(self.config, "TARGET_GROUP_RANKS", ""))),
             ("Weight_Methods", str(getattr(self.config, "WEIGHT_METHODS", ""))),
+            ("Max_Weight", str(getattr(self.config, "MAX_WEIGHT", ""))),
+            ("Max_Weight_Grid", str(getattr(self.config, "MAX_WEIGHT_GRID", ""))),
             ("Exit_Policy_Grid", str(getattr(self.config, "EXIT_POLICY_GRID", ""))),
             ("TP_Base_Grid", str(getattr(self.config, "TP_BASE_GRID", ""))),
             ("SL_Base_Grid", str(getattr(self.config, "SL_BASE_GRID", ""))),

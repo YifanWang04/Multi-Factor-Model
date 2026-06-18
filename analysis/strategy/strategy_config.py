@@ -119,13 +119,13 @@ OUTPUT_EXCEL_NAME = "strategy_backtest_report.xlsx"
 # ── 网格遍历参数 ──────────────────────────────────────────────────────────────
 
 # 分层数量：88 只股票建议 5 / 10 层；如需 15 / 20 层可自行追加
-GROUP_NUMS = [5, 10]
+GROUP_NUMS = [5, 10, 15, 20]
 
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
 # 每个周期优先读取 matching 的 composite_factors_P{N}_*.xlsx。
 # 注：调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制，已移除 REBALANCE_DATE_OFFSET
 # REBALANCE_PERIODS = [5, 10, 20]
-REBALANCE_PERIODS = [5, 10]
+REBALANCE_PERIODS = [10]
 
 COMPOSITE_FACTOR_FILES_BY_PERIOD = {
     int(period): get_composite_factor_file(int(period))
@@ -148,10 +148,10 @@ WEIGHT_METHODS = ["max_return"]
 # Exit policy grid:
 # - fixed_rebalance keeps the historical behavior and does not use TP/SL grids.
 # - dynamic_tp_sl scans TP_BASE_GRID x SL_BASE_GRID using Adj Close exits.
-EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
-TP_BASE_GRID = [0.75, 0.8, 0.85, 0.9]
-SL_BASE_GRID = [0.6, 0.65, 0.75]
-# SL_BASE_GRID = [0.5, 0.55, 0.6, 0.65, 0.75, 0.8, 0.95, 1]
+EXIT_POLICY_GRID = ["fixed_rebalance"]
+# EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
+# TP_BASE_GRID = [0.75, 0.8, 0.85, 0.9]
+# SL_BASE_GRID = [0.5, 0.65, 0.8, 0.95]
 TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability
 
 # Active-profile defaults used by detailed backtest and rebalance-day reports.
@@ -168,4 +168,7 @@ TRANSACTION_COST = 0.001     # 单边交易成本（在每个持仓周期首日�
 OPTIMIZATION_LOOKBACK = 252
 
 # 单只标的最大权重约束（适用于 mvo / min_variance / max_return）
-MAX_WEIGHT = 0.4
+# MAX_WEIGHT 是详细回测/调仓日使用的 active profile 默认标量；run_strategy.py 如需研究扫描，
+# 使用 MAX_WEIGHT_GRID 展开网格，避免把 list 传入优化器。
+MAX_WEIGHT = ACTIVE_PROFILE.max_weight
+MAX_WEIGHT_GRID = [0.4, 0.6, 1.0]

@@ -66,6 +66,7 @@ class StrategyProfile:
     strategy_param: str
     ticker_universe: str
     description: str = ""
+    max_weight: float = 0.4
     exit_policy: str = "fixed_rebalance"
     tp_base: float = 0.08
     sl_base: float = 0.05
@@ -108,6 +109,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
         ticker_universe="US_108",
+        max_weight=0.4,
         exit_policy="fixed_rebalance",
         # tp_base=0.08,
         # sl_base=0.05,
@@ -118,12 +120,13 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         name="Strategy11",
         factor_indices=(95, 101, 62, 65, 32),
         composite_sheet="ic_m3_N20",
-        strategy_param="max_return_5G_Top1_P5d",
+        strategy_param="max_return_5G_Top1_P10d",
         ticker_universe="US_108",
-        exit_policy="dynamic_tp_sl",
-        tp_base=0.8,
-        sl_base=0.65,
-        tp_sl_probability=1.0,
+        max_weight=1,
+        exit_policy="fixed_rebalance",
+        # tp_base=0.8,
+        # sl_base=0.65,
+        # tp_sl_probability=1.0,
         description="Strategy11 with dynamic TP/SL research profile.",
     ),
     "Strategy2": StrategyProfile(
@@ -132,6 +135,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_10G_Top1_P20d",
         ticker_universe="US_108",
+        max_weight=0.4,
         description="Strategy2 Legacy 2026-03/25 research profile.",
     ),
     "Strategy3": StrategyProfile(
@@ -140,6 +144,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top2_P20d",
         ticker_universe="US_143",
+        max_weight=0.4,
         description="Strategy3 June 2026 strategy profile.",
     ),
     "Strategy4": StrategyProfile(
@@ -148,6 +153,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N10",
         strategy_param="max_return_5G_Top2_P20d",
         ticker_universe="US_143",
+        max_weight=0.4,
         description="Strategy4 June 2026 strategy profile.",
     ),
     # "Strategy5": StrategyProfile(

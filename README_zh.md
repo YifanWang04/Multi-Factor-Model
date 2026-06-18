@@ -207,10 +207,11 @@ qqq/
 - `fixed_rebalance`：现有固定调仓日卖出逻辑，作为 baseline，不参与 TP/SL 参数网格。
 - `dynamic_tp_sl`：持仓期内每日用 adjusted close 检查单只股票是否触发动态止盈或止损；提前退出后该资金留现金，到下一次 rebalance 再重新分配。
 
-`qqq_config/strategy_profiles.py` 中的 active profile 保存详细回测和调仓日流程默认使用的退出参数：
+`qqq_config/strategy_profiles.py` 中的 active profile 保存详细回测和调仓日流程默认使用的权重与退出参数：
 
 ```python
 exit_policy = "fixed_rebalance"  # 或 "dynamic_tp_sl"
+max_weight = 0.4
 tp_base = 0.08
 sl_base = 0.05
 tp_sl_probability = 1.0
@@ -223,7 +224,14 @@ EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
 TP_BASE_GRID = [0.04, 0.06, 0.08, 0.10, 0.12]
 SL_BASE_GRID = [0.02, 0.03, 0.05, 0.07]
 TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability
+MAX_WEIGHT = ACTIVE_PROFILE.max_weight
+MAX_WEIGHT_GRID = [0.4, 0.6, 1.0]
 ```
+
+`MAX_WEIGHT` 从 active profile 派生，是详细回测和调仓日流程使用的默认标量；
+调仓日配置/状态表和 Discord 摘要会显示该 profile 的权重上限。`run_strategy.py`
+只会对优化型权重方法（`min_variance`、`mvo`、`max_return`）展开 `MAX_WEIGHT_GRID`，
+多权重上限扫描时会把权重上限写入策略名和报表参数。
 
 以 10 个交易日持仓周期为例，阈值为：
 

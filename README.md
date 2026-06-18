@@ -210,6 +210,7 @@ The active profile in `qqq_config/strategy_profiles.py` owns the default live/de
 
 ```python
 exit_policy = "fixed_rebalance"  # or "dynamic_tp_sl"
+max_weight = 0.4
 tp_base = 0.08
 sl_base = 0.05
 tp_sl_probability = 1.0
@@ -222,7 +223,15 @@ EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
 TP_BASE_GRID = [0.04, 0.06, 0.08, 0.10, 0.12]
 SL_BASE_GRID = [0.02, 0.03, 0.05, 0.07]
 TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability
+MAX_WEIGHT = ACTIVE_PROFILE.max_weight
+MAX_WEIGHT_GRID = [0.4, 0.6, 1.0]
 ```
+
+`MAX_WEIGHT` is derived from the active profile and is the default scalar used by detailed backtest and rebalance-day
+flows. Rebalance-day config/status reports and Discord summaries include this
+profile weight cap. `run_strategy.py` expands `MAX_WEIGHT_GRID` only for optimizer-based
+allocation methods (`min_variance`, `mvo`, `max_return`) and adds the weight cap
+to strategy names and report parameters when multiple caps are scanned.
 
 For a 10-trading-day holding period, the dynamic thresholds are:
 

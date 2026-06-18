@@ -264,6 +264,54 @@ class RiskFixTests(unittest.TestCase):
             3,
         )
 
+    def test_strategy_grid_expands_max_weight_grid_as_scalars(self):
+        from analysis.strategy.strategy_backtest import StrategyBacktester
+
+        cfg = type(
+            "Cfg",
+            (),
+            {
+                "GROUP_NUMS": [1],
+                "REBALANCE_PERIODS": [5],
+                "TARGET_GROUP_RANKS": [1],
+                "WEIGHT_METHODS": ["max_return"],
+                "EXIT_POLICY_GRID": ["fixed_rebalance"],
+                "OPTIMIZATION_LOOKBACK": 5,
+                "RISK_FREE_RATE": 0.02,
+                "MAX_WEIGHT": 0.5,
+                "MAX_WEIGHT_GRID": [0.5, 1.0],
+                "TRANSACTION_COST": 0.0,
+            },
+        )
+        ret_index = pd.bdate_range("2026-01-01", periods=15)
+        factor = pd.DataFrame(
+            {
+                "AAA": 1.0,
+                "BBB": 2.0,
+                "CCC": 3.0,
+            },
+            index=ret_index,
+        )
+        returns = pd.DataFrame(
+            {
+                "AAA": 0.001,
+                "BBB": 0.002,
+                "CCC": 0.003,
+            },
+            index=ret_index,
+        )
+
+        backtester = StrategyBacktester(factor, returns, cfg)
+        self.assertEqual(len(backtester._all_combinations()), 2)
+
+        results = backtester.run_grid()
+
+        self.assertIn("max_return_1G_Top1_P5d_MW50__fixed_rebalance", results)
+        self.assertIn("max_return_1G_Top1_P5d_MW100__fixed_rebalance", results)
+        for result in results.values():
+            self.assertGreater(len(result["daily_returns"]), 0)
+            self.assertIsInstance(result["params"]["max_weight"], float)
+
     def test_composite_factor_writer_replaces_existing_workbook(self):
         from analysis.multi_factor.run_composite_factor import write_composite_factors_excel
 

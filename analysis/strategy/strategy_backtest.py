@@ -49,6 +49,29 @@ class CompositeCalendarError(ValueError):
     """Raised when a composite factor calendar cannot support a strategy period."""
 
 
+_OPTIMIZER_WEIGHT_METHODS = {"min_variance", "mvo", "max_return"}
+
+
+def _as_float_grid(value, default: float = 0.4) -> list[float]:
+    """Normalize a scalar or iterable config value into a non-empty float list."""
+    if value is None:
+        return [float(default)]
+    if isinstance(value, (str, bytes)):
+        return [float(value)]
+    try:
+        values = list(value)
+    except TypeError:
+        return [float(value)]
+    if not values:
+        return [float(default)]
+    return [float(v) for v in values]
+
+
+def _max_weight_tag(max_weight: float) -> str:
+    text = f"{float(max_weight) * 100:g}".replace(".", "p")
+    return f"MW{text}"
+
+
 # ---------------------------------------------------------------------------
 # 分组工具（独立函数，与 GrouperEnhanced 逻辑一致）
 # ---------------------------------------------------------------------------
@@ -158,6 +181,7 @@ class StrategyBacktester:
                 target_rank,
                 rebalance_period,
                 weight_method,
+                max_weight,
                 exit_policy,
                 tp_base,
                 sl_base,
@@ -167,6 +191,8 @@ class StrategyBacktester:
             base_name = (
                 f"{weight_method}_{group_num}G_Top{target_rank}_P{rebalance_period}d"
             )
+            if self._should_tag_max_weight(weight_method):
+                base_name = f"{base_name}_{_max_weight_tag(max_weight)}"
             if exit_policy == EXIT_DYNAMIC_TP_SL:
                 strategy_name = (
                     f"{base_name}__{exit_policy}__"
@@ -183,6 +209,7 @@ class StrategyBacktester:
                     target_group,
                     rebalance_period,
                     weight_method,
+                    max_weight=max_weight,
                     exit_policy=exit_policy,
                     tp_base=tp_base,
                     sl_base=sl_base,
@@ -194,6 +221,7 @@ class StrategyBacktester:
                     "target_rank": target_rank,
                     "rebalance_period": rebalance_period,
                     "weight_method": weight_method,
+                    "max_weight": max_weight,
                     "exit_policy": exit_policy,
                     "tp_base": tp_base,
                     "sl_base": sl_base,
@@ -213,6 +241,7 @@ class StrategyBacktester:
                         "target_rank": target_rank,
                         "rebalance_period": rebalance_period,
                         "weight_method": weight_method,
+                        "max_weight": max_weight,
                         "exit_policy": exit_policy,
                         "tp_base": tp_base,
                         "sl_base": sl_base,
@@ -232,6 +261,7 @@ class StrategyBacktester:
         target_group: int,
         rebalance_period: int,
         weight_method: str,
+        max_weight: float | None = None,
         exit_policy: str = EXIT_FIXED_REBALANCE,
         tp_base: float | None = None,
         sl_base: float | None = None,
@@ -263,6 +293,9 @@ class StrategyBacktester:
         exit_stats = {"tp_count": 0, "sl_count": 0, "forced_close_count": 0}
 
         cfg = self.config
+        if max_weight is None:
+            max_weight = getattr(cfg, "MAX_WEIGHT", 0.4)
+        max_weight = float(max_weight)
 
         for i in range(len(rebalance_dates) - 1):
             rb_date = rebalance_dates[i]
@@ -300,7 +333,7 @@ class StrategyBacktester:
                 hist_returns=hist_ret,
                 lookback=getattr(cfg, "OPTIMIZATION_LOOKBACK", 252),
                 rf=getattr(cfg, "RISK_FREE_RATE", 0.02),
-                max_weight=getattr(cfg, "MAX_WEIGHT", 0.4),
+                max_weight=max_weight,
             )
 
             # ── 持仓期收益（向量化替代 iterrows）──────────────────────────
@@ -461,24 +494,39 @@ class StrategyBacktester:
             for rp in cfg.REBALANCE_PERIODS:
                 for tr in cfg.TARGET_GROUP_RANKS:
                     for wm in cfg.WEIGHT_METHODS:
-                        for ep in getattr(cfg, "EXIT_POLICY_GRID", [EXIT_FIXED_REBALANCE]):
-                            ep = normalize_exit_policy(ep)
-                            if ep == EXIT_DYNAMIC_TP_SL:
-                                for tp in getattr(cfg, "TP_BASE_GRID", [getattr(cfg, "TP_BASE", 0.08)]):
-                                    for sl in getattr(cfg, "SL_BASE_GRID", [getattr(cfg, "SL_BASE", 0.05)]):
-                                        combos.append((
-                                            gn,
-                                            tr,
-                                            rp,
-                                            wm,
-                                            ep,
-                                            float(tp),
-                                            float(sl),
-                                            float(getattr(cfg, "TP_SL_PROBABILITY", 1.0)),
-                                        ))
-                            else:
-                                combos.append((gn, tr, rp, wm, ep, np.nan, np.nan, np.nan))
+                        for mw in self._max_weight_grid_for_method(wm):
+                            for ep in getattr(cfg, "EXIT_POLICY_GRID", [EXIT_FIXED_REBALANCE]):
+                                ep = normalize_exit_policy(ep)
+                                if ep == EXIT_DYNAMIC_TP_SL:
+                                    for tp in getattr(cfg, "TP_BASE_GRID", [getattr(cfg, "TP_BASE", 0.08)]):
+                                        for sl in getattr(cfg, "SL_BASE_GRID", [getattr(cfg, "SL_BASE", 0.05)]):
+                                            combos.append((
+                                                gn,
+                                                tr,
+                                                rp,
+                                                wm,
+                                                mw,
+                                                ep,
+                                                float(tp),
+                                                float(sl),
+                                                float(getattr(cfg, "TP_SL_PROBABILITY", 1.0)),
+                                            ))
+                                else:
+                                    combos.append((gn, tr, rp, wm, mw, ep, np.nan, np.nan, np.nan))
         return combos
+
+    def _max_weight_grid_for_method(self, weight_method: str) -> list[float]:
+        cfg = self.config
+        default = float(getattr(cfg, "MAX_WEIGHT", 0.4))
+        if weight_method not in _OPTIMIZER_WEIGHT_METHODS:
+            return [default]
+        return _as_float_grid(getattr(cfg, "MAX_WEIGHT_GRID", default), default)
+
+    def _should_tag_max_weight(self, weight_method: str) -> bool:
+        return (
+            weight_method in _OPTIMIZER_WEIGHT_METHODS
+            and len(self._max_weight_grid_for_method(weight_method)) > 1
+        )
 
     @staticmethod
     def _empty_result() -> dict:

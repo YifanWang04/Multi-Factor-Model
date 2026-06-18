@@ -306,6 +306,7 @@ def send_discord_notification(
             f"**复合因子：** {_describe_composite_method(composite_factor_sheet)}\n"
             f"**策略参数：** {strategy_param}\n"
             f"**权重方式：** {strategy_params.get('weight_method', '')}　"
+            f"**Max Weight：** {float(strategy_params.get('max_weight', 0.0)):.0%}　"
             f"**分组数：** {strategy_params.get('group_num', '')}　"
             f"**目标组：** Top{strategy_params.get('target_rank', '')}　"
             f"**调仓周期：** {strategy_params.get('rebalance_period', '')} 交易日　"

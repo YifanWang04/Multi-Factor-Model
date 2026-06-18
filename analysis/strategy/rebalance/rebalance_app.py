@@ -127,6 +127,7 @@ STRATEGY_PARAMS = {
     "group_num": _parsed[1],
     "target_rank": _parsed[2],
     "rebalance_period": _parsed[3],
+    "max_weight": cfg.MAX_WEIGHT,
 }
 
 
@@ -498,6 +499,7 @@ def main(
     print(f"  复合因子: {_describe_composite_method_for_report(COMPOSITE_FACTOR_SHEET)}")
     print(f"  策略参数: {STRATEGY_PARAM}")
     print(f"    权重方式: {STRATEGY_PARAMS['weight_method']}")
+    print(f"    Max Weight: {STRATEGY_PARAMS['max_weight']:.2%}")
     print(f"    分组数:   {STRATEGY_PARAMS['group_num']}")
     print(f"    目标组:   Top{STRATEGY_PARAMS['target_rank']}")
     print(f"    调仓周期: {STRATEGY_PARAMS['rebalance_period']} 交易日")
