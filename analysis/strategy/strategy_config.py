@@ -68,12 +68,12 @@ ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
 # Only set the factor group and composite sheet here; strategy grids stay below.
 # Leave values as None to use the active profile.
 # Reset them to None before live/rebalance-day runs.
-# STRATEGY_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19]          # Example: [95, 99, 27, 46, 19]
-# STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
+STRATEGY_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19]          # Example: [95, 99, 27, 46, 19]
+STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
 # STRATEGY_RESEARCH_FACTOR_INDICES = None
 # STRATEGY_RESEARCH_COMPOSITE_SHEET = None
-STRATEGY_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]          # Example: [95, 99, 27, 46, 19]
-STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N20"       # Example: "rank_ic_m3_N20"
+# STRATEGY_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]          # Example: [95, 99, 27, 46, 19]
+# STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N20"       # Example: "rank_ic_m3_N20"
 
 def _coerce_factor_indices(value):
     if value is None:

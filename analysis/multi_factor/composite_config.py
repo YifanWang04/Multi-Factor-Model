@@ -31,8 +31,9 @@ MANUALLY_SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
 # Research-only override for running run_composite_factor.py directly.
 # Set to a list like [95, 99, 27, 46, 19], or leave as None to use the active profile.
 # The rebalance-day pipeline still takes precedence through REBALANCE_SELECTED_FACTOR_INDICES.
+COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19] # test
 # COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]
-COMPOSITE_RESEARCH_FACTOR_INDICES = None #June 16, 2026
+# COMPOSITE_RESEARCH_FACTOR_INDICES = None #June 16, 2026
 
 # ─────────────────────────────────────────────────────────────────────────────
 

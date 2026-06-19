@@ -115,12 +115,13 @@ def _offset_dir_suffix() -> str:
     """目录后缀：offset=0 为空，offset!=0 为 _offset{N}d。"""
     return offset_dir_suffix(DATA_START_OFFSET_DAYS)
 
-ACTIVE_STRATEGY_PROFILE = getattr(cfg, "ACTIVE_STRATEGY_PROFILE", "")
-ACTIVE_TICKER_UNIVERSE = cfg.ACTIVE_PROFILE.ticker_universe
-COMPOSITE_FACTOR_SHEET = cfg.COMPOSITE_FACTOR_SHEET
-STRATEGY_PARAM = cfg.STRATEGY_PARAM
-SELECTED_FACTOR_INDICES = list(cfg.STRATEGY_SELECTED_FACTOR_INDICES)
-SELECTED_FACTOR_NAMES = list(cfg.STRATEGY_SELECTED_FACTOR_NAMES)
+ACTIVE_PROFILE = cfg.ACTIVE_PROFILE
+ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
+ACTIVE_TICKER_UNIVERSE = ACTIVE_PROFILE.ticker_universe
+COMPOSITE_FACTOR_SHEET = ACTIVE_PROFILE.composite_sheet
+STRATEGY_PARAM = ACTIVE_PROFILE.strategy_param
+SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
+SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
 
 _parsed = parse_strategy_param(STRATEGY_PARAM)
 STRATEGY_PARAMS = {
@@ -143,6 +144,7 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
         "REBALANCE_SELECTED_FACTORS": ",".join(SELECTED_FACTOR_NAMES),
         "REBALANCE_SELECTED_FACTOR_INDICES": ",".join(str(i) for i in SELECTED_FACTOR_INDICES),
         "REBALANCE_SELECTED_COMPOSITE": COMPOSITE_FACTOR_SHEET,
+        "REBALANCE_COMPOSITE_PERIODS": str(STRATEGY_PARAMS["rebalance_period"]),
         "REBALANCE_OFFSET_DAYS": str(DATA_START_OFFSET_DAYS),
         "REBALANCE_TICKER_UNIVERSE": ACTIVE_TICKER_UNIVERSE,
     }
@@ -201,6 +203,7 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
     env["REBALANCE_SELECTED_FACTORS"] = ",".join(SELECTED_FACTOR_NAMES)
     env["REBALANCE_SELECTED_FACTOR_INDICES"] = ",".join(str(i) for i in SELECTED_FACTOR_INDICES)
     env["REBALANCE_SELECTED_COMPOSITE"] = COMPOSITE_FACTOR_SHEET
+    env["REBALANCE_COMPOSITE_PERIODS"] = str(STRATEGY_PARAMS["rebalance_period"])
     env["REBALANCE_OFFSET_DAYS"] = str(DATA_START_OFFSET_DAYS)
     env["REBALANCE_TICKER_UNIVERSE"] = ACTIVE_TICKER_UNIVERSE
 
@@ -424,7 +427,10 @@ def main(
             composite_file = composite_factors_path(run_dir, SELECTED_FACTOR_INDICES)
             price_file = os.path.join(run_dir, "data", _price_filename())
         else:
-            composite_file = _COMPOSITE_FACTOR_FILE
+            composite_file = composite_factors_path(
+                COMPOSITE_FACTOR_OUTPUT_DIR,
+                SELECTED_FACTOR_INDICES,
+            )
             price_file = os.path.join(PROJECT_ROOT, "data", _price_filename())
     else:
         composite_file = composite_factors_path(run_dir, SELECTED_FACTOR_INDICES)

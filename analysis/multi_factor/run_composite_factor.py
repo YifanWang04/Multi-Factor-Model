@@ -129,8 +129,25 @@ def _build_factor_suffix():
     return suffix if suffix else "fall"
 
 
+def _parse_rebalance_periods(value: str) -> list[int]:
+    periods = []
+    for item in value.replace(";", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        period = int(item)
+        if period <= 0:
+            raise ValueError(f"Invalid rebalance period: {period}")
+        periods.append(period)
+    return periods
+
+
 def _resolve_rebalance_periods() -> list[int]:
-    periods = [int(p) for p in COMPOSITE_REBALANCE_PERIODS]
+    env_periods = os.environ.get("REBALANCE_COMPOSITE_PERIODS")
+    if env_periods:
+        periods = _parse_rebalance_periods(env_periods)
+    else:
+        periods = [int(p) for p in COMPOSITE_REBALANCE_PERIODS]
     if not periods:
         periods = [int(REBALANCE_PERIOD)]
     return sorted(dict.fromkeys(periods))

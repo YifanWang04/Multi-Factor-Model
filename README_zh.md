@@ -55,6 +55,12 @@ python analysis/strategy/run_rebalance_day.py --no-discord
 python analysis/strategy/run_rebalance_day.py --run-dir <existing_run_dir>
 ```
 
+直接运行 `run_composite_factor.py` 时，会按
+`analysis/multi_factor/composite_config.py::COMPOSITE_REBALANCE_PERIODS`
+生成研究用的多个调仓周期。由 `run_rebalance_day.py` 调用时，调仓日流程会用
+`STRATEGY_PARAM` 解析出的 active strategy 周期覆盖该列表，因此实盘流程只生成与
+策略匹配的 P 周期复合因子。
+
 其他常用入口：
 
 ```powershell
@@ -329,6 +335,11 @@ V1 实盘流程不要求每天运行 Python，也不会自动下单。active pro
 1. `REBALANCE_SELECTED_FACTOR_INDICES`，由调仓日 pipeline 为单次运行设置
 2. `analysis/multi_factor/composite_config.py` 中的 `COMPOSITE_RESEARCH_FACTOR_INDICES`，用于手动直接运行 `run_composite_factor.py`
 3. `qqq_config/strategy_profiles.py` 中的 active profile
+
+`run_rebalance_day.py` 会直接从 active strategy profile 派生因子编号和复合因子
+sheet，并通过 `REBALANCE_SELECTED_FACTOR_INDICES` / `REBALANCE_SELECTED_COMPOSITE`
+传给 pipeline，因此实盘调仓流程不会继承 `COMPOSITE_RESEARCH_FACTOR_INDICES`
+或 `STRATEGY_RESEARCH_FACTOR_INDICES`。
 
 新策略尚未定稿前，`analysis/strategy/strategy_config.py` 也支持 `run_strategy.py` 的研究覆盖：只设置 `STRATEGY_RESEARCH_FACTOR_INDICES` 和 `STRATEGY_RESEARCH_COMPOSITE_SHEET`。策略参数网格仍使用普通固定配置区的 `GROUP_NUMS`、`REBALANCE_PERIODS`、`TARGET_GROUP_RANKS`、`WEIGHT_METHODS`。研究覆盖保持为 `None` 时继续使用 active profile 默认值；实盘/调仓日前应恢复为 `None`。
 

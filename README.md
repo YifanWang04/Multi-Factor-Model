@@ -57,6 +57,12 @@ python analysis/strategy/run_rebalance_day.py --no-discord
 python analysis/strategy/run_rebalance_day.py --run-dir <existing_run_dir>
 ```
 
+When `run_composite_factor.py` is run directly, it generates the periods listed
+in `analysis/multi_factor/composite_config.py::COMPOSITE_REBALANCE_PERIODS`.
+When it is invoked by `run_rebalance_day.py`, the rebalance-day pipeline
+overrides that list with the active strategy period parsed from `STRATEGY_PARAM`
+so the live run only builds the matching P-period composite factor.
+
 Other useful entries:
 
 ```powershell
@@ -331,6 +337,12 @@ Composite factor selection is resolved in this order:
 1. `REBALANCE_SELECTED_FACTOR_INDICES`, set by the rebalance pipeline for a single run
 2. `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`, for manual direct runs of `run_composite_factor.py`
 3. the active profile in `qqq_config/strategy_profiles.py`
+
+`run_rebalance_day.py` derives the factor indices and composite sheet directly
+from the active strategy profile and passes them to the pipeline through
+`REBALANCE_SELECTED_FACTOR_INDICES` / `REBALANCE_SELECTED_COMPOSITE`, so live
+rebalance runs do not inherit `COMPOSITE_RESEARCH_FACTOR_INDICES` or
+`STRATEGY_RESEARCH_FACTOR_INDICES`.
 
 Before a strategy profile is finalized, `analysis/strategy/strategy_config.py` also supports direct research overrides for `run_strategy.py`: set only `STRATEGY_RESEARCH_FACTOR_INDICES` and `STRATEGY_RESEARCH_COMPOSITE_SHEET`. The strategy parameter grid remains the normal fixed `GROUP_NUMS`, `REBALANCE_PERIODS`, `TARGET_GROUP_RANKS`, and `WEIGHT_METHODS` section. Leave research overrides as `None` for the active profile defaults, and reset them to `None` before live/rebalance-day runs.
 
