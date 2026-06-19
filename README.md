@@ -225,6 +225,14 @@ Optimization uses SLSQP and falls back to equal weights when data is insufficien
 
 Performance reports include annualized return, annualized volatility, Sharpe, win rate, profit/loss ratio, max drawdown, Calmar ratio, and worst-period drawdown. Worst-period drawdown is the worst drawdown inside any single holding interval from one rebalance date to the next.
 
+### Performance Metric Convention
+
+All standard performance reports use the return series as the source of truth. Total return is compounded as `prod(1 + returns) - 1`; annualized return is `(1 + total_return) ** (periods_per_year / n) - 1`; annualized volatility is sample volatility with `ddof=1`; Sharpe uses annualized return minus annual risk-free rate over annualized volatility; max drawdown and Calmar include an implicit initial wealth anchor of `1.0`.
+
+Single-factor and composite-factor long metrics are based on rebalance-period returns, using `252 / rebalance_period` periods per year. Strategy backtest, detailed report, rebalance-day report, strategy review, and walk-forward full-period metrics are based on daily portfolio returns and use 252 trading days per year. Rebalance report `Win_Rate` and `Profit_Loss_Ratio` are daily-return based; strategy `open_*` metrics remain rebalance-period/opening based.
+
+This is a metric-convention correction. Historical Excel reports are not backfilled; rerun the corresponding scripts to generate reports with the corrected values.
+
 ### Dynamic TP/SL Exit Research
 
 Strategy backtests can compare two exit policies in one `run_strategy.py` run:

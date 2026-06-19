@@ -773,6 +773,169 @@ class RiskFixTests(unittest.TestCase):
         self.assertNotIn(pd.Timestamp("2026-01-05"), result["daily_returns"].index)
         self.assertIn(pd.Timestamp("2026-01-06"), result["daily_returns"].index)
 
+    def test_performance_analyzer_matches_shared_metrics(self):
+        from analysis.single_factor.performance import PerformanceAnalyzer
+        from qqq_core.performance_metrics import performance_summary
+
+        returns = pd.Series(
+            [0.10, -0.05, 0.02],
+            index=pd.to_datetime(["2026-01-02", "2026-01-05", "2026-01-06"]),
+        )
+        nav = (1.0 + returns).cumprod()
+        expected = performance_summary(returns, rf=0.01, periods_per_year=3)
+        actual = PerformanceAnalyzer(nav, returns, rf=0.01, periods_per_year=3).calculate_metrics()
+
+        self.assertAlmostEqual(actual["Total_Return"], expected["total_return"])
+        self.assertAlmostEqual(actual["Annual_Return"], expected["annual_return"])
+        self.assertAlmostEqual(actual["Volatility"], expected["annual_vol"])
+        self.assertAlmostEqual(actual["Sharpe"], expected["sharpe"])
+        self.assertAlmostEqual(actual["Max_Drawdown"], expected["max_drawdown"])
+        self.assertAlmostEqual(actual["Calmar"], expected["calmar"])
+        self.assertAlmostEqual(actual["Win_Rate"], expected["win_rate"])
+        self.assertAlmostEqual(actual["Profit_Loss_Ratio"], expected["profit_loss_ratio"])
+
+    def test_strategy_and_rebalance_metrics_match_shared_metrics(self):
+        import types
+
+        if "yfinance" not in sys.modules:
+            sys.modules["yfinance"] = types.ModuleType("yfinance")
+        if "requests" not in sys.modules:
+            fake_requests = types.ModuleType("requests")
+            fake_requests.post = lambda *args, **kwargs: None
+            sys.modules["requests"] = fake_requests
+        if "pandas_market_calendars" not in sys.modules:
+            fake_mcal = types.ModuleType("pandas_market_calendars")
+            fake_mcal.get_calendar = lambda name: None
+            sys.modules["pandas_market_calendars"] = fake_mcal
+        if "scipy" not in sys.modules:
+            fake_scipy = types.ModuleType("scipy")
+            fake_optimize = types.ModuleType("scipy.optimize")
+            fake_optimize.minimize = lambda *args, **kwargs: None
+            fake_scipy.optimize = fake_optimize
+            sys.modules["scipy"] = fake_scipy
+            sys.modules["scipy.optimize"] = fake_optimize
+
+        from analysis.strategy.strategy_metrics import StrategyMetrics
+        from analysis.strategy.rebalance.discord_notifier import compute_extended_metrics
+        from qqq_core.performance_metrics import performance_summary, worst_period_drawdown
+
+        daily_returns = pd.Series(
+            [-0.10, 0.02, 0.03],
+            index=pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07"]),
+        )
+        rebalance_returns = pd.Series(
+            [-0.082, 0.03],
+            index=pd.to_datetime(["2026-01-02", "2026-01-06"]),
+        )
+        nav = (1.0 + daily_returns).cumprod()
+        expected = performance_summary(daily_returns, rf=0.01, periods_per_year=252)
+        expected_wp_dd, _, _ = worst_period_drawdown(daily_returns, rebalance_returns)
+
+        strategy = StrategyMetrics(daily_returns, rebalance_returns, rf=0.01).compute_all()
+        rebalance = compute_extended_metrics(daily_returns, nav, rebalance_returns, rf_rate=0.01)
+
+        self.assertAlmostEqual(strategy["annual_return"], expected["annual_return"])
+        self.assertAlmostEqual(strategy["annual_vol"], expected["annual_vol"])
+        self.assertAlmostEqual(strategy["sharpe"], expected["sharpe"])
+        self.assertAlmostEqual(strategy["max_drawdown"], expected["max_drawdown"])
+        self.assertAlmostEqual(strategy["calmar"], expected["calmar"])
+        self.assertAlmostEqual(strategy["worst_period_drawdown"], expected_wp_dd)
+
+        self.assertAlmostEqual(rebalance["annual_return"], expected["annual_return"])
+        self.assertAlmostEqual(rebalance["volatility"], expected["annual_vol"])
+        self.assertAlmostEqual(rebalance["sharpe"], expected["sharpe"])
+        self.assertAlmostEqual(rebalance["max_drawdown"], expected["max_drawdown"])
+        self.assertAlmostEqual(rebalance["calmar"], expected["calmar"])
+        self.assertAlmostEqual(rebalance["win_rate"], expected["win_rate"])
+        self.assertAlmostEqual(rebalance["profit_loss_ratio"], expected["profit_loss_ratio"])
+        self.assertAlmostEqual(rebalance["worst_period_drawdown"], expected_wp_dd)
+
+    def test_strategy_review_metrics_keep_fields_and_match_shared_metrics(self):
+        import types
+
+        if "pandas_market_calendars" not in sys.modules:
+            fake_mcal = types.ModuleType("pandas_market_calendars")
+            fake_mcal.get_calendar = lambda name: None
+            sys.modules["pandas_market_calendars"] = fake_mcal
+        if "yfinance" not in sys.modules:
+            sys.modules["yfinance"] = types.ModuleType("yfinance")
+        if "requests" not in sys.modules:
+            fake_requests = types.ModuleType("requests")
+            fake_requests.post = lambda *args, **kwargs: None
+            sys.modules["requests"] = fake_requests
+        fake_scipy = sys.modules.get("scipy") or types.ModuleType("scipy")
+        if "scipy.stats" not in sys.modules:
+            fake_stats = types.ModuleType("scipy.stats")
+            fake_stats.spearmanr = lambda *args, **kwargs: (np.nan, np.nan)
+            fake_stats.skew = lambda *args, **kwargs: np.nan
+            fake_stats.kurtosis = lambda *args, **kwargs: np.nan
+            fake_stats.ttest_1samp = lambda *args, **kwargs: (np.nan, np.nan)
+            sys.modules["scipy.stats"] = fake_stats
+            fake_scipy.stats = fake_stats
+        if "scipy.optimize" not in sys.modules:
+            fake_optimize = types.ModuleType("scipy.optimize")
+            fake_optimize.minimize = lambda *args, **kwargs: None
+            sys.modules["scipy.optimize"] = fake_optimize
+            fake_scipy.optimize = fake_optimize
+        sys.modules["scipy"] = fake_scipy
+        if "sklearn" not in sys.modules:
+            fake_sklearn = types.ModuleType("sklearn")
+            fake_linear_model = types.ModuleType("sklearn.linear_model")
+            fake_decomposition = types.ModuleType("sklearn.decomposition")
+            fake_preprocessing = types.ModuleType("sklearn.preprocessing")
+
+            class _LinearRegression:
+                def fit(self, *args, **kwargs):
+                    self.coef_ = np.array([])
+                    return self
+
+            class _PCA:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def fit_transform(self, values):
+                    return np.asarray(values)
+
+            class _StandardScaler:
+                def fit_transform(self, values):
+                    return np.asarray(values)
+
+            fake_linear_model.LinearRegression = _LinearRegression
+            fake_decomposition.PCA = _PCA
+            fake_preprocessing.StandardScaler = _StandardScaler
+            fake_sklearn.linear_model = fake_linear_model
+            fake_sklearn.decomposition = fake_decomposition
+            fake_sklearn.preprocessing = fake_preprocessing
+            sys.modules["sklearn"] = fake_sklearn
+            sys.modules["sklearn.linear_model"] = fake_linear_model
+            sys.modules["sklearn.decomposition"] = fake_decomposition
+            sys.modules["sklearn.preprocessing"] = fake_preprocessing
+
+        from analysis.strategy.run_strategy_review import compute_metrics
+        from qqq_core.performance_metrics import performance_summary
+
+        daily_returns = pd.Series(
+            [0.04, -0.02, 0.01],
+            index=pd.to_datetime(["2026-01-02", "2026-01-05", "2026-01-06"]),
+        )
+        expected = performance_summary(daily_returns, rf=0.01, periods_per_year=252)
+        actual = compute_metrics(daily_returns, rf=0.01, label="strategy")
+
+        self.assertEqual(actual["label"], "strategy")
+        self.assertEqual(actual["Trading_Days"], 3)
+        self.assertIn("Total_Return", actual)
+        self.assertIn("Ann_Return", actual)
+        self.assertIn("Ann_Vol", actual)
+        self.assertIn("Sharpe", actual)
+        self.assertIn("Max_Drawdown", actual)
+        self.assertIn("Win_Rate_Daily", actual)
+        self.assertAlmostEqual(actual["Total_Return"], expected["total_return"])
+        self.assertAlmostEqual(actual["Ann_Return"], expected["annual_return"])
+        self.assertAlmostEqual(actual["Ann_Vol"], expected["annual_vol"])
+        self.assertAlmostEqual(actual["Sharpe"], expected["sharpe"])
+        self.assertAlmostEqual(actual["Max_Drawdown"], expected["max_drawdown"])
+        self.assertAlmostEqual(actual["Win_Rate_Daily"], expected["win_rate"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,11 @@ import numpy as np
 import pandas as pd
 import requests
 
+from qqq_core.performance_metrics import (
+    performance_summary,
+    worst_period_drawdown,
+)
+
 
 # ---------------------------------------------------------------------------
 # Discord 配置常量
@@ -72,59 +77,28 @@ def compute_extended_metrics(
     if daily_returns.empty or nav.empty:
         return {}
 
-    total_ret = float(nav.iloc[-1]) - 1.0 if len(nav) > 0 else float("nan")
-    ann_ret = (1 + total_ret) ** (252 / max(1, len(daily_returns))) - 1 if len(daily_returns) > 0 else float("nan")
-    vol = daily_returns.std() * np.sqrt(252) if len(daily_returns) > 1 else float("nan")
-    sharpe = (ann_ret - rf_rate) / vol if vol and vol > 0 else float("nan")
-
-    max_dd = float((nav / nav.cummax() - 1).min()) if len(nav) > 0 else float("nan")
+    summary = performance_summary(daily_returns, rf=rf_rate, periods_per_year=252)
+    total_ret = summary["total_return"]
+    ann_ret = summary["annual_return"]
+    vol = summary["annual_vol"]
+    sharpe = summary["sharpe"]
+    max_dd = summary["max_drawdown"]
     max_dd_pct = max_dd * 100
-    calmar = ann_ret / abs(max_dd) if max_dd and max_dd != 0 else float("nan")
+    calmar = summary["calmar"]
 
     # ── 单周期最坏回撤 ──────────────────────────────────────────────
-    worst_dd = np.nan
-    worst_dd_pct = np.nan
-    if len(rebalance_returns) > 0:
-        rb_dates = rebalance_returns.index.tolist()
-        worst_val = 0.0
-        for i, rb_start in enumerate(rb_dates):
-            if i + 1 < len(rb_dates):
-                rb_end = rb_dates[i + 1]
-            else:
-                if len(nav) == 0:
-                    continue
-                rb_end = nav.index[-1]
-            period_ret = daily_returns[daily_returns.index > rb_start]
-            if i + 1 < len(rb_dates):
-                period_ret = period_ret[period_ret.index <= rb_end]
-            if len(period_ret) == 0:
-                continue
-            if rb_start in nav.index:
-                base_nav = nav.loc[rb_start]
-            else:
-                valid = nav.index[nav.index <= rb_start]
-                if len(valid) == 0:
-                    continue
-                base_nav = nav.loc[valid[-1]]
-            period_nav = (1.0 + period_ret).cumprod() * base_nav
-            cummax = period_nav.cummax()
-            dd = (period_nav - cummax) / cummax
-            dd_min = dd.min()
-            if dd_min < worst_val:
-                worst_val = dd_min
-        if worst_val < 0:
-            worst_dd = float(worst_val)
-            worst_dd_pct = worst_dd * 100
+    worst_dd, _, _ = worst_period_drawdown(daily_returns, rebalance_returns)
+    worst_dd_pct = worst_dd * 100 if not np.isnan(worst_dd) else np.nan
     # ── 单周期最坏回撤 end ──────────────��───────────────────────────
 
     win_days = int((daily_returns > 0).sum())
     total_days = len(daily_returns)
-    win_rate = win_days / total_days if total_days > 0 else float("nan")
+    win_rate = summary["win_rate"]
 
     avg_win = float(daily_returns[daily_returns > 0].mean()) if win_days > 0 else 0.0
     loss_days = int((daily_returns < 0).sum())
     avg_loss = float(daily_returns[daily_returns < 0].mean()) if loss_days > 0 else 0.0
-    profit_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else float("nan")
+    profit_loss_ratio = summary["profit_loss_ratio"]
 
     return {
         "total_return": total_ret,

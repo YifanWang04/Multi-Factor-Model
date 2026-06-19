@@ -68,12 +68,10 @@ ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
 # Only set the factor group and composite sheet here; strategy grids stay below.
 # Leave values as None to use the active profile.
 # Reset them to None before live/rebalance-day runs.
-STRATEGY_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19]          # Example: [95, 99, 27, 46, 19]
-STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
-# STRATEGY_RESEARCH_FACTOR_INDICES = None
-# STRATEGY_RESEARCH_COMPOSITE_SHEET = None
-# STRATEGY_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]          # Example: [95, 99, 27, 46, 19]
-# STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N20"       # Example: "rank_ic_m3_N20"
+# STRATEGY_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19]          # Example: [95, 99, 27, 46, 19]
+# STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
+STRATEGY_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]          # Example: [95, 99, 27, 46, 19]
+STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N20"       # Example: "rank_ic_m3_N20"
 
 def _coerce_factor_indices(value):
     if value is None:
@@ -158,14 +156,14 @@ REPORT_TIMESERIES_TOP_N = 10
 # ── 网格遍历参数 ──────────────────────────────────────────────────────────────
 
 # 分层数量：88 只股票建议 5 / 10 层；如需 15 / 20 层可自行追加
-# GROUP_NUMS = [5, 10]
-GROUP_NUMS = [5, 10, 15]
+GROUP_NUMS = [5, 10]
+# GROUP_NUMS = [5, 10, 15]
 
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
 # 每个周期优先读取 matching 的 composite_factors_P{N}_*.xlsx。
 # 注：调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制，已移除 REBALANCE_DATE_OFFSET
-REBALANCE_PERIODS = [5, 10, 20]
-# REBALANCE_PERIODS = [10]
+# REBALANCE_PERIODS = [10, 20]
+REBALANCE_PERIODS = [5, 10]
 
 COMPOSITE_FACTOR_FILES_BY_PERIOD = {
     int(period): get_composite_factor_file(int(period))

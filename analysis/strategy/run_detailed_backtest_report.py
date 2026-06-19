@@ -55,6 +55,7 @@ from portfolio_optimizer import compute_weights
 import strategy_config as cfg
 from rebalance.rebalance_operations import _nth_nyse_trading_day
 from rebalance.rebalance_report import _describe_composite_method
+from qqq_core.performance_metrics import performance_summary
 from tp_sl_exit import (
     EXIT_DYNAMIC_TP_SL,
     EXIT_FORCED_REBALANCE,
@@ -457,14 +458,14 @@ def write_detailed_report(result: dict, output_path: str) -> None:
 
     params = result.get("params", {})
     dr = result["daily_returns"]
-    nv = result["nav"]
     ret_df = result.get("_ret_df", pd.DataFrame())
     price_df = result.get("_price_df", pd.DataFrame())
-    total_ret = float(nv.iloc[-1]) - 1.0 if len(nv) > 0 else np.nan
-    ann_ret = (1 + total_ret) ** (252 / max(1, len(dr))) - 1 if len(dr) > 0 else np.nan
-    vol = dr.std() * np.sqrt(252) * 100 if len(dr) > 1 else np.nan
-    sharpe = (ann_ret - cfg.RISK_FREE_RATE) / (vol / 100) if vol and vol > 0 else np.nan
-    max_dd = (nv / nv.cummax() - 1).min() * 100 if len(nv) > 0 else np.nan
+    summary = performance_summary(dr, rf=cfg.RISK_FREE_RATE, periods_per_year=252)
+    total_ret = summary["total_return"]
+    ann_ret = summary["annual_return"]
+    vol = summary["annual_vol"] * 100 if not np.isnan(summary["annual_vol"]) else np.nan
+    sharpe = summary["sharpe"]
+    max_dd = summary["max_drawdown"] * 100 if not np.isnan(summary["max_drawdown"]) else np.nan
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         # Sheet 0: Config & Performance (merged)

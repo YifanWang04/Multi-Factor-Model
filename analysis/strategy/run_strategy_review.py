@@ -48,6 +48,7 @@ from analysis.multi_factor.composite_factor import compute_selected_composites
 
 import strategy_config as cfg
 from data.data_config import PRICE_FILE, DATA_START_OFFSET_DAYS
+from qqq_core.performance_metrics import performance_summary
 
 import strategy_review_config as rev_cfg
 
@@ -257,14 +258,14 @@ def compute_metrics(
             "Start_Date": "-",
             "End_Date": "-",
         }
-    nav = (1 + daily_returns).cumprod()
-    total_ret = float(nav.iloc[-1]) - 1.0
+    summary = performance_summary(daily_returns, rf=rf, periods_per_year=252)
+    total_ret = summary["total_return"]
     n_days = len(daily_returns)
-    ann_ret = (1 + total_ret) ** (252 / max(1, n_days)) - 1
-    vol = float(daily_returns.std() * np.sqrt(252))
-    sharpe = (ann_ret - rf) / vol if vol > 0 else np.nan
-    max_dd = float((nav / nav.cummax() - 1).min())
-    win_rate = float((daily_returns > 0).mean())
+    ann_ret = summary["annual_return"]
+    vol = summary["annual_vol"]
+    sharpe = summary["sharpe"]
+    max_dd = summary["max_drawdown"]
+    win_rate = summary["win_rate"]
     return {
         "label": label,
         "Total_Return": total_ret,
@@ -736,18 +737,14 @@ def write_review_report(
         bm_aligned = bm_r.reindex(dr.index).fillna(0)
         m_strat = compute_metrics(dr, rf=cfg.RISK_FREE_RATE, label="strategy")
         m_bm = compute_metrics(bm_aligned, rf=cfg.RISK_FREE_RATE, label="benchmark")
-        bm_nav = (1 + bm_aligned).cumprod()
-        bm_total = float(bm_nav.iloc[-1]) - 1.0
-        bm_ann = (1 + bm_total) ** (252 / max(1, len(bm_aligned))) - 1
-
         return [
             [f"=== {label} ===", ""],
             ["Period", f"{dr.index[0].date()} ~ {dr.index[-1].date()}"],
             ["Trading_Days", m_strat["Trading_Days"]],
             ["", ""],
             ["Metric", f"Strategy vs {BENCHMARK_TICKER}"],
-            ["Total_Return", f"{_fmt_pct(m_strat['Total_Return'])}  vs  {_fmt_pct(bm_total)}"],
-            ["Ann_Return", f"{_fmt_pct(m_strat['Ann_Return'])}  vs  {_fmt_pct(bm_ann)}"],
+            ["Total_Return", f"{_fmt_pct(m_strat['Total_Return'])}  vs  {_fmt_pct(m_bm['Total_Return'])}"],
+            ["Ann_Return", f"{_fmt_pct(m_strat['Ann_Return'])}  vs  {_fmt_pct(m_bm['Ann_Return'])}"],
             ["Ann_Vol", f"{_fmt_pct(m_strat['Ann_Vol'])}  vs  {_fmt_pct(m_bm['Ann_Vol'])}"],
             ["Sharpe", f"{_fmt_f(m_strat['Sharpe'], 3)}  vs  {_fmt_f(m_bm['Sharpe'], 3)}"],
             ["Max_Drawdown", f"{_fmt_pct(m_strat['Max_Drawdown'])}  vs  {_fmt_pct(m_bm['Max_Drawdown'])}"],

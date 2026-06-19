@@ -1,32 +1,29 @@
-"""
-策略绩效指标计算 (strategy_metrics.py)
-=====================================
-输入：日频组合收益率序列（daily_returns）+ 每持仓周期收益率序列（rebalance_returns）
-输出：完整绩效指标字典，供回测报表使用。
+"""Strategy performance metrics.
 
-计算指标清单：
-  近期收益  : 近1日、近1周、近1月、近3月、近半年、近1年、上一年整年
-  全周期    : 年化收益、年化波动、夏普比率
-  开仓统计  : 开仓胜率、开仓盈亏比、年化开仓次数、年化盈利次数
-  回撤      : 最大回撤、Calmar 比率、最大回撤起始日、最大回撤结束日
+Inputs:
+- ``daily_returns``: daily portfolio returns.
+- ``rebalance_returns``: per-opening-period total returns.
+
+The daily return series is the source of truth for full-period metrics.
+Opening statistics remain based on ``rebalance_returns``.
 """
 
 import numpy as np
 import pandas as pd
 
+from qqq_core.performance_metrics import (
+    annualized_return,
+    annualized_volatility,
+    calmar_ratio,
+    max_drawdown,
+    max_drawdown_info,
+    nav_from_returns,
+    sharpe_ratio,
+    worst_period_drawdown,
+)
+
 
 class StrategyMetrics:
-    """
-    绩效指标计算器。
-
-    Parameters
-    ----------
-    daily_returns     : pd.Series（index=日期，values=日收益率）
-    rebalance_returns : pd.Series（index=调仓日，values=该持仓周期总收益率）
-    rf                : float，年化无风险利率，默认 0.02
-    periods_per_year  : int，日频=252
-    """
-
     def __init__(
         self,
         daily_returns: pd.Series,
@@ -40,17 +37,11 @@ class StrategyMetrics:
         self.ppy = periods_per_year
         self._nav: pd.Series | None = None
 
-    # ------------------------------------------------------------------
-    # 公开接口
-    # ------------------------------------------------------------------
-
     def compute_all(self) -> dict:
         if len(self.rets) == 0:
             return self._empty()
 
         m: dict = {}
-
-        # ── 近期收益 ──────────────────────────────────────────────────
         m["ret_1d"] = self._tail_ret(1)
         m["ret_1w"] = self._tail_ret(5)
         m["ret_1m"] = self._tail_ret(21)
@@ -59,24 +50,20 @@ class StrategyMetrics:
         m["ret_1y"] = self._tail_ret(252)
         m["ret_last_year"] = self._last_full_year_ret()
 
-        # ── 全周期指标 ─────────────────────────────────────────────────
         m["annual_return"] = self._annual_return()
         m["annual_vol"] = self._annual_vol()
         m["sharpe"] = self._sharpe()
 
-        # ── 开仓统计（基于调仓周期收益） ──────────────────────────────
         m["open_win_rate"] = self._open_win_rate()
         m["open_pl_ratio"] = self._open_pl_ratio()
         m["annual_open_count"] = self._annual_open_count()
         m["annual_profit_count"] = self._annual_profit_count()
 
-        # ── 回撤 ──────────────────────────────────────────────────────
         m["max_drawdown"] = self._max_drawdown()
         m["calmar"] = self._calmar()
         dd_start, dd_end = self._max_dd_dates()
         m["max_dd_start"] = dd_start
         m["max_dd_end"] = dd_end
-        # 单持仓周期最坏回撤（所有调仓周期内各自的最大回撤，取最差值）
         wp_dd, wp_start, wp_end = self._worst_period_drawdown()
         m["worst_period_drawdown"] = wp_dd
         m["worst_period_dd_start"] = wp_start
@@ -84,19 +71,11 @@ class StrategyMetrics:
 
         return m
 
-    # ------------------------------------------------------------------
-    # 净值曲线（懒加载）
-    # ------------------------------------------------------------------
-
     @property
     def nav(self) -> pd.Series:
         if self._nav is None:
-            self._nav = (1.0 + self.rets).cumprod()
+            self._nav = nav_from_returns(self.rets)
         return self._nav
-
-    # ------------------------------------------------------------------
-    # 近期收益
-    # ------------------------------------------------------------------
 
     def _tail_ret(self, n_days: int) -> float:
         tail = self.rets.iloc[-n_days:]
@@ -105,7 +84,6 @@ class StrategyMetrics:
         return float((1.0 + tail).prod() - 1.0)
 
     def _last_full_year_ret(self) -> float:
-        """上一个完整日历年（例如 2025-01-01 ~ 2025-12-31）的收益率。"""
         if len(self.rets) == 0:
             return np.nan
         last_year = self.rets.index[-1].year - 1
@@ -114,35 +92,14 @@ class StrategyMetrics:
             return np.nan
         return float((1.0 + yr).prod() - 1.0)
 
-    # ------------------------------------------------------------------
-    # 全周期指标
-    # ------------------------------------------------------------------
-
     def _annual_return(self) -> float:
-        n = len(self.nav)
-        if n < 2:
-            return np.nan
-        total = float(self.nav.iloc[-1] / self.nav.iloc[0])
-        n_years = n / self.ppy
-        if n_years <= 0:
-            return np.nan
-        return float(total ** (1.0 / n_years) - 1.0)
+        return annualized_return(self.rets, self.ppy)
 
     def _annual_vol(self) -> float:
-        if len(self.rets) < 2:
-            return np.nan
-        return float(self.rets.std() * np.sqrt(self.ppy))
+        return annualized_volatility(self.rets, self.ppy)
 
     def _sharpe(self) -> float:
-        ar = self._annual_return()
-        av = self._annual_vol()
-        if np.isnan(ar) or np.isnan(av) or av < 1e-10:
-            return np.nan
-        return float((ar - self.rf) / av)
-
-    # ------------------------------------------------------------------
-    # 开仓统计
-    # ------------------------------------------------------------------
+        return sharpe_ratio(self.rets, self.rf, self.ppy)
 
     def _open_win_rate(self) -> float:
         if len(self.rb_rets) == 0:
@@ -173,99 +130,18 @@ class StrategyMetrics:
         n_profit = int((self.rb_rets > 0).sum())
         return float(n_profit / n_years) if n_years > 0 else np.nan
 
-    # ------------------------------------------------------------------
-    # 回撤
-    # ------------------------------------------------------------------
-
     def _max_drawdown(self) -> float:
-        if len(self.nav) == 0:
-            return np.nan
-        cummax = self.nav.cummax()
-        dd = (self.nav - cummax) / cummax
-        return float(dd.min())
+        return max_drawdown(self.rets)
 
     def _calmar(self) -> float:
-        ar = self._annual_return()
-        mdd = self._max_drawdown()
-        if np.isnan(ar) or np.isnan(mdd) or mdd >= 0.0:
-            return np.nan
-        return float(-ar / mdd)
+        return calmar_ratio(self.rets, self.ppy)
 
     def _max_dd_dates(self) -> tuple:
-        """返回 (最大回撤起始日, 最大回撤结束日)。"""
-        if len(self.nav) < 2:
-            return np.nan, np.nan
-        cummax = self.nav.cummax()
-        dd = (self.nav - cummax) / cummax
-        dd_end = dd.idxmin()
-        dd_start = self.nav.loc[:dd_end].idxmax()
+        _, dd_start, dd_end = max_drawdown_info(self.rets)
         return dd_start, dd_end
 
     def _worst_period_drawdown(self) -> tuple:
-        """
-        返回 (单周期最坏回撤, 该回撤起始日, 该回撤结束日)。
-        对每个持仓区间（调仓日 → 下一调仓日）分别计算期间最大回撤，
-        取所有区间中最差（最负）的一次。
-        """
-        if len(self.rets) == 0 or len(self.rb_rets) == 0:
-            return np.nan, np.nan, np.nan
-
-        rb_dates = self.rb_rets.index.tolist()
-        ret_index = self.rets.index
-        ret_values = self.rets.to_numpy(dtype=float, copy=False)
-        nav = self.nav
-        nav_index = nav.index
-        nav_values = nav.to_numpy(dtype=float, copy=False)
-
-        worst_dd = 0.0       # 越大越好的初始值（回撤 ≤ 0）
-        worst_start = np.nan
-        worst_end = np.nan
-
-        for i, rb_start in enumerate(rb_dates):
-            if i + 1 < len(rb_dates):
-                rb_end = rb_dates[i + 1]
-                end_pos = ret_index.searchsorted(rb_end, side="right")
-            else:
-                if len(nav_index) == 0:
-                    continue
-                end_pos = len(ret_index)
-
-            start_pos = ret_index.searchsorted(rb_start, side="right")
-            if start_pos >= end_pos:
-                continue
-
-            # 保持原有口径：若 rb_start 前没有组合净值，则跳过该区间。
-            base_pos = nav_index.searchsorted(rb_start, side="right") - 1
-            if base_pos < 0:
-                continue
-            base_nav = nav_values[base_pos]
-
-            period_values = ret_values[start_pos:end_pos]
-            period_nav = np.cumprod(1.0 + period_values) * base_nav
-            if period_nav.size == 0:
-                continue
-
-            cummax = np.maximum.accumulate(period_nav)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                dd = (period_nav - cummax) / cummax
-            if np.all(np.isnan(dd)):
-                continue
-
-            dd_pos = int(np.nanargmin(dd))
-            dd_min = float(dd[dd_pos])
-            if dd_min < worst_dd:
-                worst_dd = dd_min
-                worst_end = ret_index[start_pos + dd_pos]
-                start_rel_pos = int(np.nanargmax(period_nav[:dd_pos + 1]))
-                worst_start = ret_index[start_pos + start_rel_pos]
-
-        if worst_dd == 0.0 and np.isnan(worst_end):
-            return 0.0, np.nan, np.nan
-        return float(worst_dd), worst_start, worst_end
-
-    # ------------------------------------------------------------------
-    # 空指标字典（无收益数据时的占位）
-    # ------------------------------------------------------------------
+        return worst_period_drawdown(self.rets, self.rb_rets)
 
     @staticmethod
     def _empty() -> dict:
@@ -279,15 +155,7 @@ class StrategyMetrics:
         return {k: np.nan for k in keys}
 
 
-# ---------------------------------------------------------------------------
-# 便捷函数：从回测结果字典批量计算指标
-# ---------------------------------------------------------------------------
-
 def compute_all_metrics(results: dict, rf: float = 0.02) -> dict:
-    """
-    输入 {strategy_name: result_dict}（来自 StrategyBacktester.run_grid()），
-    返回 {strategy_name: metrics_dict}。
-    """
     all_metrics = {}
     for name, res in results.items():
         calc = StrategyMetrics(
