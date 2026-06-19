@@ -27,6 +27,26 @@ python analysis/multi_factor/run_composite_factor.py
 python analysis/strategy/run_strategy.py
 ```
 
+Performance mode:
+
+```powershell
+$env:QQQ_MAX_WORKERS = "8"        # set to "1" to force serial execution
+python pipeline/build_factors.py
+python pipeline/data_process.py
+python analysis/strategy/run_strategy.py
+python analysis/multi_factor/run_composite_factor.py
+python analysis/single_factor/run_multi_factor_test.py
+```
+
+The heavy research loops use `QQQ_MAX_WORKERS` for process-level parallelism and
+reuse workbook-derived DataFrames through a pickle cache under `output/cache/`.
+Set `QQQ_DISABLE_CACHE=1` to bypass the cache, or `QQQ_CACHE_DIR=<path>` to
+store it elsewhere.
+`run_strategy.py` keeps all parameter combinations in the statistics sheet, but
+limits the daily/cumulative return time-series sheets to the top
+`REPORT_TIMESERIES_TOP_N` strategies by Sharpe by default. Set that config value
+to `None` or `0` to export every strategy time series.
+
 Live/rebalance-day pipeline:
 
 ```powershell

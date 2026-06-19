@@ -210,52 +210,54 @@ class StrategyMetrics:
         if len(self.rets) == 0 or len(self.rb_rets) == 0:
             return np.nan, np.nan, np.nan
 
-        # rebalance_returns 的 index 是调仓日，values 是区间总收益率
         rb_dates = self.rb_rets.index.tolist()
+        ret_index = self.rets.index
+        ret_values = self.rets.to_numpy(dtype=float, copy=False)
+        nav = self.nav
+        nav_index = nav.index
+        nav_values = nav.to_numpy(dtype=float, copy=False)
 
         worst_dd = 0.0       # 越大越好的初始值（回撤 ≤ 0）
         worst_start = np.nan
         worst_end = np.nan
 
         for i, rb_start in enumerate(rb_dates):
-            # 该区间的日频收益率切片
             if i + 1 < len(rb_dates):
                 rb_end = rb_dates[i + 1]
+                end_pos = ret_index.searchsorted(rb_end, side="right")
             else:
-                # 最后一个区间：到 nav 最后一个日期
-                if len(self.nav) == 0:
+                if len(nav_index) == 0:
                     continue
-                rb_end = self.nav.index[-1]
+                end_pos = len(ret_index)
 
-            period_ret = self.rets[self.rets.index > rb_start]
-            if i + 1 < len(rb_dates):
-                period_ret = period_ret[period_ret.index <= rb_end]
-
-            if len(period_ret) == 0:
+            start_pos = ret_index.searchsorted(rb_start, side="right")
+            if start_pos >= end_pos:
                 continue
 
-            # 从买入时刻（rb_start 的净值）起计算期间最大回撤
-            if rb_start in self.nav.index:
-                base_nav = self.nav.loc[rb_start]
-            else:
-                # 找不到精确 rb_start，用最近的前序日期净值
-                valid = self.nav.index[self.nav.index <= rb_start]
-                if len(valid) == 0:
-                    continue
-                base_nav = self.nav.loc[valid[-1]]
+            # 保持原有口径：若 rb_start 前没有组合净值，则跳过该区间。
+            base_pos = nav_index.searchsorted(rb_start, side="right") - 1
+            if base_pos < 0:
+                continue
+            base_nav = nav_values[base_pos]
 
-            period_nav = (1.0 + period_ret).cumprod() * base_nav
-            if len(period_nav) == 0:
+            period_values = ret_values[start_pos:end_pos]
+            period_nav = np.cumprod(1.0 + period_values) * base_nav
+            if period_nav.size == 0:
                 continue
 
-            cummax = period_nav.cummax()
-            dd = (period_nav - cummax) / cummax
-            dd_min = dd.min()
+            cummax = np.maximum.accumulate(period_nav)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                dd = (period_nav - cummax) / cummax
+            if np.all(np.isnan(dd)):
+                continue
 
+            dd_pos = int(np.nanargmin(dd))
+            dd_min = float(dd[dd_pos])
             if dd_min < worst_dd:
                 worst_dd = dd_min
-                worst_end = dd.idxmin()
-                worst_start = period_nav.loc[:worst_end].idxmax() if len(period_nav.loc[:worst_end]) > 0 else np.nan
+                worst_end = ret_index[start_pos + dd_pos]
+                start_rel_pos = int(np.nanargmax(period_nav[:dd_pos + 1]))
+                worst_start = ret_index[start_pos + start_rel_pos]
 
         if worst_dd == 0.0 and np.isnan(worst_end):
             return 0.0, np.nan, np.nan

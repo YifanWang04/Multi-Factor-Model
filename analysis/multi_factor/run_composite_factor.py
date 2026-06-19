@@ -37,11 +37,13 @@ from composite_config import (
 from composite_factor import compute_all_composites, compute_selected_composites
 from rebalance_manager import RebalancePeriodManager
 from run_multi_factor_test import (
-    load_return_data, load_factor,
+    load_return_data_cached as load_return_data, load_factor_cached as load_factor,
     run_one_factor_one_period,
     build_sheet1_df, build_sheet2_df, build_long_excess_df, build_long_cumret_df,
     write_excel_with_format, filter_factor_ret_by_lookback,
 )
+from qqq_core.data_cache import print_cache_summary
+from qqq_core.parallel import ordered_parallel_map
 
 try:
     import openpyxl
@@ -157,13 +159,26 @@ def main():
     periods = _resolve_rebalance_periods()
     print(f"复合因子调仓周期: {periods}")
 
-    for rebalance_period in periods:
-        _run_one_rebalance_period(
-            factor_dict=factor_dict,
-            ret=ret,
-            factor_suffix=factor_suffix,
-            rebalance_period=rebalance_period,
-        )
+    tasks = [
+        (factor_dict, ret, factor_suffix, rebalance_period)
+        for rebalance_period in periods
+    ]
+    ordered_parallel_map(
+        _run_one_rebalance_period_worker,
+        tasks,
+        label="composite_periods",
+    )
+    print_cache_summary()
+
+
+def _run_one_rebalance_period_worker(task):
+    factor_dict, ret, factor_suffix, rebalance_period = task
+    return _run_one_rebalance_period(
+        factor_dict=factor_dict,
+        ret=ret,
+        factor_suffix=factor_suffix,
+        rebalance_period=rebalance_period,
+    )
 
 
 def _run_one_rebalance_period(factor_dict, ret, factor_suffix: str, rebalance_period: int):
@@ -239,7 +254,23 @@ def _run_one_rebalance_period(factor_dict, ret, factor_suffix: str, rebalance_pe
     records = []
     records_3M, records_6M, records_1Y = [], [], []
     total = len(composite_dict)
-    for i, (name, comp_df) in enumerate(composite_dict.items()):
+    tasks = [
+        (i, total, name, comp_df, ret_periods, config, rebalance_period)
+        for i, (name, comp_df) in enumerate(composite_dict.items(), start=1)
+    ]
+    backtest_results = ordered_parallel_map(
+        _run_composite_backtest_bundle,
+        tasks,
+        label=f"composite_backtests_P{rebalance_period}",
+    )
+    for name, rec, rec_3m, rec_6m, rec_1y in backtest_results:
+        factor_names.append(name)
+        records.append(rec)
+        records_3M.append(rec_3m)
+        records_6M.append(rec_6m)
+        records_1Y.append(rec_1y)
+
+    for i, (name, comp_df) in enumerate([]):
         print(f"[{i+1}/{total}] 回测复合因子: {name}")
         # comp_df 已是调仓期截面 DataFrame，直接用 run_one_factor_one_period
         # 但该函数内部会再做一次 RebalancePeriodManager 对齐，
@@ -380,6 +411,20 @@ def _run_composite_backtest(comp_df, ret_periods, config, rebalance_period: int)
         "group_returns": group_returns,
         "ret_periods": rp,
     }
+
+
+def _run_composite_backtest_bundle(task):
+    """Worker payload for one composite sheet across full/3M/6M/1Y windows."""
+    i, total, name, comp_df, ret_periods, config, rebalance_period = task
+    print(f"[{i}/{total}] 回测复合因子: {name}", flush=True)
+    rec = _run_composite_backtest(comp_df, ret_periods, config, rebalance_period)
+    window_records = []
+    for lb_months in (3, 6, 12):
+        comp_filt, ret_filt = filter_factor_ret_by_lookback(comp_df, ret_periods, lb_months)
+        window_records.append(
+            _run_composite_backtest(comp_filt, ret_filt, config, rebalance_period)
+        )
+    return name, rec, window_records[0], window_records[1], window_records[2]
 
 
 if __name__ == "__main__":

@@ -34,11 +34,7 @@ for _p in [_HERE, _SF_DIR, _ROOT]:
 
 # ── 本地模块 ──────────────────────────────────────────────────────────────────
 import strategy_config as cfg
-from strategy_backtest import (
-    CompositeCalendarError,
-    StrategyBacktester,
-    _select_rebalance_dates,
-)
+from strategy_backtest import CompositeCalendarError, StrategyBacktester, _select_rebalance_dates
 from strategy_metrics import compute_all_metrics
 from strategy_report import StrategyReporter
 
@@ -81,33 +77,6 @@ def _minimum_requested_rebalance_period(config) -> int:
     return min(periods)
 
 
-def _assert_composite_calendar_supports_strategy_grid(
-    factor_dfs_by_period: dict[int, pd.DataFrame],
-    ret_df: pd.DataFrame,
-    config,
-) -> None:
-    """Fail before grid search if the composite calendar is too coarse."""
-
-    for period in sorted({int(x) for x in getattr(config, "REBALANCE_PERIODS", [])}):
-        factor_df = factor_dfs_by_period[period]
-        try:
-            _select_rebalance_dates(factor_df.index, ret_df.index, period)
-        except CompositeCalendarError as exc:
-            source = getattr(config, "COMPOSITE_FACTOR_FILES_BY_PERIOD", {}).get(
-                period,
-                getattr(config, "COMPOSITE_FACTOR_FILE", ""),
-            )
-            raise CompositeCalendarError(
-                f"{exc}\n\n"
-                f"当前 run_strategy 需要 P{period}d，但复合因子文件 {source} "
-                "的日期频率更粗。\n"
-                "不能从 P10 复合因子恢复 P5 信号；请先重新生成匹配频率的复合因子：\n"
-                "  python analysis/multi_factor/run_composite_factor.py\n"
-                "然后再运行：\n"
-                "  python analysis/strategy/run_strategy.py"
-            ) from exc
-
-
 def _load_composite_factors_for_strategy_periods(config) -> dict[int, pd.DataFrame]:
     factors = {}
     files_by_period = getattr(config, "COMPOSITE_FACTOR_FILES_BY_PERIOD", {})
@@ -121,6 +90,31 @@ def _load_composite_factors_for_strategy_periods(config) -> dict[int, pd.DataFra
         print(f"      因子形状: {df.shape}  日期范围: {df.index[0].date()} ~ {df.index[-1].date()}")
         factors[period] = df
     return factors
+
+
+def _assert_composite_calendar_supports_strategy_grid(
+    factor_dfs_by_period: dict[int, pd.DataFrame],
+    ret_df: pd.DataFrame,
+    config,
+) -> None:
+    for period in sorted({int(x) for x in getattr(config, "REBALANCE_PERIODS", [])}):
+        factor_df = factor_dfs_by_period[period]
+        try:
+            _select_rebalance_dates(factor_df.index, ret_df.index, period)
+        except CompositeCalendarError as exc:
+            source = getattr(config, "COMPOSITE_FACTOR_FILES_BY_PERIOD", {}).get(
+                period,
+                getattr(config, "COMPOSITE_FACTOR_FILE", ""),
+            )
+            raise CompositeCalendarError(
+                f"{exc}\n\n"
+                f"当前 run_strategy 需要 P{period}d，但复合因子文件 {source} "
+                "的日期频率更粗。\n"
+                "不能从更粗周期的复合因子恢复更细周期信号；请先重新生成匹配频率的复合因子：\n"
+                "  python analysis/multi_factor/run_composite_factor.py\n"
+                "然后再运行：\n"
+                "  python analysis/strategy/run_strategy.py"
+            ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -137,18 +131,22 @@ def main():
     print("=" * 64)
 
     # ── 1. 加载复合因子 ────────────────────────────────────────────────
+    print(f"\n[1/4] 加载复合因子: {cfg.COMPOSITE_FACTOR_SHEET}")
     factor_dfs_by_period = _load_composite_factors_for_strategy_periods(cfg)
     min_period = _minimum_requested_rebalance_period(cfg)
     factor_df = factor_dfs_by_period[min_period]
+    if factor_df.empty or len(factor_df) == 0:
+        raise ValueError("复合因子数据为空，请检查 COMPOSITE_FACTOR_FILE 与 COMPOSITE_FACTOR_SHEET")
+    print(f"      因子形状: {factor_df.shape}  "
+          f"日期范围: {factor_df.index[0].date()} ~ {factor_df.index[-1].date()}")
 
     # ── 2. 加载日频收益率 ──────────────────────────────────────────────
     print(f"\n[2/4] 加载日频收益率: {os.path.basename(cfg.PRICE_FILE)}")
     ret_df = load_return_data(cfg.PRICE_FILE, cfg.RETURN_COLUMN)
     ret_df.sort_index(inplace=True)
+    _assert_composite_calendar_supports_strategy_grid(factor_dfs_by_period, ret_df, cfg)
     print(f"      收益率形状: {ret_df.shape}  "
           f"日期范围: {ret_df.index[0].date()} ~ {ret_df.index[-1].date()}")
-
-    _assert_composite_calendar_supports_strategy_grid(factor_dfs_by_period, ret_df, cfg)
 
     # ── 参数组合数预览 ─────────────────────────────────────────────────
     print(f"\n[3/5] Loading Adj Close prices: {os.path.basename(cfg.PRICE_FILE)}")

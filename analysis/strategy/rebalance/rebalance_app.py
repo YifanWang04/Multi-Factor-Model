@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import os
 import sys
+import glob
 import shutil
 import subprocess
 from datetime import datetime
@@ -263,7 +264,7 @@ def _get_run_dir(run_dir_arg: Optional[str], skip_pipeline: bool) -> str:
     return str(_PATHS.make_rebalance_run_dir(ACTIVE_STRATEGY_PROFILE))
 
 
-def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
+def _sync_composite_factor_to_standard_legacy(run_dir: str, sheet: str) -> None:
     """
     将 Pipeline 生成的复合因子同步到标准路径，使 run_detailed_backtest_report.py 使用最新数据。
     原子写保护：使用 NamedTemporaryFile(suffix=".xlsx") + os.replace() 原子替换，
@@ -310,6 +311,81 @@ def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
+
+def _sync_selected_composite_sheet(src: str, dst: str, sheet: str) -> pd.DataFrame:
+    """Copy one composite sheet from src to dst while preserving other dst sheets."""
+    import tempfile
+
+    src_df = pd.read_excel(src, sheet_name=sheet, index_col=0)
+    src_df.index = pd.to_datetime(src_df.index)
+    src_df = src_df.apply(pd.to_numeric, errors="coerce")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+
+    existing_sheets: dict[str, pd.DataFrame] = {}
+    if os.path.isfile(dst):
+        try:
+            existing_sheets = pd.read_excel(dst, sheet_name=None, index_col=0)
+        except Exception:
+            existing_sheets = {}
+
+    with tempfile.NamedTemporaryFile(
+        suffix=".xlsx",
+        delete=False,
+        dir=os.path.dirname(dst),
+    ) as tf:
+        tmp_path = tf.name
+
+    try:
+        with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+            for name, df in existing_sheets.items():
+                if name == sheet:
+                    continue
+                df.to_excel(writer, sheet_name=name)
+            src_df.to_excel(writer, sheet_name=sheet)
+        os.replace(tmp_path, dst)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+
+    return src_df
+
+
+def _sync_composite_factor_to_standard(run_dir: str, sheet: str) -> None:
+    """
+    Sync the selected composite sheet from a rebalance run into standard outputs.
+
+    run_strategy.py reads period-specific standard workbooks, so this updates
+    both the legacy compatibility workbook and P5/P10/P20 workbooks.
+    """
+    legacy_src = composite_factors_path(run_dir, SELECTED_FACTOR_INDICES)
+    legacy_dst = os.path.join(COMPOSITE_FACTOR_OUTPUT_DIR, os.path.basename(legacy_src))
+    sync_pairs = [(legacy_src, legacy_dst)]
+
+    run_composite_dir = os.path.join(run_dir, "composite_factor_reports")
+    suffix = os.path.basename(legacy_src).replace("composite_factors_", "", 1)
+    period_pattern = os.path.join(run_composite_dir, f"composite_factors_P*_{suffix}")
+    for src in sorted(glob.glob(period_pattern)):
+        dst = os.path.join(COMPOSITE_FACTOR_OUTPUT_DIR, os.path.basename(src))
+        sync_pairs.append((src, dst))
+
+    synced = 0
+    try:
+        for src, dst in sync_pairs:
+            if not os.path.isfile(src):
+                print(f"  [同步跳过] 源文件不存在: {src}")
+                continue
+
+            src_df = _sync_selected_composite_sheet(src, dst, sheet)
+            synced += 1
+            print(f"  [同步完成] 复合因子 {sheet} 已更新至: {dst}")
+            print(f"             因子日期范围: {src_df.index[0].date()} ~ {src_df.index[-1].date()}")
+
+        if synced == 0:
+            print(f"  [同步跳过] run_dir 下未找到可同步的复合因子: {run_dir}")
+    except Exception as e:
+        print(f"  [同步警告] 同步复合因子失败（不影响本次调仓报表）: {e}")
+
 
 def main(
     skip_pipeline: bool = False,

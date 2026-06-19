@@ -143,6 +143,34 @@ class RiskFixTests(unittest.TestCase):
             self.assertEqual(float(frames["close"].loc[pd.Timestamp("2026-01-02"), "AAPL"]), 5.5)
             self.assertNotIn("NOT_IN_UNIVERSE", frames["close"].columns)
 
+    def test_mad_winsorize_preserves_zero_mad_rows(self):
+        if "pandas_market_calendars" not in sys.modules:
+            import types
+
+            fake_mcal = types.ModuleType("pandas_market_calendars")
+            fake_mcal.get_calendar = lambda name: None
+            sys.modules["pandas_market_calendars"] = fake_mcal
+
+        from pipeline.data_process import mad_winsorize, process_factor_df
+
+        dates = pd.to_datetime(["2026-01-02", "2026-01-05"])
+        raw = pd.DataFrame(
+            {
+                "AAA": [1.0, 1.0],
+                "BBB": [1.0, 1.0],
+                "CCC": [1.0, 10.0],
+                "DDD": [1.0, 1.0],
+            },
+            index=dates,
+        )
+
+        winsorized = mad_winsorize(raw)
+        pd.testing.assert_frame_equal(winsorized, raw)
+
+        processed = process_factor_df(raw)
+        self.assertAlmostEqual(float(processed.loc[dates[1], "CCC"]), 1.5)
+        self.assertAlmostEqual(float(processed.loc[dates[1], "AAA"]), -0.5)
+
     def test_strategy_price_loader_filters_extra_sheets(self):
         from analysis.strategy.strategy_utils import load_price_data
         from analysis.single_factor.run_multi_factor_test import load_return_data
@@ -264,6 +292,65 @@ class RiskFixTests(unittest.TestCase):
             3,
         )
 
+    def test_run_strategy_loads_matching_composite_for_each_period(self):
+        import types
+
+        if "pandas_market_calendars" not in sys.modules:
+            fake_mcal = types.ModuleType("pandas_market_calendars")
+            fake_mcal.get_calendar = lambda name: None
+            sys.modules["pandas_market_calendars"] = fake_mcal
+        if "scipy" not in sys.modules:
+            fake_scipy = types.ModuleType("scipy")
+            fake_optimize = types.ModuleType("scipy.optimize")
+            fake_stats = types.ModuleType("scipy.stats")
+            fake_optimize.minimize = lambda *args, **kwargs: None
+            fake_stats.spearmanr = lambda *args, **kwargs: (np.nan, np.nan)
+            fake_stats.skew = lambda *args, **kwargs: np.nan
+            fake_stats.kurtosis = lambda *args, **kwargs: np.nan
+            fake_stats.ttest_1samp = lambda *args, **kwargs: (np.nan, np.nan)
+            fake_scipy.optimize = fake_optimize
+            fake_scipy.stats = fake_stats
+            sys.modules["scipy"] = fake_scipy
+            sys.modules["scipy.optimize"] = fake_optimize
+            sys.modules["scipy.stats"] = fake_stats
+
+        import analysis.strategy.run_strategy as run_strategy
+
+        cfg = type(
+            "Cfg",
+            (),
+            {
+                "REBALANCE_PERIODS": [5, 10],
+                "COMPOSITE_FACTOR_FILES_BY_PERIOD": {
+                    5: "composite_factors_P5.xlsx",
+                    10: "composite_factors_P10.xlsx",
+                },
+                "COMPOSITE_FACTOR_FILE": "composite_factors.xlsx",
+                "COMPOSITE_FACTOR_SHEET": "ic_m3_N20",
+            },
+        )
+        dates = pd.bdate_range("2026-01-01", periods=20)
+        frames = {
+            "composite_factors_P5.xlsx": pd.DataFrame({"AAPL": 1.0}, index=dates[::5]),
+            "composite_factors_P10.xlsx": pd.DataFrame({"AAPL": 1.0}, index=dates[::10]),
+        }
+        calls = []
+        old_loader = run_strategy.load_composite_factor
+        run_strategy.load_composite_factor = lambda path, sheet: calls.append((path, sheet)) or frames[path]
+        try:
+            got = run_strategy._load_composite_factors_for_strategy_periods(cfg)
+        finally:
+            run_strategy.load_composite_factor = old_loader
+
+        self.assertEqual(set(got), {5, 10})
+        self.assertEqual(
+            calls,
+            [
+                ("composite_factors_P5.xlsx", "ic_m3_N20"),
+                ("composite_factors_P10.xlsx", "ic_m3_N20"),
+            ],
+        )
+
     def test_strategy_grid_expands_max_weight_grid_as_scalars(self):
         from analysis.strategy.strategy_backtest import StrategyBacktester
 
@@ -327,6 +414,94 @@ class RiskFixTests(unittest.TestCase):
             self.assertEqual(float(got.iloc[0, 0]), 2.0)
             leftovers = [name for name in os.listdir(tmp) if name != "composite.xlsx"]
             self.assertEqual(leftovers, [])
+
+    def test_rebalance_sync_replaces_selected_sheet_and_preserves_others(self):
+        import types
+
+        if "pandas_market_calendars" not in sys.modules:
+            fake_mcal = types.ModuleType("pandas_market_calendars")
+            fake_mcal.get_calendar = lambda name: None
+            sys.modules["pandas_market_calendars"] = fake_mcal
+        if "scipy" not in sys.modules:
+            fake_scipy = types.ModuleType("scipy")
+            fake_optimize = types.ModuleType("scipy.optimize")
+            fake_stats = types.ModuleType("scipy.stats")
+            fake_optimize.minimize = lambda *args, **kwargs: None
+            fake_stats.spearmanr = lambda *args, **kwargs: (np.nan, np.nan)
+            fake_stats.skew = lambda *args, **kwargs: np.nan
+            fake_stats.kurtosis = lambda *args, **kwargs: np.nan
+            fake_stats.ttest_1samp = lambda *args, **kwargs: (np.nan, np.nan)
+            fake_scipy.optimize = fake_optimize
+            fake_scipy.stats = fake_stats
+            sys.modules["scipy"] = fake_scipy
+            sys.modules["scipy.optimize"] = fake_optimize
+            sys.modules["scipy.stats"] = fake_stats
+        if "yfinance" not in sys.modules:
+            sys.modules["yfinance"] = types.ModuleType("yfinance")
+        if "requests" not in sys.modules:
+            fake_requests = types.ModuleType("requests")
+            fake_requests.post = lambda *args, **kwargs: None
+            sys.modules["requests"] = fake_requests
+
+        from analysis.strategy.rebalance import rebalance_app
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "src.xlsx")
+            dst = os.path.join(tmp, "dst.xlsx")
+            idx = [pd.Timestamp("2026-01-02")]
+            with pd.ExcelWriter(src) as writer:
+                pd.DataFrame({"AAPL": [2.0]}, index=idx).to_excel(writer, sheet_name="ic_m3_N20")
+            with pd.ExcelWriter(dst) as writer:
+                pd.DataFrame({"AAPL": [1.0]}, index=idx).to_excel(writer, sheet_name="ic_m3_N20")
+                pd.DataFrame({"AAPL": [9.0]}, index=idx).to_excel(writer, sheet_name="other")
+
+            rebalance_app._sync_selected_composite_sheet(src, dst, "ic_m3_N20")
+
+            selected = pd.read_excel(dst, sheet_name="ic_m3_N20", index_col=0)
+            other = pd.read_excel(dst, sheet_name="other", index_col=0)
+            self.assertEqual(float(selected.iloc[0, 0]), 2.0)
+            self.assertEqual(float(other.iloc[0, 0]), 9.0)
+            leftovers = [name for name in os.listdir(tmp) if name not in {"src.xlsx", "dst.xlsx"}]
+            self.assertEqual(leftovers, [])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = os.path.join(tmp, "run")
+            std_dir = os.path.join(tmp, "standard")
+            run_reports = os.path.join(run_dir, "composite_factor_reports")
+            os.makedirs(run_reports)
+            os.makedirs(std_dir)
+            idx = [pd.Timestamp("2026-01-02")]
+
+            legacy_src = os.path.join(run_reports, "composite_factors_f95.xlsx")
+            p10_src = os.path.join(run_reports, "composite_factors_P10_f95.xlsx")
+            p10_dst = os.path.join(std_dir, "composite_factors_P10_f95.xlsx")
+            with pd.ExcelWriter(legacy_src) as writer:
+                pd.DataFrame({"AAPL": [3.0]}, index=idx).to_excel(writer, sheet_name="ic_m3_N20")
+            with pd.ExcelWriter(p10_src) as writer:
+                pd.DataFrame({"AAPL": [4.0]}, index=idx).to_excel(writer, sheet_name="ic_m3_N20")
+            with pd.ExcelWriter(p10_dst) as writer:
+                pd.DataFrame({"AAPL": [1.0]}, index=idx).to_excel(writer, sheet_name="ic_m3_N20")
+                pd.DataFrame({"AAPL": [8.0]}, index=idx).to_excel(writer, sheet_name="other")
+
+            old_output_dir = rebalance_app.COMPOSITE_FACTOR_OUTPUT_DIR
+            old_indices = rebalance_app.SELECTED_FACTOR_INDICES
+            rebalance_app.COMPOSITE_FACTOR_OUTPUT_DIR = std_dir
+            rebalance_app.SELECTED_FACTOR_INDICES = [95]
+            try:
+                rebalance_app._sync_composite_factor_to_standard(run_dir, "ic_m3_N20")
+            finally:
+                rebalance_app.COMPOSITE_FACTOR_OUTPUT_DIR = old_output_dir
+                rebalance_app.SELECTED_FACTOR_INDICES = old_indices
+
+            legacy_dst = os.path.join(std_dir, "composite_factors_f95.xlsx")
+            self.assertTrue(os.path.isfile(legacy_dst))
+            self.assertFalse(os.path.exists(os.path.join(std_dir, "composite_factor_reports")))
+            legacy = pd.read_excel(legacy_dst, sheet_name="ic_m3_N20", index_col=0)
+            selected = pd.read_excel(p10_dst, sheet_name="ic_m3_N20", index_col=0)
+            other = pd.read_excel(p10_dst, sheet_name="other", index_col=0)
+            self.assertEqual(float(legacy.iloc[0, 0]), 3.0)
+            self.assertEqual(float(selected.iloc[0, 0]), 4.0)
+            self.assertEqual(float(other.iloc[0, 0]), 8.0)
 
     def test_strategy_entrypoints_use_active_profile_config(self):
         from qqq_config.strategy_profiles import get_active_profile

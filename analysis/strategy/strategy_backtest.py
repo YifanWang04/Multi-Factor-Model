@@ -24,6 +24,7 @@
 
 import sys
 import os
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -43,6 +44,7 @@ from tp_sl_exit import (
     event_counts,
     normalize_exit_policy,
 )
+from qqq_core.parallel import get_max_workers, ordered_parallel_map
 
 
 class CompositeCalendarError(ValueError):
@@ -173,6 +175,36 @@ class StrategyBacktester:
         """
         combinations = self._all_combinations()
         total = len(combinations)
+        config_snapshot = _strategy_config_snapshot(self.config)
+        worker_count = get_max_workers(total)
+        combo_tasks = [
+            (idx, combo, self._should_tag_max_weight(combo[3]))
+            for idx, combo in enumerate(combinations, start=1)
+        ]
+        chunk_size = max(1, int(np.ceil(len(combo_tasks) / max(1, worker_count))))
+        chunks = [
+            combo_tasks[i:i + chunk_size]
+            for i in range(0, len(combo_tasks), chunk_size)
+        ]
+        tasks = [
+            (
+                chunk,
+                total,
+                self.factor_df,
+                self.ret_df,
+                config_snapshot,
+                self.price_df,
+                self.factor_dfs_by_period,
+            )
+            for chunk in chunks
+        ]
+        chunk_results = ordered_parallel_map(
+            _run_strategy_chunk_worker,
+            tasks,
+            label="strategy_grid",
+        )
+        pairs = [pair for chunk in chunk_results for pair in chunk]
+        return {name: result for name, result in pairs}
         results = {}
 
         for idx, combo in enumerate(combinations, start=1):
@@ -537,3 +569,131 @@ class StrategyBacktester:
             "rebalance_returns": pd.Series(dtype=float),
             "exit_stats": {"tp_count": 0, "sl_count": 0, "forced_close_count": 0},
         }
+
+
+def _strategy_config_snapshot(config) -> SimpleNamespace:
+    """Make the config picklable for process-pool workers."""
+    fields = [
+        "OPTIMIZATION_LOOKBACK",
+        "RISK_FREE_RATE",
+        "TRANSACTION_COST",
+        "MAX_WEIGHT",
+    ]
+    return SimpleNamespace(**{name: getattr(config, name, None) for name in fields})
+
+
+def _strategy_name_for_combo(combo, tag_max_weight: bool) -> tuple[str, dict]:
+    (
+        group_num,
+        target_rank,
+        rebalance_period,
+        weight_method,
+        max_weight,
+        exit_policy,
+        tp_base,
+        sl_base,
+        probability,
+    ) = combo
+    target_group = group_num - (target_rank - 1)
+    base_name = f"{weight_method}_{group_num}G_Top{target_rank}_P{rebalance_period}d"
+    if tag_max_weight:
+        base_name = f"{base_name}_{_max_weight_tag(max_weight)}"
+    if exit_policy == EXIT_DYNAMIC_TP_SL:
+        strategy_name = (
+            f"{base_name}__{exit_policy}__"
+            f"tp{int(round(float(tp_base) * 100)):02d}_"
+            f"sl{int(round(float(sl_base) * 100)):02d}"
+        )
+    else:
+        strategy_name = f"{base_name}__{exit_policy}"
+    params = {
+        "group_num": group_num,
+        "target_group": target_group,
+        "target_rank": target_rank,
+        "rebalance_period": rebalance_period,
+        "weight_method": weight_method,
+        "max_weight": max_weight,
+        "exit_policy": exit_policy,
+        "tp_base": tp_base,
+        "sl_base": sl_base,
+        "probability": probability,
+    }
+    return strategy_name, params
+
+
+def _run_strategy_combo_worker(task):
+    (
+        idx,
+        total,
+        combo,
+        factor_df,
+        ret_df,
+        config,
+        price_df,
+        factor_dfs_by_period,
+        tag_max_weight,
+    ) = task
+    strategy_name, params = _strategy_name_for_combo(combo, tag_max_weight)
+    print(f"  [{idx:>3}/{total}] {strategy_name}", flush=True)
+    try:
+        backtester = StrategyBacktester(
+            factor_df,
+            ret_df,
+            config,
+            price_df=price_df,
+            factor_dfs_by_period=factor_dfs_by_period,
+        )
+        result = backtester._run_single(
+            params["group_num"],
+            params["target_group"],
+            params["rebalance_period"],
+            params["weight_method"],
+            max_weight=params["max_weight"],
+            exit_policy=params["exit_policy"],
+            tp_base=params["tp_base"],
+            sl_base=params["sl_base"],
+            probability=params["probability"],
+        )
+        result["params"] = {
+            **params,
+            **result.get("exit_stats", {}),
+        }
+        return strategy_name, result
+    except CompositeCalendarError:
+        raise
+    except Exception as exc:
+        print(f"    [!] skip {strategy_name}: {exc}", flush=True)
+        return strategy_name, {
+            **StrategyBacktester._empty_result(),
+            "params": params,
+        }
+
+
+def _run_strategy_chunk_worker(task):
+    (
+        chunk,
+        total,
+        factor_df,
+        ret_df,
+        config,
+        price_df,
+        factor_dfs_by_period,
+    ) = task
+    out = []
+    for idx, combo, tag_max_weight in chunk:
+        out.append(
+            _run_strategy_combo_worker(
+                (
+                    idx,
+                    total,
+                    combo,
+                    factor_df,
+                    ret_df,
+                    config,
+                    price_df,
+                    factor_dfs_by_period,
+                    tag_max_weight,
+                )
+            )
+        )
+    return out

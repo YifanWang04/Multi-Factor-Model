@@ -185,29 +185,28 @@ def max_return_weight(ret_matrix: np.ndarray, max_weight: float = 0.4) -> np.nda
         return np.array([1.0])
 
     mu = arr.mean(axis=0)
+    cap = float(max_weight)
+    if not np.isfinite(cap) or cap <= 0:
+        return _fallback_equal(N)
+    cap = min(cap, 1.0)
+    if N * cap < 1.0 - 1e-12:
+        return _fallback_equal(N)
 
-    def neg_ret(w):
-        return -float(w @ mu)
+    # Linear objective with box constraints: allocate to the highest expected
+    # return names first until the portfolio is fully invested.
+    order = np.argsort(-mu, kind="mergesort")
+    weights = np.zeros(N, dtype=float)
+    remaining = 1.0
+    for idx in order:
+        if remaining <= 1e-12:
+            break
+        alloc = min(cap, remaining)
+        weights[idx] = alloc
+        remaining -= alloc
 
-    def neg_ret_grad(w):
-        return -mu
-
-    w0 = _fallback_equal(N)
-    bounds = [(0.0, max_weight)] * N
-    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}]
-
-    try:
-        res = minimize(
-            neg_ret, w0, jac=neg_ret_grad, method="SLSQP",
-            bounds=bounds, constraints=constraints,
-            options={"maxiter": 500, "ftol": 1e-9},
-        )
-        if res.success:
-            return _post_process(res.x)
-    except Exception:
-        pass
-
-    return _fallback_equal(N)
+    if remaining > 1e-8:
+        return _fallback_equal(N)
+    return _post_process(weights)
 
 
 # ---------------------------------------------------------------------------

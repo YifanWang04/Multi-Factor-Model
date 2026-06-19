@@ -29,21 +29,26 @@ from data.data_config import (
     FACTOR_PROCESSED_DIR,
     require_price_file_exists,
 )
+from qqq_core.parallel import ordered_parallel_map
 
 def mad_winsorize(df, n=3):
     """
     横截面（逐日）中位数 + MAD 去极值
     """
-    def winsorize_row(row):
-        median = row.median()
-        mad = (row - median).abs().median()
-        if mad == 0 or np.isnan(mad):
-            return row
-        bound = n * 1.4826 * mad
-        upper = median + bound
-        lower = median - bound
-        return row.clip(lower=lower, upper=upper)
-    result = df.apply(winsorize_row, axis=1)
+    median = df.median(axis=1)
+    mad = df.sub(median, axis=0).abs().median(axis=1)
+    invalid_mad = mad.isna() | mad.eq(0)
+    bound = n * 1.4826 * mad
+    lower = median - bound
+    upper = median + bound
+    result = df.copy()
+    valid_mad = ~invalid_mad
+    if valid_mad.any():
+        result.loc[valid_mad] = df.loc[valid_mad].clip(
+            lower=lower.loc[valid_mad],
+            upper=upper.loc[valid_mad],
+            axis=0,
+        )
     # 统一将 inf 替换为 nan，避免后续统计计算异常
     return result.replace([np.inf, -np.inf], np.nan)
 
@@ -51,12 +56,12 @@ def zscore_standardize(df):
     """
     横截面（逐日）Z-score 标准化
     """
-    def zscore_row(row):
-        std = row.std()
-        if std == 0 or np.isnan(std):
-            return row * 0.0
-        return (row - row.mean()) / std
-    result = df.apply(zscore_row, axis=1)
+    mean = df.mean(axis=1)
+    std = df.std(axis=1)
+    invalid_std = std.isna() | std.eq(0)
+    result = df.sub(mean, axis=0).div(std.replace(0, np.nan), axis=0)
+    if invalid_std.any():
+        result.loc[invalid_std] = df.loc[invalid_std] * 0.0
     return result.replace([np.inf, -np.inf], np.nan)
 
 def process_factor_df(df):
@@ -166,6 +171,51 @@ def process_factor_excel(input_excel, output_excel, reference_excel=None):
 
     print(f"  处理完成，保存到: {output_excel}")
 
+
+def _process_factor_file_task(task):
+    file, input_dir, output_dir, reference_file = task
+    input_path = os.path.join(input_dir, file)
+    output_path = os.path.join(
+        output_dir,
+        file.replace(".xlsx", "_processed.xlsx")
+    )
+
+    if is_factor_all_empty_nan_or_zero(input_path):
+        factor_name = file.replace("factor_", "").replace(".xlsx", "")
+        print(f"\n[skip] {file}: all empty/NaN/zero", flush=True)
+        return {
+            "status": "skipped_empty",
+            "factor_name": factor_name,
+            "input_path": input_path,
+            "output_path": output_path,
+            "reason": "all_empty_nan_or_zero",
+        }
+
+    print(f"\n处理 {file} ...", flush=True)
+    try:
+        process_factor_excel(
+            input_excel=input_path,
+            output_excel=output_path,
+            reference_excel=reference_file,
+        )
+        return {
+            "status": "processed",
+            "factor_name": file.replace("factor_", "").replace(".xlsx", ""),
+            "input_path": input_path,
+            "output_path": output_path,
+        }
+    except Exception as e:
+        import traceback
+        print(f"  处理失败: {e}", flush=True)
+        traceback.print_exc()
+        return {
+            "status": "failed",
+            "factor_name": file.replace("factor_", "").replace(".xlsx", ""),
+            "input_path": input_path,
+            "output_path": output_path,
+            "reason": str(e),
+        }
+
 if __name__ == "__main__":
 
     _run_dir = os.environ.get("REBALANCE_RUN_DIR")
@@ -192,8 +242,40 @@ if __name__ == "__main__":
     print("=" * 60)
 
     skipped_empty_factors = []
+    files = [
+        file for file in sorted(os.listdir(input_dir))
+        if file.startswith("factor_")
+        and file.endswith(".xlsx")
+        and (files_to_process is None or file in files_to_process)
+    ]
+    tasks = [
+        (file, input_dir, output_dir, reference_file)
+        for file in files
+    ]
+    results = ordered_parallel_map(
+        _process_factor_file_task,
+        tasks,
+        label="data_process",
+    )
+    skipped_empty_factors = [
+        {
+            "factor_name": rec["factor_name"],
+            "input_path": rec["input_path"],
+            "output_path": rec["output_path"],
+            "reason": rec.get("reason", "all_empty_nan_or_zero"),
+        }
+        for rec in results
+        if rec.get("status") == "skipped_empty"
+    ]
+    failed_factors = [rec for rec in results if rec.get("status") == "failed"]
+    if failed_factors:
+        print("-" * 60)
+        print("处理失败的因子：")
+        for rec in failed_factors:
+            print(f"  - {rec['factor_name']}: {rec.get('reason', '')}")
+        print("-" * 60)
 
-    for file in os.listdir(input_dir):
+    for file in []:
         if file.startswith("factor_") and file.endswith(".xlsx"):
             if files_to_process is not None and file not in files_to_process:
                 continue

@@ -12,6 +12,7 @@ Sheet1 (strategy_statistics)
 
 Sheet2 (strategy_daily_returns)
   - index = 日期，columns = 策略名称，values = 日收益率
+  - 大网格时默认只保留按 Sharpe 排名前 N 的策略时间序列
   - 附折线图（各策略净值走势，从 Sheet2 导出）
 
 Sheet3 (strategy_cumulative_returns)
@@ -129,12 +130,11 @@ class StrategyReporter:
 
         sheet1_df = self._build_sheet1_df()
         sheet2_df = self._build_sheet2_df()
-        sheet3_df = self._build_sheet3_df(sheet2_df)
 
-        # 按夏普比率降序排序 Sheet1，并同步调整 Sheet2/Sheet3 的列顺序
-        sheet1_df, sheet2_df, sheet3_df = self._sort_by_sharpe(
-            sheet1_df, sheet2_df, sheet3_df
-        )
+        # 按夏普比率降序排序 Sheet1，并同步调整 Sheet2 的列顺序。
+        sheet1_df, sheet2_df = self._sort_by_sharpe(sheet1_df, sheet2_df)
+        sheet2_df = self._limit_timeseries_columns(sheet1_df, sheet2_df)
+        sheet3_df = self._build_sheet3_df(sheet2_df)
 
         if OPENPYXL_OK:
             self._write_with_format(output_path, sheet1_df, sheet2_df, sheet3_df)
@@ -208,6 +208,7 @@ class StrategyReporter:
             ("Active_Profile_Exit_Policy", str(getattr(self.config, "EXIT_POLICY", ""))),
             ("Active_Profile_TP_Base", str(getattr(self.config, "TP_BASE", ""))),
             ("Active_Profile_SL_Base", str(getattr(self.config, "SL_BASE", ""))),
+            ("Report_Timeseries_Top_N", str(getattr(self.config, "REPORT_TIMESERIES_TOP_N", ""))),
         ]
         return pd.DataFrame(rows, columns=["Key", "Value"])
 
@@ -239,13 +240,12 @@ class StrategyReporter:
         self,
         sheet1_df: pd.DataFrame,
         sheet2_df: pd.DataFrame,
-        sheet3_df: pd.DataFrame,
     ) -> tuple:
         """
-        按夏普比率降序排序 Sheet1 行，并将 Sheet2/Sheet3 的列按相同顺序重排。
+        按夏普比率降序排序 Sheet1 行，并将 Sheet2 的列按相同顺序重排。
         """
         if "sharpe" not in sheet1_df.columns or len(sheet1_df) == 0:
-            return sheet1_df, sheet2_df, sheet3_df
+            return sheet1_df, sheet2_df
 
         # Sheet1：按夏普降序，NaN 置后
         sheet1_sorted = sheet1_df.sort_values(
@@ -257,7 +257,7 @@ class StrategyReporter:
         # 取得排序后的策略名顺序
         sorted_names = sheet1_sorted["strategy_name"].tolist()
 
-        # Sheet2/Sheet3：列按 sorted_names 重排，不在名单中的列置于末尾
+        # Sheet2：列按 sorted_names 重排，不在名单中的列置于末尾
         def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
             if len(df) == 0:
                 return df
@@ -267,9 +267,38 @@ class StrategyReporter:
             return df[new_order]
 
         sheet2_reordered = reorder_columns(sheet2_df)
-        sheet3_reordered = reorder_columns(sheet3_df)
 
-        return sheet1_sorted, sheet2_reordered, sheet3_reordered
+        return sheet1_sorted, sheet2_reordered
+
+    def _limit_timeseries_columns(
+        self,
+        sheet1_df: pd.DataFrame,
+        sheet2_df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """
+        大参数网格下，Excel 中的全量日收益宽表会变成百万级单元格。
+        统计汇总仍保留全部策略；时间序列 sheet 仅保留排名靠前的策略用于人工检查。
+        """
+        if len(sheet2_df) == 0:
+            return sheet2_df
+
+        top_n = getattr(self.config, "REPORT_TIMESERIES_TOP_N", None)
+        if top_n in (None, "", 0):
+            return sheet2_df
+
+        try:
+            top_n = int(top_n)
+        except (TypeError, ValueError):
+            return sheet2_df
+        if top_n <= 0 or sheet2_df.shape[1] <= top_n:
+            return sheet2_df
+
+        keep = [
+            name
+            for name in sheet1_df["strategy_name"].head(top_n).tolist()
+            if name in sheet2_df.columns
+        ]
+        return sheet2_df[keep]
 
     # ------------------------------------------------------------------
     # Excel 写入与格式化

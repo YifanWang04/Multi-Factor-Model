@@ -27,6 +27,24 @@ python analysis/multi_factor/run_composite_factor.py
 python analysis/strategy/run_strategy.py
 ```
 
+性能模式：
+
+```powershell
+$env:QQQ_MAX_WORKERS = "8"        # 设为 "1" 可强制串行
+python pipeline/build_factors.py
+python pipeline/data_process.py
+python analysis/strategy/run_strategy.py
+python analysis/multi_factor/run_composite_factor.py
+python analysis/single_factor/run_multi_factor_test.py
+```
+
+耗时较重的研究循环会读取 `QQQ_MAX_WORKERS` 做进程级并行，并将 Excel 派生的
+DataFrame 缓存在 `output/cache/`。如需禁用缓存，设置 `QQQ_DISABLE_CACHE=1`；
+如需改缓存目录，设置 `QQQ_CACHE_DIR=<path>`。
+`run_strategy.py` 的统计汇总 sheet 会保留全部参数组合，但日收益和累计收益
+时间序列 sheet 默认只导出 Sharpe 排名前 `REPORT_TIMESERIES_TOP_N` 的策略。
+如需导出全部策略时间序列，可把该配置设为 `None` 或 `0`。
+
 实盘/调仓日流程：
 
 ```powershell

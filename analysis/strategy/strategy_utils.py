@@ -26,6 +26,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from data.data_config import should_use_price_sheet
+from qqq_core.data_cache import load_or_compute
 from qqq_core.excel_io import read_price_workbook, read_sheet_with_datetime_index
 from qqq_core.strategy_params import (
     build_factor_suffix,
@@ -60,10 +61,15 @@ def load_price_data(price_file: str, price_column: str = "Adj Close") -> pd.Data
             f"outside YFINANCE_TICKERS: {preview}{suffix}"
         )
 
-    return read_price_workbook(
-        price_file,
-        price_column=price_column,
-        sheet_filter=should_use_price_sheet,
+    return load_or_compute(
+        "price_data",
+        [price_file],
+        {"price_column": price_column},
+        lambda: read_price_workbook(
+            price_file,
+            price_column=price_column,
+            sheet_filter=should_use_price_sheet,
+        ),
     )
 
 
@@ -97,7 +103,12 @@ def load_composite_factor(file_path: str, sheet_name: str) -> pd.DataFrame:
         raise FileNotFoundError(f"复合因子文件不存在: {file_path}")
 
     try:
-        return read_sheet_with_datetime_index(file_path, sheet_name=sheet_name, index_col=0)
+        return load_or_compute(
+            "composite_sheet",
+            [file_path],
+            {"sheet_name": sheet_name},
+            lambda: read_sheet_with_datetime_index(file_path, sheet_name=sheet_name, index_col=0),
+        )
     except ValueError as exc:
         with pd.ExcelFile(file_path) as xl:
             available = xl.sheet_names

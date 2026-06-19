@@ -39,6 +39,8 @@ from grouping import GrouperEnhanced
 from backtest import LongOnlyBacktest, ShortOnlyBacktest
 from performance import PerformanceAnalyzer
 from data.data_config import should_use_price_sheet
+from qqq_core.data_cache import load_or_compute, print_cache_summary
+from qqq_core.parallel import ordered_parallel_map
 
 try:
     import openpyxl
@@ -89,6 +91,32 @@ def load_factor(factor_file, sheet_name=0):
     return factor
 
 
+def load_return_data_cached(price_file, return_column="Return"):
+    """Cached variant of load_return_data used by batch research entry points."""
+    def _load():
+        return load_return_data(price_file, return_column)
+
+    return load_or_compute(
+        "return_data",
+        [price_file],
+        {"return_column": return_column},
+        _load,
+    )
+
+
+def load_factor_cached(factor_file, sheet_name=0):
+    """Cached variant of load_factor for repeated Excel reads."""
+    def _load():
+        return load_factor(factor_file, sheet_name)
+
+    return load_or_compute(
+        "factor_sheet",
+        [factor_file],
+        {"sheet_name": sheet_name},
+        _load,
+    )
+
+
 def filter_factor_ret_by_lookback(factor, ret, lookback_months):
     """
     按近 N 个月过滤因子与收益率数据。
@@ -114,7 +142,7 @@ def iter_factors_from_files(factor_files, get_factor_display_name):
         base_name = get_factor_display_name(path)
         for sheet in xl.sheet_names:
             try:
-                factor = load_factor(path, sheet_name=sheet)
+                factor = load_factor_cached(path, sheet_name=sheet)
                 if factor.empty or len(factor) < 2:
                     continue
                 name = f"{base_name}_{sheet}" if len(xl.sheet_names) > 1 else base_name
@@ -279,6 +307,24 @@ def run_one_factor_one_period(factor, ret, rebalance_period, config):
         "group_returns": group_returns,
         "ret_periods": ret_periods,
     }
+
+
+# ---------------------------------------------------------------------------
+# Parallel worker
+# ---------------------------------------------------------------------------
+
+def _run_factor_period_bundle(task):
+    """Run one factor for the full sample and recent lookback windows."""
+    name, factor, ret, rebalance_period, config = task
+    rec = run_one_factor_one_period(factor, ret, rebalance_period, config)
+    records_by_window = []
+    for lb_months in (3, 6, 12):
+        f_filt, r_filt = filter_factor_ret_by_lookback(factor, ret, lb_months)
+        records_by_window.append(
+            run_one_factor_one_period(f_filt, r_filt, rebalance_period, config)
+        )
+    is_empty = len(rec.get("ic_df", [])) == 0 and len(rec.get("ret_periods", [])) == 0
+    return name, rec, records_by_window[0], records_by_window[1], records_by_window[2], is_empty
 
 
 # ---------------------------------------------------------------------------
@@ -687,7 +733,7 @@ def run_multi_factor_test(
     )
 
     os.makedirs(output_dir, exist_ok=True)
-    ret = load_return_data(price_file, RETURN_COLUMN)
+    ret = load_return_data_cached(price_file, RETURN_COLUMN)
     factor_names = []
     records = []
     factor_list = list(iter_factors_from_files(factor_files, get_factor_display_name))
@@ -696,7 +742,25 @@ def run_multi_factor_test(
             "未找到任何有效因子，请检查因子 Excel 是否含多 sheet 且每 sheet 有至少 2 行有效数据"
         )
     records_3M, records_6M, records_1Y = [], [], []
-    for i, (name, factor) in enumerate(factor_list):
+    tasks = [
+        (name, factor, ret, rebalance_period, config)
+        for name, factor in factor_list
+    ]
+    factor_results = ordered_parallel_map(
+        _run_factor_period_bundle,
+        tasks,
+        label=f"multi_factor_P{rebalance_period}",
+    )
+    for name, rec, rec_3m, rec_6m, rec_1y, is_empty in factor_results:
+        if is_empty:
+            print(f"    警告: {name} 与收益日期无重叠或调仓期无效，报告中该因子为空。")
+        factor_names.append(name)
+        records.append(rec)
+        records_3M.append(rec_3m)
+        records_6M.append(rec_6m)
+        records_1Y.append(rec_1y)
+
+    for i, (name, factor) in enumerate([]):
         print(f"[{i+1}/{len(factor_list)}] 因子: {name}")
         rec = run_one_factor_one_period(factor, ret, rebalance_period, config)
         if len(rec.get("ic_df", [])) == 0 and len(rec.get("ret_periods", [])) == 0:
@@ -731,6 +795,7 @@ def run_multi_factor_test(
         out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
         sheet1_3M_df=sheet1_3M_df, sheet1_6M_df=sheet1_6M_df, sheet1_1Y_df=sheet1_1Y_df,
     )
+    print_cache_summary()
     print(f"报表已写入: {out_path}")
     return out_path
 

@@ -33,6 +33,8 @@ from data.data_config import (
     require_price_file_exists,
     should_use_price_sheet,
 )
+from qqq_core.data_cache import load_or_compute, print_cache_summary
+from qqq_core.parallel import get_max_workers, ordered_parallel_map
 
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
 if _RUN_DIR:
@@ -50,7 +52,12 @@ def load_ohlcv_data(excel_path):
     若某列不存在（如 Open/High/Low），则对应 DataFrame 为空（empty）。
     """
     excel_path = require_price_file_exists(excel_path)
-    raw = pd.read_excel(excel_path, sheet_name=None)
+    raw = load_or_compute(
+        "price_workbook_raw",
+        [excel_path],
+        {"loader": "build_factors"},
+        lambda: pd.read_excel(excel_path, sheet_name=None),
+    )
 
     frames = {k: {} for k in ('open', 'high', 'low', 'close', 'volume')}
 
@@ -143,6 +150,26 @@ def build_and_save_all_factors(data_dict):
     else:
         factor_names = None
 
+    factor_specs = []
+    for name, cfg in FACTOR_CONFIGS.items():
+        if factor_names is not None and name not in factor_names:
+            continue
+        factor_specs.append((name, cfg.get('data_keys', ['close'])))
+
+    worker_count = get_max_workers(len(factor_specs))
+    chunk_size = max(1, int(np.ceil(len(factor_specs) / max(1, worker_count)))) if factor_specs else 1
+    chunks = [
+        factor_specs[i:i + chunk_size]
+        for i in range(0, len(factor_specs), chunk_size)
+    ]
+    tasks = [(chunk, data_dict, FACTOR_RAW_DIR) for chunk in chunks]
+    built_chunks = ordered_parallel_map(
+        _build_factor_chunk_worker,
+        tasks,
+        label="build_factors",
+    )
+    return [item for chunk in built_chunks for item in chunk]
+
     for name, cfg in FACTOR_CONFIGS.items():
         if factor_names is not None and name not in factor_names:
             continue
@@ -178,6 +205,44 @@ def build_and_save_all_factors(data_dict):
     return built
 
 
+def _build_factor_chunk_worker(task):
+    factor_specs, data_dict, factor_raw_dir = task
+    from factors.factor_library import FACTOR_CONFIGS
+
+    os.makedirs(factor_raw_dir, exist_ok=True)
+    built = []
+
+    for name, data_keys in factor_specs:
+        cfg = FACTOR_CONFIGS[name]
+        func = cfg['func']
+        raw_path = os.path.join(factor_raw_dir, f"factor_{name}.xlsx")
+        missing = [k for k in data_keys if data_dict.get(k) is None or (
+            isinstance(data_dict[k], pd.DataFrame) and data_dict[k].empty
+        )]
+        if missing:
+            print(f"  [skip] {name}: missing data {missing}", flush=True)
+            continue
+
+        try:
+            args = [data_dict[k] for k in data_keys]
+            factor_df = func(*args)
+
+            if isinstance(factor_df, pd.Series):
+                factor_df = factor_df.to_frame()
+
+            factor_df = factor_df.replace([np.inf, -np.inf], np.nan)
+            factor_df.index.name = "Date"
+            factor_df.to_excel(raw_path, sheet_name="factor")
+            built.append((name, raw_path))
+            print(f"  {name} -> {raw_path}", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"  [error] {name}: {e}", flush=True)
+            traceback.print_exc()
+
+    return built
+
+
 def main():
     print("=" * 60)
     print("Step 1: 加载 OHLCV 数据")
@@ -198,6 +263,7 @@ def main():
     print("Step 2: 构建并保存所有因子 -> factor_raw")
     print("=" * 60)
     factor_list = build_and_save_all_factors(data_dict)
+    print_cache_summary()
     print(f"\n共成功构建 {len(factor_list)} 个因子（数据处理请运行 pipeline/data_process.py）")
     print("\nFactor pipeline finished.")
 
