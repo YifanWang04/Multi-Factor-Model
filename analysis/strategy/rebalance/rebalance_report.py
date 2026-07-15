@@ -23,6 +23,7 @@ from qqq_core.performance_metrics import (
     performance_summary,
     worst_period_drawdown,
 )
+from data.price_snapshot import manifest_adjustments_frame
 
 # ── 路径注册（strategy_utils 位于同级目录）────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -253,6 +254,7 @@ def write_rebalance_day_report(
     rebalance_period: int = 20,
     data_start_offset_days: int = 0,
     rf_rate: float = 0.02,
+    price_snapshot_manifest: Optional[dict] = None,
 ) -> None:
     """
     写入合并后的调仓日报表（单文件，含全部 sheet）。
@@ -300,6 +302,15 @@ def write_rebalance_day_report(
 
     params = result.get("params", {})
     as_of = pd.Timestamp(datetime.now().date())
+    price_adjustments = manifest_adjustments_frame(price_snapshot_manifest)
+    manifest_status = "available" if price_snapshot_manifest else "not_found"
+    manifest_base_file = ""
+    manifest_base_run = ""
+    manifest_notes = ""
+    if price_snapshot_manifest:
+        manifest_base_file = str(price_snapshot_manifest.get("base_price_file") or "")
+        manifest_base_run = str(price_snapshot_manifest.get("base_run_dir") or "")
+        manifest_notes = " | ".join(str(x) for x in price_snapshot_manifest.get("notes") or [])
 
     daily_returns = result["daily_returns"]
     nav = result["nav"]
@@ -313,6 +324,8 @@ def write_rebalance_day_report(
     sharpe = summary["sharpe"]
     max_dd = summary["max_drawdown"]
     max_dd_pct = max_dd * 100 if not np.isnan(max_dd) else float("nan")
+    max_loss_duration = summary["max_loss_duration"]
+    avg_loss_duration = summary["avg_loss_duration"]
     calmar = summary["calmar"]
 
     wp_dd, _, _ = worst_period_drawdown(daily_returns, rebalance_returns)
@@ -353,6 +366,13 @@ def write_rebalance_day_report(
         ["Price_Convention", price_conv],
         ["Rebalance_Period_TradingDays", strategy_params.get("rebalance_period", rebalance_period)],
         ["Data_Start_Offset_TradingDays", data_start_offset_days],
+        ["Preserve_Price_Scale", strategy_params.get("preserve_price_scale", "")],
+        ["Price_Scale_Config_Base_Run_Dir", strategy_params.get("price_scale_base_run_dir", "")],
+        ["Price_Scale_Manifest", manifest_status],
+        ["Price_Scale_Base_Run", manifest_base_run],
+        ["Price_Scale_Base_File", manifest_base_file],
+        ["Price_Scale_Adjusted_Tickers", len(price_adjustments)],
+        ["Price_Scale_Notes", manifest_notes],
         ["---", "---"],
         ["Factor_Indices", str(selected_factor_indices)],
         ["Selected_Factors", ", ".join(selected_factor_names)],
@@ -376,6 +396,8 @@ def write_rebalance_day_report(
         ["Annual_Volatility_Pct", _fmt(vol * 100 if not np.isnan(vol) else float("nan"), "{:.2f}")],
         ["Sharpe_Ratio", _fmt(sharpe, "{:.2f}")],
         ["Max_Drawdown_Pct", _fmt(max_dd_pct, "{:.2f}")],
+        ["Max_Loss_Duration_TradingDays", _fmt(max_loss_duration, "{:.0f}")],
+        ["Avg_Loss_Duration_TradingDays", _fmt(avg_loss_duration, "{:.2f}")],
         ["Worst_Period_Drawdown_Pct", _fmt(wp_dd_pct, "{:.2f}")],
         ["Calmar_Ratio", _fmt(calmar, "{:.2f}")],
         ["Win_Rate", _fmt(win_rate, "{:.2%}")],
@@ -434,6 +456,22 @@ def write_rebalance_day_report(
         pd.DataFrame(status_rows[1:], columns=status_rows[0]).to_excel(
             writer, sheet_name="Rebalance_Config_Status", index=False
         )
+
+        if price_snapshot_manifest:
+            if not price_adjustments.empty:
+                price_adjustments.to_excel(writer, sheet_name="Price_Scale_Adjustments", index=False)
+            else:
+                pd.DataFrame(
+                    {
+                        "Note": ["No price scale adjustments detected"],
+                        "Base_Run": [manifest_base_run],
+                        "Base_File": [manifest_base_file],
+                    }
+                ).to_excel(writer, sheet_name="Price_Scale_Adjustments", index=False)
+        else:
+            pd.DataFrame({"Note": ["No price snapshot manifest found"]}).to_excel(
+                writer, sheet_name="Price_Scale_Adjustments", index=False
+            )
 
         if not filtered_ops.empty:
             _nan_to_dash(filtered_ops).to_excel(writer, sheet_name="Current_Operations", index=False)

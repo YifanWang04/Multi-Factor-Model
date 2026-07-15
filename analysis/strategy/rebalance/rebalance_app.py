@@ -78,6 +78,7 @@ from data.data_config import (
     COMPOSITE_FACTOR_OUTPUT_DIR,
     COMPOSITE_FACTOR_FILE as _COMPOSITE_FACTOR_FILE,
 )
+from data.price_snapshot import load_manifest as load_price_snapshot_manifest
 from strategy_utils import (
     load_price_data as _load_price_data,
     load_composite_factor_with_fallback,
@@ -130,6 +131,8 @@ STRATEGY_PARAMS = {
     "target_rank": _parsed[2],
     "rebalance_period": _parsed[3],
     "max_weight": cfg.MAX_WEIGHT,
+    "preserve_price_scale": ACTIVE_PROFILE.preserve_price_scale,
+    "price_scale_base_run_dir": ACTIVE_PROFILE.price_scale_base_run_dir,
 }
 
 
@@ -147,6 +150,9 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
         "REBALANCE_COMPOSITE_PERIODS": str(STRATEGY_PARAMS["rebalance_period"]),
         "REBALANCE_OFFSET_DAYS": str(DATA_START_OFFSET_DAYS),
         "REBALANCE_TICKER_UNIVERSE": ACTIVE_TICKER_UNIVERSE,
+        "REBALANCE_STRATEGY_PROFILE": ACTIVE_STRATEGY_PROFILE,
+        "REBALANCE_PRESERVE_PRICE_SCALE": "1" if ACTIVE_PROFILE.preserve_price_scale else "0",
+        "REBALANCE_PRICE_BASE_RUN_DIR": ACTIVE_PROFILE.price_scale_base_run_dir or "",
     }
     old_env = {k: os.environ.get(k) for k in env_updates}
     os.environ.update(env_updates)
@@ -175,6 +181,7 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
             pull_yhfinance_Data.main(
                 ticker_universe=ACTIVE_TICKER_UNIVERSE,
                 ticker_source=f"profile:{ACTIVE_STRATEGY_PROFILE}",
+                price_scale_base_run_dir=ACTIVE_PROFILE.price_scale_base_run_dir,
             )
 
         print("[Pipeline] 构建因子...")
@@ -206,6 +213,9 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
     env["REBALANCE_COMPOSITE_PERIODS"] = str(STRATEGY_PARAMS["rebalance_period"])
     env["REBALANCE_OFFSET_DAYS"] = str(DATA_START_OFFSET_DAYS)
     env["REBALANCE_TICKER_UNIVERSE"] = ACTIVE_TICKER_UNIVERSE
+    env["REBALANCE_STRATEGY_PROFILE"] = ACTIVE_STRATEGY_PROFILE
+    env["REBALANCE_PRESERVE_PRICE_SCALE"] = "1" if ACTIVE_PROFILE.preserve_price_scale else "0"
+    env["REBALANCE_PRICE_BASE_RUN_DIR"] = ACTIVE_PROFILE.price_scale_base_run_dir or ""
 
     data_dir = os.path.join(run_dir, "data")
     for sub_dir in (data_dir, os.path.join(run_dir, "factor_raw"),
@@ -530,6 +540,10 @@ def main(
     next_rb_date = status.get("next_rebalance_date")
     current_ops = pd.DataFrame()
     used_live_prices = False
+    price_snapshot_manifest = load_price_snapshot_manifest(run_dir)
+    if price_snapshot_manifest:
+        adjustments = price_snapshot_manifest.get("adjustments") or []
+        print(f"[PriceScale] manifest loaded; adjusted tickers: {len(adjustments)}")
 
     # 阶段 3c：获取当前调仓日操作明细（含盘中实时价格 + MTM Round 2）
     if current_rb_date is not None:
@@ -572,6 +586,7 @@ def main(
         rebalance_period=STRATEGY_PARAMS["rebalance_period"],
         data_start_offset_days=DATA_START_OFFSET_DAYS,
         rf_rate=cfg.RISK_FREE_RATE,
+        price_snapshot_manifest=price_snapshot_manifest,
     )
 
     # 打印摘要
@@ -608,6 +623,7 @@ def main(
             strategy_params=STRATEGY_PARAMS,
             data_start_offset_days=DATA_START_OFFSET_DAYS,
             rf_rate=cfg.RISK_FREE_RATE,
+            price_snapshot_manifest=price_snapshot_manifest,
         )
     else:
         print("\n[阶段 5] 跳过 Discord 通知")

@@ -141,6 +141,46 @@ def max_drawdown_info(returns: pd.Series | list | np.ndarray | None) -> tuple[fl
     return float(dd[end_pos]), wealth.index[start_pos], wealth.index[end_pos]
 
 
+def loss_duration_stats(
+    returns: pd.Series | list | np.ndarray | None,
+) -> tuple[float, float]:
+    """Return maximum and average loss duration in return periods.
+
+    A loss episode starts when wealth falls below its previous high-water mark
+    and ends when wealth first recovers to or exceeds that mark. Duration is
+    the number of return observations from the peak to recovery. An unfinished
+    episode at the end is included through the last observation.
+    """
+
+    rets = clean_returns(returns)
+    if len(rets) == 0:
+        return float("nan"), float("nan")
+
+    wealth = np.concatenate(([1.0], nav_from_returns(rets).to_numpy(dtype=float)))
+    durations: list[int] = []
+    peak_value = wealth[0]
+    peak_pos = 0
+    underwater = False
+
+    for pos in range(1, len(wealth)):
+        value = wealth[pos]
+        if value >= peak_value:
+            if underwater:
+                durations.append(pos - peak_pos)
+                underwater = False
+            peak_value = value
+            peak_pos = pos
+        elif not underwater:
+            underwater = True
+
+    if underwater:
+        durations.append(len(wealth) - 1 - peak_pos)
+
+    if not durations:
+        return 0.0, 0.0
+    return float(max(durations)), float(np.mean(durations))
+
+
 def calmar_ratio(
     returns: pd.Series | list | np.ndarray | None,
     periods_per_year: float = 252.0,
@@ -181,12 +221,15 @@ def performance_summary(
 ) -> dict[str, float]:
     """Return the standard metric set for one return series."""
 
+    max_loss_duration, avg_loss_duration = loss_duration_stats(returns)
     return {
         "total_return": total_return(returns),
         "annual_return": annualized_return(returns, periods_per_year),
         "annual_vol": annualized_volatility(returns, periods_per_year),
         "sharpe": sharpe_ratio(returns, rf, periods_per_year),
         "max_drawdown": max_drawdown(returns),
+        "max_loss_duration": max_loss_duration,
+        "avg_loss_duration": avg_loss_duration,
         "calmar": calmar_ratio(returns, periods_per_year),
         "win_rate": win_rate(returns),
         "profit_loss_ratio": profit_loss_ratio(returns),

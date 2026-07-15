@@ -35,6 +35,14 @@ from data.data_config import (
     resolve_yfinance_tickers,
     yfinance_pull_start_date,
 )
+from data.price_snapshot import (
+    PRESERVE_PRICE_SCALE_ENV_VAR,
+    STRATEGY_PROFILE_ENV_VAR,
+    apply_preserved_price_scale,
+    manifest_path_for_run,
+    preserve_price_scale_enabled,
+    write_manifest,
+)
 
 
 def _normalize_yfinance_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -205,10 +213,21 @@ def _download_one_symbol(symbol: str, start_date: str, end_date: str) -> pd.Data
     return _add_adjusted_ohlc(df)
 
 
+def _print_skip_notice(message: str) -> None:
+    """Print a skip notice without failing on the active console encoding."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        safe_message = str(message).encode(encoding, errors="backslashreplace").decode(encoding)
+    except LookupError:
+        safe_message = str(message).encode("ascii", errors="backslashreplace").decode("ascii")
+    print(safe_message)
+
+
 def main(
     ticker_universe: str | None = None,
     tickers: Sequence[str] | None = None,
     ticker_source: str | None = None,
+    price_scale_base_run_dir: str | None = None,
 ) -> str:
     """下载行情并写入 Excel，返回输出文件路径。"""
     offset = _resolve_offset()
@@ -233,14 +252,27 @@ def main(
         f"{universe_name} | source={source} | tickers={len(codes)}"
     )
     print(f"开始下载 {len(codes)} 只标的...")
+    skipped: list[tuple[str, str]] = []
     for i, code in enumerate(codes, 1):
-        df = _download_one_symbol(code, start_date, end_date)
+        try:
+            df = _download_one_symbol(code, start_date, end_date)
+        except Exception as exc:
+            reason = f"download failed ({type(exc).__name__}: {exc})"
+            skipped.append((code, reason))
+            _print_skip_notice(f"  [{i}/{len(codes)}] [SKIP] {code}: {reason}")
+            continue
         if df.empty:
-            print(f"  [{i}/{len(codes)}] {code} ✗ (无数据)")
+            reason = "no data returned"
+            skipped.append((code, reason))
+            _print_skip_notice(f"  [{i}/{len(codes)}] [SKIP] {code}: {reason}")
             continue
         data_dict[code] = df
 
     print(f"下载完成，成功获取 {len(data_dict)}/{len(codes)} 只")
+    if skipped:
+        _print_skip_notice(f"Skipped {len(skipped)}/{len(codes)} tickers:")
+        for code, reason in skipped:
+            _print_skip_notice(f"  - {code}: {reason}")
     _backfill_completed_close_bars(data_dict)
 
     if not data_dict:
@@ -253,6 +285,33 @@ def main(
     else:
         out_path = os.path.join(_ROOT, "data", price_name)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    if run_dir and preserve_price_scale_enabled():
+        profile_name = os.environ.get(STRATEGY_PROFILE_ENV_VAR, "profile")
+        data_dict, snapshot_result = apply_preserved_price_scale(
+            data_dict,
+            run_dir=run_dir,
+            profile_name=profile_name,
+            offset=offset,
+            output_price_file=out_path,
+            base_run_dir=price_scale_base_run_dir,
+        )
+        manifest_path = manifest_path_for_run(run_dir)
+        write_manifest(manifest_path, snapshot_result)
+        if snapshot_result.base_price_file:
+            print(f"  [PriceScale] base snapshot: {snapshot_result.base_price_file}")
+            print(f"  [PriceScale] adjusted tickers: {len(snapshot_result.adjustments)}")
+            for adj in snapshot_result.adjustments:
+                print(
+                    "    "
+                    f"{adj.ticker}: price_factor={adj.price_factor:.8f}, "
+                    f"volume_factor={adj.volume_factor:.8f}, "
+                    f"new_rows={adj.new_rows_adjusted}"
+                )
+        else:
+            print("  [PriceScale] no base snapshot found; wrote fresh data unchanged")
+    elif run_dir and os.environ.get(PRESERVE_PRICE_SCALE_ENV_VAR) is not None:
+        print("  [PriceScale] preserve_price_scale disabled for this profile")
 
     with pd.ExcelWriter(out_path, engine="xlsxwriter") as writer:
         for sheet_name, df in data_dict.items():

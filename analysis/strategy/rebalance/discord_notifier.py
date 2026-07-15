@@ -26,6 +26,7 @@ from qqq_core.performance_metrics import (
     performance_summary,
     worst_period_drawdown,
 )
+from data.price_snapshot import manifest_adjustments_frame
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +61,33 @@ def _describe_composite_method(sheet_name: str) -> str:
     return sheet_name
 
 
+def _price_scale_field(price_snapshot_manifest: Optional[dict]) -> Optional[dict]:
+    if not price_snapshot_manifest:
+        return None
+
+    adjustments = manifest_adjustments_frame(price_snapshot_manifest)
+    base_run = price_snapshot_manifest.get("base_run_dir") or price_snapshot_manifest.get("base_price_file") or "-"
+    if adjustments.empty:
+        return {
+            "name": "Price Scale",
+            "value": f"Preserve price scale enabled; no ticker scale adjustment detected.\nBase: {base_run}",
+            "inline": False,
+        }
+
+    lines = []
+    for _, row in adjustments.iterrows():
+        lines.append(
+            f"{row['Ticker']}: price_factor={float(row['Price_Factor']):.8f}, "
+            f"volume_factor={float(row['Volume_Factor']):.8f}, "
+            f"new_rows={int(row['New_Rows_Adjusted'])}"
+        )
+    return {
+        "name": f"Price Scale Adjustments ({len(adjustments)})",
+        "value": _trunc_text("Base: " + str(base_run) + "\n" + "\n".join(lines), DISCORD_FIELD_MAX_CHARS),
+        "inline": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 绩效指标计算
 # ---------------------------------------------------------------------------
@@ -84,6 +112,8 @@ def compute_extended_metrics(
     sharpe = summary["sharpe"]
     max_dd = summary["max_drawdown"]
     max_dd_pct = max_dd * 100
+    max_loss_duration = summary["max_loss_duration"]
+    avg_loss_duration = summary["avg_loss_duration"]
     calmar = summary["calmar"]
 
     # ── 单周期最坏回撤 ──────────────────────────────────────────────
@@ -108,6 +138,8 @@ def compute_extended_metrics(
         "sharpe": sharpe,
         "max_drawdown": max_dd,
         "max_drawdown_pct": max_dd_pct,
+        "max_loss_duration": max_loss_duration,
+        "avg_loss_duration": avg_loss_duration,
         "calmar": calmar,
         "win_rate": win_rate,
         "win_days": win_days,
@@ -231,6 +263,7 @@ def send_discord_notification(
     strategy_params: Optional[dict] = None,
     data_start_offset_days: int = 0,
     rf_rate: float = 0.02,
+    price_snapshot_manifest: Optional[dict] = None,
 ) -> None:
     """
     发送 Discord 通知（含完整绩效指标 + 持仓盈亏，低权重操作已过滤）。
@@ -293,6 +326,7 @@ def send_discord_notification(
         price_df = result.get("_price_df", pd.DataFrame())
         ops_df = result.get("operations_df", pd.DataFrame())
         metrics = compute_extended_metrics(dr, nv, rb_rets, rf_rate=rf_rate)
+        price_scale_field = _price_scale_field(price_snapshot_manifest)
 
         # ── 当前持仓盈亏区块 ───────────────────────────────────────────
         holding_field: Optional[dict] = None
@@ -423,6 +457,8 @@ def send_discord_notification(
             ann_ret = metrics.get("annual_return", float("nan"))
             sharpe = metrics.get("sharpe", float("nan"))
             max_dd_pct = metrics.get("max_drawdown_pct", float("nan"))
+            max_loss_duration = metrics.get("max_loss_duration", float("nan"))
+            avg_loss_duration = metrics.get("avg_loss_duration", float("nan"))
             wp_dd_pct = metrics.get("worst_period_drawdown_pct", float("nan"))
             calmar = metrics.get("calmar", float("nan"))
             win_rate = metrics.get("win_rate", float("nan"))
@@ -438,6 +474,8 @@ def send_discord_notification(
                 f"• 年化收益率：{_fmt_metric(ann_ret, '{:.2%}')}\n"
                 f"• 夏普比率：{_fmt_metric(sharpe, '{:.2f}')}\n"
                 f"• 最大回撤：{_fmt_metric(max_dd_pct, '{:.2f}%')}（全局）\n"
+                f"• 最大亏损持续期：{_fmt_metric(max_loss_duration, '{:.0f}')} 个交易日\n"
+                f"• 平均亏损持续期：{_fmt_metric(avg_loss_duration, '{:.2f}')} 个交易日\n"
                 f"• 单周期最坏：{_fmt_metric(wp_dd_pct, '{:.2f}%')}（最差持仓周期）\n"
                 f"• Calmar 比率：{_fmt_metric(calmar, '{:.2f}')}\n"
                 f"• 胜率：{_fmt_metric(win_rate, '{:.2%}')}\n"
@@ -515,6 +553,9 @@ def send_discord_notification(
                     "inline": False,
                 })
 
+            if price_scale_field:
+                fields.append(price_scale_field)
+
             if holding_field:
                 fields.append(holding_field)
 
@@ -528,6 +569,8 @@ def send_discord_notification(
                 + f"**下一调仓日：** {next_rb.date() if next_rb else '未知'}\n\n"
             )
             fields = []
+            if price_scale_field:
+                fields.append(price_scale_field)
             if holding_field:
                 fields.append(holding_field)
             description += "\n今日无需操作，请等待下一调仓日。"

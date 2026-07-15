@@ -253,6 +253,8 @@ def compute_metrics(
             "Ann_Vol": np.nan,
             "Sharpe": np.nan,
             "Max_Drawdown": np.nan,
+            "Max_Loss_Duration_TradingDays": np.nan,
+            "Avg_Loss_Duration_TradingDays": np.nan,
             "Win_Rate_Daily": np.nan,
             "Trading_Days": 0,
             "Start_Date": "-",
@@ -265,6 +267,8 @@ def compute_metrics(
     vol = summary["annual_vol"]
     sharpe = summary["sharpe"]
     max_dd = summary["max_drawdown"]
+    max_loss_duration = summary["max_loss_duration"]
+    avg_loss_duration = summary["avg_loss_duration"]
     win_rate = summary["win_rate"]
     return {
         "label": label,
@@ -273,6 +277,8 @@ def compute_metrics(
         "Ann_Vol": vol,
         "Sharpe": sharpe,
         "Max_Drawdown": max_dd,
+        "Max_Loss_Duration_TradingDays": max_loss_duration,
+        "Avg_Loss_Duration_TradingDays": avg_loss_duration,
         "Win_Rate_Daily": win_rate,
         "Trading_Days": n_days,
         "Start_Date": str(daily_returns.index[0].date()),
@@ -543,6 +549,8 @@ def run_param_sensitivity(
             "Ann_Vol": m["Ann_Vol"],
             "Sharpe": m["Sharpe"],
             "Max_Drawdown": m["Max_Drawdown"],
+            "Max_Loss_Duration_TradingDays": m["Max_Loss_Duration_TradingDays"],
+            "Avg_Loss_Duration_TradingDays": m["Avg_Loss_Duration_TradingDays"],
             "Win_Rate_Daily": m["Win_Rate_Daily"],
             "Rebalance_Count": n_rb,
             "Start_Date": m["Start_Date"],
@@ -748,6 +756,8 @@ def write_review_report(
             ["Ann_Vol", f"{_fmt_pct(m_strat['Ann_Vol'])}  vs  {_fmt_pct(m_bm['Ann_Vol'])}"],
             ["Sharpe", f"{_fmt_f(m_strat['Sharpe'], 3)}  vs  {_fmt_f(m_bm['Sharpe'], 3)}"],
             ["Max_Drawdown", f"{_fmt_pct(m_strat['Max_Drawdown'])}  vs  {_fmt_pct(m_bm['Max_Drawdown'])}"],
+            ["Max_Loss_Duration_TradingDays", f"{_fmt_f(m_strat['Max_Loss_Duration_TradingDays'], 0)}  vs  {_fmt_f(m_bm['Max_Loss_Duration_TradingDays'], 0)}"],
+            ["Avg_Loss_Duration_TradingDays", f"{_fmt_f(m_strat['Avg_Loss_Duration_TradingDays'], 2)}  vs  {_fmt_f(m_bm['Avg_Loss_Duration_TradingDays'], 2)}"],
             ["Win_Rate_Daily", f"{_fmt_pct(m_strat['Win_Rate_Daily'])}  vs  {_fmt_pct(m_bm['Win_Rate_Daily'])}"],
             ["", ""],
         ]

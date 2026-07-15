@@ -466,6 +466,8 @@ def write_detailed_report(result: dict, output_path: str) -> None:
     vol = summary["annual_vol"] * 100 if not np.isnan(summary["annual_vol"]) else np.nan
     sharpe = summary["sharpe"]
     max_dd = summary["max_drawdown"] * 100 if not np.isnan(summary["max_drawdown"]) else np.nan
+    max_loss_duration = summary["max_loss_duration"]
+    avg_loss_duration = summary["avg_loss_duration"]
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         # Sheet 0: Config & Performance (merged)
@@ -499,6 +501,8 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["Annual_Volatility_Pct", f"{vol:.2f}" if not np.isnan(vol) else "-"],
             ["Sharpe_Ratio", f"{sharpe:.2f}" if not np.isnan(sharpe) else "-"],
             ["Max_Drawdown_Pct", f"{max_dd:.2f}" if not np.isnan(max_dd) else "-"],
+            ["Max_Loss_Duration_TradingDays", f"{max_loss_duration:.0f}" if not np.isnan(max_loss_duration) else "-"],
+            ["Avg_Loss_Duration_TradingDays", f"{avg_loss_duration:.2f}" if not np.isnan(avg_loss_duration) else "-"],
             ["Backtest_Range", f"{dr.index[0].date()} ~ {dr.index[-1].date()}" if len(dr) > 0 else "-"],
             ["Rebalance_Count", len(result["rebalance_dates"])],
         ]

@@ -15,7 +15,7 @@ import os
 import pandas as pd
 import pandas_market_calendars as mcal
 from qqq_core.paths import ProjectPaths, offset_dir_suffix, price_filename
-from qqq_config.strategy_profiles import TICKER_UNIVERSES
+from qqq_config.ticker_universes import TICKER_UNIVERSES
 
 # 项目根目录（data 的上级）
 _PATHS = ProjectPaths.from_env()
@@ -34,7 +34,7 @@ DATA_BASE_START_DATE = "2023-01-01"
 # 调仓日或其他调用方需要指定股票池时，通过 REBALANCE_TICKER_UNIVERSE /
 # YFINANCE_TICKER_UNIVERSE 环境变量，或 pull_yhfinance_Data.main(ticker_universe=...)
 # 显式传入。
-DATA_PULL_TICKER_UNIVERSE = "US_108"
+DATA_PULL_TICKER_UNIVERSE = "ORIGINAL_108"
 REBALANCE_TICKER_UNIVERSE_ENV_VAR = "REBALANCE_TICKER_UNIVERSE"
 YFINANCE_TICKER_UNIVERSE_ENV_VAR = "YFINANCE_TICKER_UNIVERSE"
 

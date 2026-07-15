@@ -13,47 +13,13 @@ import os
 import re
 from typing import Mapping
 
-
-YFINANCE_TICKERS_US_108: tuple[str, ...] = (
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
-    "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
-    "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
-    "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
-    "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
-    "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
-    "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
-    "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
-    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
-    "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
-    "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
-    "SANM", "ANET",
+from qqq_config.ticker_universes import (
+    NASDAQ_100_LAST_6_YEARS,
+    ORIGINAL_108,
+    ORIGINAL_108_PLUS_NASDAQ_100,
+    ORIGINAL_143,
+    TICKER_UNIVERSES,
 )
-
-YFINANCE_TICKERS_US_143: tuple[str, ...] = (
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "BRK-B", "TSLA", "JPM", "JNJ",
-    "V", "PG", "UNH", "HD", "MA", "XOM", "LLY", "MRK", "ABBV", "PEP",
-    "KO", "AVGO", "COST", "WMT", "BAC", "MCD", "CSCO", "ADBE", "CRM", "NFLX",
-    "ORCL", "ACN", "TMO", "ABT", "CVX", "DHR", "TXN", "VZ", "NEE", "PM",
-    "INTC", "QCOM", "HON", "IBM", "AMD", "LIN", "LOW", "GS", "MS", "UPS",
-    "RTX", "SPGI", "CAT", "AMGN", "INTU", "DE", "ISRG", "MDT", "AXP", "BLK",
-    "NOW", "LMT", "SCHW", "BA", "CB", "PLD", "BKNG", "CI", "TGT",
-    "MO", "GE", "ADI", "GILD", "SYK", "EL", "ZTS", "USB", "PGR", "SO",
-    "DUK", "CME", "APD", "BDX", "ITW", "EW", "CSX", "NSC", "CCJ", "SVM",
-    "WPM", "PAAS", "TSM", "MU", "PLTR", "WDC", "STX", "VRT",
-    "TER", "AEP", "TTMI", "RKLB", "ASTS", "SNDK", "RMBS", "ONDS", "HROW",
-    "SANM", "ANET",
-    "AMAT", "LRCX", "CRDO", "ARM", "AAOI", "MRVL", "NBIS",
-    "BN", "FN", "COHR", "FLY", "RDW", "GLW", "DELL",
-    "HPE", "ALAB", "CIEN", "LITE", "MTSI", "ASML", "SNPS", "CDNS",
-    "ETN", "GEV", "PWR", "CLS", "JBL", "FLEX", "FIX", "DDOG", "NET",
-    "MDB", "PANW", "CRWD",
-    "KLAC",  # June 12, 2026 1-for-10 split noted in research comments.
-)
-
-TICKER_UNIVERSES: Mapping[str, tuple[str, ...]] = {
-    "US_108": YFINANCE_TICKERS_US_108,
-    "US_143": YFINANCE_TICKERS_US_143,
-}
 
 
 @dataclass(frozen=True)
@@ -67,6 +33,8 @@ class StrategyProfile:
     ticker_universe: str
     description: str = ""
     max_weight: float = 0.4
+    preserve_price_scale: bool = False
+    price_scale_base_run_dir: str | None = None
     exit_policy: str = "fixed_rebalance"
     tp_base: float = 0.08
     sl_base: float = 0.05
@@ -108,8 +76,10 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 101, 62, 65, 32),
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
-        ticker_universe="US_108",
+        ticker_universe="ORIGINAL_108",
         max_weight=0.4,
+        preserve_price_scale=True,
+        price_scale_base_run_dir=None,
         exit_policy="fixed_rebalance",
         # tp_base=0.08,
         # sl_base=0.05,
@@ -121,20 +91,52 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 101, 62, 65, 32),
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
-        ticker_universe="US_108",
+        ticker_universe="ORIGINAL_108",
         max_weight=0.6,
+        preserve_price_scale=True,
+        price_scale_base_run_dir=r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0",
         exit_policy="fixed_rebalance",
         # tp_base=0.8,
         # sl_base=0.65,
         # tp_sl_probability=1.0,
         description="Strategy11 with dynamic TP/SL research profile.",
     ),
+    "Strategy12": StrategyProfile(
+        name="Strategy12",
+        factor_indices=(95, 101, 62, 65, 32),
+        composite_sheet="ic_m3_N20",
+        strategy_param="max_return_5G_Top1_P10d",
+        ticker_universe="ORIGINAL_108_PLUS_NASDAQ_100",
+        max_weight=0.6,
+        preserve_price_scale=True,
+        price_scale_base_run_dir=r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0",
+        exit_policy="fixed_rebalance",
+        # tp_base=0.8,
+        # sl_base=0.65,
+        # tp_sl_probability=1.0,
+        description="Strategy12 with dynamic TP/SL research profile.",
+    ),
+    "Strategy13": StrategyProfile(
+        name="Strategy13",
+        factor_indices=(95, 101, 62, 65, 32),
+        composite_sheet="ic_m3_N20",
+        strategy_param="max_return_5G_Top1_P10d",
+        ticker_universe="ORIGINAL_108_PLUS_ROBOTICS",
+        max_weight=0.6,
+        preserve_price_scale=True,
+        price_scale_base_run_dir=r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0",
+        exit_policy="fixed_rebalance",
+        # tp_base=0.8,
+        # sl_base=0.65,
+        # tp_sl_probability=1.0,
+        description="Strategy13 with dynamic TP/SL research profile.",
+    ),
     "Strategy2": StrategyProfile(
         name="Strategy2",
         factor_indices=(95, 24, 64, 65, 32),
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_10G_Top1_P20d",
-        ticker_universe="US_108",
+        ticker_universe="ORIGINAL_108",
         max_weight=0.4,
         description="Strategy2 Legacy 2026-03/25 research profile.",
     ),
@@ -143,7 +145,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 99, 27, 75, 19),
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top2_P20d",
-        ticker_universe="US_143",
+        ticker_universe="ORIGINAL_143",
         max_weight=0.4,
         description="Strategy3 June 2026 strategy profile.",
     ),
@@ -152,7 +154,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         factor_indices=(95, 99, 27, 46, 19),
         composite_sheet="ic_m3_N10",
         strategy_param="max_return_5G_Top2_P20d",
-        ticker_universe="US_143",
+        ticker_universe="ORIGINAL_143",
         max_weight=0.4,
         description="Strategy4 June 2026 strategy profile.",
     ),
@@ -161,13 +163,13 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
     #     factor_indices=(95, 99, 27, 19, 46),
     #     composite_sheet="ic_m3_N10",
     #     strategy_param="max_return_5G_Top2_P20d",
-    #     ticker_universe="US_143",
+    #     ticker_universe="ORIGINAL_143",
     #     description="Strategy5 June 2026 strategy profile.",
     # ),
 }
 
 
-ACTIVE_STRATEGY_PROFILE = "Strategy11"
+ACTIVE_STRATEGY_PROFILE = "Strategy13"
 PROFILE_ENV_VAR = "QQQ_STRATEGY_PROFILE"
 
 

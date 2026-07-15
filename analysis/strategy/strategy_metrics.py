@@ -17,6 +17,7 @@ from qqq_core.performance_metrics import (
     calmar_ratio,
     max_drawdown,
     max_drawdown_info,
+    loss_duration_stats,
     nav_from_returns,
     sharpe_ratio,
     worst_period_drawdown,
@@ -60,6 +61,7 @@ class StrategyMetrics:
         m["annual_profit_count"] = self._annual_profit_count()
 
         m["max_drawdown"] = self._max_drawdown()
+        m["max_loss_duration"], m["avg_loss_duration"] = loss_duration_stats(self.rets)
         m["calmar"] = self._calmar()
         dd_start, dd_end = self._max_dd_dates()
         m["max_dd_start"] = dd_start
@@ -149,7 +151,8 @@ class StrategyMetrics:
             "ret_1d", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_last_year",
             "annual_return", "annual_vol", "sharpe",
             "open_win_rate", "open_pl_ratio", "annual_open_count", "annual_profit_count",
-            "max_drawdown", "calmar", "max_dd_start", "max_dd_end",
+            "max_drawdown", "max_loss_duration", "avg_loss_duration",
+            "calmar", "max_dd_start", "max_dd_end",
             "worst_period_drawdown", "worst_period_dd_start", "worst_period_dd_end",
         ]
         return {k: np.nan for k in keys}

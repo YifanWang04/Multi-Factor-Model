@@ -16,6 +16,7 @@ from qqq_core.performance_metrics import (
     calmar_ratio,
     max_drawdown,
     max_drawdown_info,
+    loss_duration_stats,
     performance_summary,
     profit_loss_ratio,
     sharpe_ratio,
@@ -103,6 +104,26 @@ class PerformanceMetricHelperTests(unittest.TestCase):
         self.assertEqual(start, pd.Timestamp("2026-01-02"))
         self.assertEqual(end, pd.Timestamp("2026-01-05"))
 
+    def test_loss_duration_uses_peak_to_recovery_periods(self):
+        returns = pd.Series(
+            [-0.10, 1 / 9, 0.10, -0.05, 0.06],
+            index=pd.bdate_range("2026-01-02", periods=5),
+        )
+
+        max_duration, avg_duration = loss_duration_stats(returns)
+
+        self.assertEqual(max_duration, 2.0)
+        self.assertEqual(avg_duration, 2.0)
+
+    def test_loss_duration_includes_unrecovered_episode(self):
+        returns = pd.Series([0.10, -0.05, 0.00, 0.01])
+
+        self.assertEqual(loss_duration_stats(returns), (3.0, 3.0))
+        self.assertEqual(loss_duration_stats(pd.Series([0.01, 0.00])), (0.0, 0.0))
+        empty_max, empty_avg = loss_duration_stats(pd.Series(dtype=float))
+        self.assertTrue(np.isnan(empty_max))
+        self.assertTrue(np.isnan(empty_avg))
+
     def test_performance_summary_matches_individual_helpers(self):
         returns = pd.Series(
             [0.04, -0.02, 0.01],
@@ -115,6 +136,10 @@ class PerformanceMetricHelperTests(unittest.TestCase):
         self.assertAlmostEqual(summary["annual_vol"], annualized_volatility(returns, 3))
         self.assertAlmostEqual(summary["sharpe"], sharpe_ratio(returns, 0.01, 3))
         self.assertAlmostEqual(summary["max_drawdown"], max_drawdown(returns))
+        self.assertEqual(
+            (summary["max_loss_duration"], summary["avg_loss_duration"]),
+            loss_duration_stats(returns),
+        )
         self.assertAlmostEqual(summary["calmar"], calmar_ratio(returns, 3))
         self.assertAlmostEqual(summary["win_rate"], win_rate(returns))
         self.assertAlmostEqual(summary["profit_loss_ratio"], profit_loss_ratio(returns))

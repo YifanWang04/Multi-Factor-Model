@@ -223,13 +223,15 @@ Supported allocation methods in `portfolio_optimizer.py`:
 
 Optimization uses SLSQP and falls back to equal weights when data is insufficient or the solver fails. The optimizer's historical return window includes returns known by the rebalance-date close T; realized holding returns still use `(T, T_next]`. The covariance matrix uses diagonal regularization to reduce singularity risk.
 
-Performance reports include annualized return, annualized volatility, Sharpe, win rate, profit/loss ratio, max drawdown, Calmar ratio, and worst-period drawdown. Worst-period drawdown is the worst drawdown inside any single holding interval from one rebalance date to the next.
+Performance reports include annualized return, annualized volatility, Sharpe, win rate, profit/loss ratio, max drawdown, maximum/average loss duration, Calmar ratio, and worst-period drawdown. Worst-period drawdown is the worst drawdown inside any single holding interval from one rebalance date to the next.
 
 ### Performance Metric Convention
 
 All standard performance reports use the return series as the source of truth. Total return is compounded as `prod(1 + returns) - 1`; annualized return is `(1 + total_return) ** (periods_per_year / n) - 1`; annualized volatility is sample volatility with `ddof=1`; Sharpe uses annualized return minus annual risk-free rate over annualized volatility; max drawdown and Calmar include an implicit initial wealth anchor of `1.0`.
 
 Single-factor and composite-factor long metrics are based on rebalance-period returns, using `252 / rebalance_period` periods per year. Strategy backtest, detailed report, rebalance-day report, strategy review, and walk-forward full-period metrics are based on daily portfolio returns and use 252 trading days per year. Rebalance report `Win_Rate` and `Profit_Loss_Ratio` are daily-return based; strategy `open_*` metrics remain rebalance-period/opening based.
+
+Strategy loss duration is measured in trading days from the previous NAV high-water mark until NAV first recovers to or exceeds that level. Maximum and average loss duration include an unfinished underwater episode through the final backtest observation. A strategy that never falls below its high-water mark reports zero for both duration metrics.
 
 This is a metric-convention correction. Historical Excel reports are not backfilled; rerun the corresponding scripts to generate reports with the corrected values.
 
@@ -245,6 +247,8 @@ The active profile in `qqq_config/strategy_profiles.py` owns the default live/de
 ```python
 exit_policy = "fixed_rebalance"  # or "dynamic_tp_sl"
 max_weight = 0.4
+preserve_price_scale = True
+price_scale_base_run_dir = r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0"
 tp_base = 0.08
 sl_base = 0.05
 tp_sl_probability = 1.0
@@ -307,7 +311,8 @@ Important config files:
 | `qqq_core/run_context.py` | resolved profile/offset/run-dir context for one run |
 | `qqq_core/excel_io.py` | shared Excel sheet validation, price workbook loading, and atomic Excel writing |
 | `qqq_core/strategy_params.py` | shared factor suffix, composite workbook path, strategy-param parsing, and safe filename tags |
-| `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, ticker universe, selected factors, composite sheet, and live strategy parameter |
+| `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, selected factors, composite sheet, and live strategy parameter |
+| `qqq_config/ticker_universes.py` | named ticker universes imported by strategy profiles and data configuration |
 | `data/data_config.py` | data start date, direct-pull ticker universe, offset-aware paths |
 | `analysis/single_factor/config.py` | single-factor test settings |
 | `analysis/single_factor/multi_factor_config.py` | multi-factor test settings |
@@ -336,9 +341,13 @@ Rules:
 
 Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/multi_factor/composite_config.py` derive their default selected factors, composite sheet, and strategy parameter from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses. For direct composite-method research before a profile is finalized, set `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`.
 
-Each strategy profile selects one complete ticker universe through `ticker_universe`: `US_108` for the original 108-stock pool, or `US_143` for the full 143-stock pool used by the June 2026 profiles. `Strategy1` and `Strategy2` use `US_108`; `Strategy3`, `Strategy4`, and `Strategy5` use `US_143`, which includes names such as `AMAT`, `LRCX`, `CRDO`, `ARM`, `MRVL`, `ASML`, `DDOG`, `PANW`, `CRWD`, and `KLAC`.
+Each strategy profile selects one complete ticker universe through `ticker_universe`. `ORIGINAL_108` and `ORIGINAL_143` preserve the two original pools. `NASDAQ_100_LAST_6_YEARS` is the 162-ticker union of all Nasdaq-100 securities present from 2020-07-15 through the 2026-07-15 snapshot, including constituents that exited during the window. `ORIGINAL_108_PLUS_NASDAQ_100` is the duplicate-free 235-ticker union used by `Strategy12`; `Strategy1`, `Strategy11`, and `Strategy2` use `ORIGINAL_108`, while `Strategy3` and `Strategy4` use `ORIGINAL_143`.
+
+The six-year Nasdaq universe is a static research universe, not a point-in-time membership series. Using it unchanged across historical dates includes securities before their actual Nasdaq-100 entry date. It is suitable for broad data collection and candidate research, but membership-accurate backtests need date-effective constituent masks.
 
 Direct runs of `data/pull_yhfinance_Data.py` use `DATA_PULL_TICKER_UNIVERSE` in `data/data_config.py`, independent of `QQQ_STRATEGY_PROFILE`. Rebalance-day and other callers should pass the intended universe explicitly, either through `pull_yhfinance_Data.main(ticker_universe=...)` or the `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` environment variables. `run_rebalance_day.py` passes the active strategy profile's `ticker_universe` into the pipeline automatically. The pull script prints the resolved ticker universe, source, and ticker count at startup.
+
+Each strategy profile can set `preserve_price_scale=True` to protect live rebalance runs from yfinance corporate-action rewrites. Use `price_scale_base_run_dir` in the same profile to pin the canonical base run; leave it as `None` to auto-select the newest previous official run for the same profile and offset. `run_rebalance_day.py` passes these values into the data puller automatically.
 
 Composite factor selection is resolved in this order:
 
@@ -378,6 +387,8 @@ Main steps:
 
 New rebalance-day runs are created under `output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offsetN/`. Intermediate data remains in `data/`, `factor_raw/`, `factor_processed/`, and `composite_factor_reports/` inside the run directory; the final workbook is written to `reports/rebalance_day_report.xlsx`. Existing `output/rebalance_day_*` run directories can still be passed with `--run-dir`.
 
+For profiles with `preserve_price_scale=True`, the data pull step keeps the configured base run's price workbook as the canonical scale: historical rows through the base run are frozen, fresh rows after that cutoff are appended, and any split-like stable price ratio detected in the overlap is applied to the appended rows. This is meant to keep HON/SPGI-style yfinance restatements from changing past rebalance reports while still allowing new dates to be added. The pull step writes `data/price_snapshot_manifest.json` in the run directory with the base workbook and any ticker-level scale factors. The final Excel report includes `Price_Scale_Adjustments` plus `Price_Scale_Config_Base_Run_Dir`, `Price_Scale_Base_Run`, and `Price_Scale_Base_File` summary rows in `Rebalance_Config_Status`, so the configured base and the actual workbook used are visible without checking environment variables.
+
 The report includes configuration, current operations, historical operations, return series, cumulative returns, period summaries, current holdings, mark-to-market fields, and next-rebalance information. For `dynamic_tp_sl` profiles it also includes `TP_SL_Schedule` and `TP_SL_Action_Checklist` for precomputed manual TP/SL monitoring. `Current_Operations_All` is no longer emitted; `All_Operations_All` filters out rows with `Weight < 0.01`.
 
 Discord messages include:
@@ -391,6 +402,8 @@ Discord messages include:
 Discord delivery is disabled unless `REBALANCE_DISCORD_WEBHOOK_URL` is set in the environment. Webhook URLs should not be committed to the repository.
 
 Live price fallback uses local prices first. If a completed historical bar is missing close data, yfinance is queried for the completed daily bar with retry/backoff. `fast_info.last_price` is not written into historical close data.
+
+The yfinance pull isolates failures by ticker. A symbol that returns no data or raises a download exception is skipped with an encoding-safe `[SKIP]` notice and included in the final skipped-symbol summary; the remaining symbols continue. The pull still fails if every requested symbol is skipped, preventing an empty price workbook from entering the factor pipeline.
 
 ## Strategy Review
 

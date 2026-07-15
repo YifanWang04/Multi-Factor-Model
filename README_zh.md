@@ -222,13 +222,15 @@ qqq/
 
 优化使用 SLSQP；当数据不足或求解失败时自动降级为等权。权重优化的历史收益窗口包含调仓日 T 收盘时已经可知的数据；实际持仓收益仍使用 `(T, T_next]`。协方差矩阵使用对角正则化降低奇异风险。
 
-绩效报告包括年化收益、年化波动、夏普、胜率、盈亏比、最大回撤、Calmar 比率和单周期最坏回撤。单周期最坏回撤是所有调仓持仓区间内最差的一次区间内回撤。
+绩效报告包括年化收益、年化波动、夏普、胜率、盈亏比、最大回撤、最大/平均亏损持续期、Calmar 比率和单周期最坏回撤。单周期最坏回撤是所有调仓持仓区间内最差的一次区间内回撤。
 
 ### 绩效指标口径
 
 所有标准绩效报告都以收益率序列为权威输入。总收益按 `prod(1 + returns) - 1` 复利计算；年化收益按 `(1 + total_return) ** (periods_per_year / n) - 1` 计算；年化波动使用 `ddof=1` 的样本标准差；夏普使用年化收益减年化无风险利率再除以年化波动；最大回撤和 Calmar 都包含隐含初始净值 `1.0`。
 
 单因子和复合因子的 long 指标基于调仓期收益，年化频率为 `252 / rebalance_period`。策略回测、详细报告、调仓日报告、策略复盘和 Walk-Forward 的全局绩效指标基于日频组合收益，年化频率为 252。调仓日报告中的 `Win_Rate` 和 `Profit_Loss_Ratio` 保持日收益口径；策略中的 `open_*` 指标保持调仓期/开仓期口径。
+
+策略的亏损持续期按交易日计算：从净值的前一个历史高水位开始，到净值首次恢复或超过该水位为止。最大和平均亏损持续期都会将回测结束时尚未修复的水下区间统计到最后一个观测日；若净值从未跌破高水位，两项指标均为 0。
 
 本次属于指标口径修正，不批量回填历史 Excel；重新运行对应脚本后，新报告会使用修正后的数值。
 
@@ -244,6 +246,8 @@ qqq/
 ```python
 exit_policy = "fixed_rebalance"  # 或 "dynamic_tp_sl"
 max_weight = 0.4
+preserve_price_scale = True
+price_scale_base_run_dir = r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0"
 tp_base = 0.08
 sl_base = 0.05
 tp_sl_probability = 1.0
@@ -305,7 +309,8 @@ V1 实盘流程不要求每天运行 Python，也不会自动下单。active pro
 | `qqq_core/run_context.py` | 一次运行的 profile、offset、run-dir 上下文 |
 | `qqq_core/excel_io.py` | Excel sheet 校验、价格 workbook 读取、因子 sheet 读取和原子写入 |
 | `qqq_core/strategy_params.py` | 因子后缀、复合因子文件名、策略参数解析和安全文件名标签 |
-| `qqq_config/strategy_profiles.py` | active strategy profile、股票池、选定因子、复合 sheet、实盘策略参数的唯一权威配置源 |
+| `qqq_config/strategy_profiles.py` | active strategy profile、选定因子、复合 sheet、实盘策略参数的唯一权威配置源 |
+| `qqq_config/ticker_universes.py` | strategy profile 与数据配置共用的命名股票池 |
 | `data/data_config.py` | 数据起始日、直接拉取默认股票池、offset 路径 |
 | `analysis/single_factor/config.py` | 单因子测试配置 |
 | `analysis/single_factor/multi_factor_config.py` | 多因子测试配置 |
@@ -334,9 +339,13 @@ V1 实盘流程不要求每天运行 Python，也不会自动下单。active pro
 
 核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/multi_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet 和策略参数。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。在新 profile 尚未定稿、需要直接探索复合方法时，可在 `analysis/multi_factor/composite_config.py` 中设置 `COMPOSITE_RESEARCH_FACTOR_INDICES`。
 
-每个 strategy profile 通过 `ticker_universe` 选择一套完整股票池：`US_108` 表示原来的 108 只股票，`US_143` 表示 2026 年 6 月 profile 使用的完整 143 只股票。`Strategy1` 和 `Strategy2` 使用 `US_108`；`Strategy3`、`Strategy4` 和 `Strategy5` 使用 `US_143`，其中包含 `AMAT`、`LRCX`、`CRDO`、`ARM`、`MRVL`、`ASML`、`DDOG`、`PANW`、`CRWD`、`KLAC` 等股票。
+每个 strategy profile 通过 `ticker_universe` 选择一套完整股票池。`ORIGINAL_108` 和 `ORIGINAL_143` 分别保留原始的 108、143 只股票池；`NASDAQ_100_LAST_6_YEARS` 是 2020-07-15 至 2026-07-15 快照期间所有纳斯达克 100 成分证券的 162 个 ticker 去重合集，包含期间已退出的成分；`ORIGINAL_108_PLUS_NASDAQ_100` 是与原始 108 股票池合并后的 235 个 ticker 去重合集，由 `Strategy12` 使用。`Strategy1`、`Strategy11`、`Strategy2` 使用 `ORIGINAL_108`，`Strategy3`、`Strategy4` 使用 `ORIGINAL_143`。
+
+这份六年纳指股票池是静态研究全集，不是按日期生效的 point-in-time 成分表。若直接把它用于整个历史区间，会在部分股票正式加入纳斯达克 100 之前就将其纳入截面；它适合批量拉数和候选池研究，但严格复现历史成分的回测仍需按生效日期生成成分掩码。
 
 直接运行 `data/pull_yhfinance_Data.py` 时使用 `data/data_config.py` 中的 `DATA_PULL_TICKER_UNIVERSE`，不受 `QQQ_STRATEGY_PROFILE` 影响。调仓日或其他调用方需要显式传入股票池，可调用 `pull_yhfinance_Data.main(ticker_universe=...)`，或设置 `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` 环境变量。`run_rebalance_day.py` 会自动把 active strategy profile 的 `ticker_universe` 传给 pipeline。拉取脚本启动时会打印解析后的 ticker universe、来源和 ticker 数量。
+
+每个 strategy profile 可以单独设置 `preserve_price_scale=True`。同一个 profile 里的 `price_scale_base_run_dir` 用来固定价格口径基准 run；设为 `None` 时，会自动选择同 profile、同 offset 的上一份正式 run。`run_rebalance_day.py` 会自动把这些配置传给拉数脚本，日常不需要记环境变量。
 
 复合因子选择按以下优先级解析：
 
@@ -371,6 +380,8 @@ sheet，并通过 `REBALANCE_SELECTED_FACTOR_INDICES` / `REBALANCE_SELECTED_COMP
 4. 生成 `rebalance_day_report.xlsx`
 5. 可选发送 Discord 通知
 
+如果 active profile 的 `preserve_price_scale=True`，拉数阶段会把 profile 配置的基准 run 价格 workbook 作为口径：基准 run 截止日及以前的历史行保持不变，只追加 cutoff 之后的新行；若重叠区间检测到稳定的拆股式价格比例，则把新追加行乘回旧价格口径，并按反向比例调整 Volume。每次运行会在 run 目录写出 `data/price_snapshot_manifest.json`，记录实际使用的基准 workbook 和每个 ticker 的比例；最终 Excel 会输出 `Price_Scale_Adjustments` sheet，并在 `Rebalance_Config_Status` 显示 `Price_Scale_Config_Base_Run_Dir`、`Price_Scale_Base_Run`、`Price_Scale_Base_File`，所以不看环境变量也能知道配置基准和实际使用文件。
+
 报告包含配置、当前操作、历史操作、收益序列、累计收益、周期汇总、当前持仓、市值重估字段和下一调仓日信息。`dynamic_tp_sl` profile 还会输出 `TP_SL_Schedule` 和 `TP_SL_Action_Checklist`，用于提前设置人工/外部价格提醒。`Current_Operations_All` 不再输出；`All_Operations_All` 会过滤 `Weight < 0.01` 的行。
 
 Discord 消息包含：
@@ -384,6 +395,8 @@ Discord 消息包含：
 Discord 发送默认关闭，只有设置环境变量 `REBALANCE_DISCORD_WEBHOOK_URL` 后才会推送。Webhook URL 不应提交到仓库。
 
 实时价格回退逻辑优先使用本地价格。若已完成的历史 bar 缺少 close，会通过 yfinance 重新拉取已完成日线；`fast_info.last_price` 不再写入历史 close 数据。
+
+yfinance 拉取按股票代码隔离失败。单只股票返回空数据或抛出下载异常时，会输出兼容当前终端编码的 `[SKIP]` 提示并计入最终跳过汇总，其余股票继续执行；只有全部股票都被跳过时才终止，避免空价格工作簿进入因子流水线。
 
 ## 策略复盘
 

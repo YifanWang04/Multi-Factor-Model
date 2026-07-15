@@ -527,23 +527,39 @@ class RiskFixTests(unittest.TestCase):
     def test_strategy_profiles_own_ticker_universe(self):
         import qqq_config.strategy_profiles as profiles
 
-        self.assertEqual(len(profiles.TICKER_UNIVERSES["US_108"]), 108)
-        self.assertEqual(len(profiles.TICKER_UNIVERSES["US_143"]), 143)
+        self.assertEqual(len(profiles.TICKER_UNIVERSES["ORIGINAL_108"]), 108)
+        self.assertEqual(len(profiles.TICKER_UNIVERSES["ORIGINAL_143"]), 143)
+        self.assertEqual(len(profiles.TICKER_UNIVERSES["NASDAQ_100_LAST_6_YEARS"]), 162)
+        self.assertEqual(
+            len(profiles.TICKER_UNIVERSES["ORIGINAL_108_PLUS_NASDAQ_100"]),
+            235,
+        )
+        for universe in profiles.TICKER_UNIVERSES.values():
+            self.assertEqual(len(universe), len(set(universe)))
+        nasdaq_history = profiles.TICKER_UNIVERSES["NASDAQ_100_LAST_6_YEARS"]
+        for ticker in ("BMRN", "PTON", "MRNA", "MDB", "INSM", "VSNT"):
+            self.assertIn(ticker, nasdaq_history)
+        for ticker in ("PLTR", "ARM", "ALAB", "RKLB", "SPCX"):
+            self.assertIn(ticker, nasdaq_history)
         self.assertEqual(
             profiles.STRATEGY_PROFILES["Strategy1"].ticker_universe,
-            "US_108",
+            "ORIGINAL_108",
         )
         self.assertEqual(
             profiles.STRATEGY_PROFILES["Strategy2"].ticker_universe,
-            "US_108",
+            "ORIGINAL_108",
         )
-        for name in ("Strategy3", "Strategy4", "Strategy5"):
+        for name in ("Strategy3", "Strategy4"):
             profile = profiles.STRATEGY_PROFILES[name]
             tickers = profile.ticker_symbols
-            self.assertEqual(profile.ticker_universe, "US_143")
-            self.assertEqual(tickers, profiles.TICKER_UNIVERSES["US_143"])
+            self.assertEqual(profile.ticker_universe, "ORIGINAL_143")
+            self.assertEqual(tickers, profiles.TICKER_UNIVERSES["ORIGINAL_143"])
             self.assertIn("AMAT", tickers)
             self.assertIn("KLAC", tickers)
+        self.assertEqual(
+            profiles.STRATEGY_PROFILES["Strategy12"].ticker_universe,
+            "ORIGINAL_108_PLUS_NASDAQ_100",
+        )
 
     def test_data_config_tickers_use_config_unless_explicitly_overridden(self):
         old_profile = os.environ.get("QQQ_STRATEGY_PROFILE")
@@ -563,11 +579,11 @@ class RiskFixTests(unittest.TestCase):
 
             dc = importlib.reload(dc)
             self.assertEqual(dc.YFINANCE_TICKER_UNIVERSE, dc.DATA_PULL_TICKER_UNIVERSE)
-            self.assertEqual(dc.YFINANCE_TICKER_UNIVERSE, "US_108")
+            self.assertEqual(dc.YFINANCE_TICKER_UNIVERSE, "ORIGINAL_108")
             self.assertFalse(dc.should_use_price_sheet("AMAT"))
 
-            os.environ["REBALANCE_TICKER_UNIVERSE"] = "US_143"
-            self.assertEqual(dc.resolve_ticker_universe_name(), "US_143")
+            os.environ["REBALANCE_TICKER_UNIVERSE"] = "ORIGINAL_143"
+            self.assertEqual(dc.resolve_ticker_universe_name(), "ORIGINAL_143")
             self.assertTrue(dc.should_use_price_sheet("AMAT"))
             self.assertTrue(dc.should_use_price_sheet("KLAC"))
         finally:
@@ -838,6 +854,8 @@ class RiskFixTests(unittest.TestCase):
         self.assertAlmostEqual(strategy["annual_vol"], expected["annual_vol"])
         self.assertAlmostEqual(strategy["sharpe"], expected["sharpe"])
         self.assertAlmostEqual(strategy["max_drawdown"], expected["max_drawdown"])
+        self.assertEqual(strategy["max_loss_duration"], expected["max_loss_duration"])
+        self.assertEqual(strategy["avg_loss_duration"], expected["avg_loss_duration"])
         self.assertAlmostEqual(strategy["calmar"], expected["calmar"])
         self.assertAlmostEqual(strategy["worst_period_drawdown"], expected_wp_dd)
 
@@ -845,6 +863,8 @@ class RiskFixTests(unittest.TestCase):
         self.assertAlmostEqual(rebalance["volatility"], expected["annual_vol"])
         self.assertAlmostEqual(rebalance["sharpe"], expected["sharpe"])
         self.assertAlmostEqual(rebalance["max_drawdown"], expected["max_drawdown"])
+        self.assertEqual(rebalance["max_loss_duration"], expected["max_loss_duration"])
+        self.assertEqual(rebalance["avg_loss_duration"], expected["avg_loss_duration"])
         self.assertAlmostEqual(rebalance["calmar"], expected["calmar"])
         self.assertAlmostEqual(rebalance["win_rate"], expected["win_rate"])
         self.assertAlmostEqual(rebalance["profit_loss_ratio"], expected["profit_loss_ratio"])
@@ -928,12 +948,16 @@ class RiskFixTests(unittest.TestCase):
         self.assertIn("Ann_Vol", actual)
         self.assertIn("Sharpe", actual)
         self.assertIn("Max_Drawdown", actual)
+        self.assertIn("Max_Loss_Duration_TradingDays", actual)
+        self.assertIn("Avg_Loss_Duration_TradingDays", actual)
         self.assertIn("Win_Rate_Daily", actual)
         self.assertAlmostEqual(actual["Total_Return"], expected["total_return"])
         self.assertAlmostEqual(actual["Ann_Return"], expected["annual_return"])
         self.assertAlmostEqual(actual["Ann_Vol"], expected["annual_vol"])
         self.assertAlmostEqual(actual["Sharpe"], expected["sharpe"])
         self.assertAlmostEqual(actual["Max_Drawdown"], expected["max_drawdown"])
+        self.assertEqual(actual["Max_Loss_Duration_TradingDays"], expected["max_loss_duration"])
+        self.assertEqual(actual["Avg_Loss_Duration_TradingDays"], expected["avg_loss_duration"])
         self.assertAlmostEqual(actual["Win_Rate_Daily"], expected["win_rate"])
 
 

@@ -79,6 +79,8 @@ _METRIC_COLS = [
     ("annual_open_count",  "年化开仓次数"),
     ("annual_profit_count","年化盈利次数"),
     ("max_drawdown",       "最大回撤"),
+    ("max_loss_duration",  "最大亏损持续期(交易日)"),
+    ("avg_loss_duration",  "平均亏损持续期(交易日)"),
     ("worst_period_drawdown", "单周期最坏回撤"),
     ("calmar",             "Calmar比率"),
     ("max_dd_start",       "最大回撤起始日"),
@@ -104,7 +106,10 @@ _HIGHER_BETTER = {
     "open_win_rate", "open_pl_ratio", "calmar",
     "annual_open_count", "annual_profit_count",
 }
-_LOWER_BETTER = {"max_drawdown", "worst_period_drawdown"}   # 越负越红（用反向色阶）
+_LOWER_BETTER = {
+    "max_drawdown", "worst_period_drawdown",
+}
+_SMALLER_POSITIVE_BETTER = {"max_loss_duration", "avg_loss_duration"}
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +436,16 @@ class StrategyReporter:
                     mid_color="FFEB9C",
                     end_type="percentile", end_value=90,
                     end_color="FFFFFF",
+                )
+                ws.conditional_formatting.add(rng, rule)
+            elif key in _SMALLER_POSITIVE_BETTER:
+                rule = ColorScaleRule(
+                    start_type="percentile", start_value=10,
+                    start_color="FFFFFF",
+                    mid_type="percentile", mid_value=50,
+                    mid_color="FFEB9C",
+                    end_type="percentile", end_value=90,
+                    end_color="9C0006",
                 )
                 ws.conditional_formatting.add(rng, rule)
 
