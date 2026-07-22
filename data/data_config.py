@@ -22,13 +22,16 @@ _PATHS = ProjectPaths.from_env()
 _PROJECT_ROOT = str(_PATHS.root)
 PROJECT_ROOT = _PROJECT_ROOT
 
-# 数据起始日提前的交易日数：0=不提前，正数=提前 N 个交易日
-# 注：此值只从配置文件读取（不再支持通过环境变量覆盖）
-# 6 = 将调仓日从 3.27 提前至 3.19（约 6 个交易日）
+# 数据覆盖起始日提前的交易日数：0=不提前，正数=提前 N 个交易日。
+# 该值控制行情覆盖与 offset 产物路径，不再隐式改变 strategy profile 的调仓相位。
 DATA_START_OFFSET_DAYS = 0
 
-# 基准起始日（用于 pull 计算实际 start_date）
+# 数据覆盖基准起始日（用于 pull 计算实际 start_date）
 DATA_BASE_START_DATE = "2023-01-01"
+
+# 调仓日 pipeline 中，active strategy profile 的 data_download_start_date
+# 被解释为“行情下载起始日”，不再用于固定策略调仓相位。
+REBALANCE_DATA_START_DATE_ENV_VAR = "REBALANCE_DATA_START_DATE"
 
 # 直接运行 data/pull_yhfinance_Data.py 时使用的默认股票池。
 # 调仓日或其他调用方需要指定股票池时，通过 REBALANCE_TICKER_UNIVERSE /
@@ -94,10 +97,34 @@ YFINANCE_DOWNLOAD_PROGRESS = False
 FACTOR_USE_ADJUSTED_OHLC = False
 
 
-def yfinance_pull_start_date() -> str:
+def resolve_rebalance_data_start_date(
+    explicit_start_date: str | None = None,
+) -> str | None:
+    """返回调仓日 pipeline 指定的精确行情下载起始日。"""
+    raw = explicit_start_date or os.environ.get(REBALANCE_DATA_START_DATE_ENV_VAR)
+    if not raw:
+        return None
+    try:
+        start = pd.Timestamp(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Invalid rebalance data start date {raw!r}; expected YYYY-MM-DD"
+        ) from exc
+    if pd.isna(start):
+        raise ValueError("Rebalance data start date cannot be NaT")
+    if start.tzinfo is not None:
+        start = start.tz_localize(None)
+    return start.normalize().strftime("%Y-%m-%d")
+
+
+def yfinance_pull_start_date(explicit_start_date: str | None = None) -> str:
     """根据 DATA_BASE_START_DATE 与 DATA_START_OFFSET_DAYS 得到 yfinance 的 start 参数（YYYY-MM-DD）。
     通过 _resolve_offset() 优先读取环境变量 REBALANCE_OFFSET_DAYS。
     """
+    profile_start = resolve_rebalance_data_start_date(explicit_start_date)
+    if profile_start is not None:
+        return profile_start
+
     offset = _resolve_offset()
     if offset <= 0:
         return DATA_BASE_START_DATE
@@ -118,11 +145,16 @@ def yfinance_pull_start_date() -> str:
 
 
 # 统一 offset 解析：优先读环境变量（subprocess 传播），否则读配置文件常量
-def _resolve_offset() -> int:
+def resolve_data_start_offset_days() -> int:
     env_val = os.environ.get("REBALANCE_OFFSET_DAYS")
     if env_val is not None:
         return int(env_val)
     return DATA_START_OFFSET_DAYS
+
+
+def _resolve_offset() -> int:
+    """Backward-compatible private alias."""
+    return resolve_data_start_offset_days()
 
 
 # 价格文件名（不含路径）

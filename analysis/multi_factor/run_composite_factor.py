@@ -29,7 +29,8 @@ for p in [_DIR, os.path.join(_ROOT, "analysis", "single_factor"), _ROOT]:
         sys.path.insert(0, p)
 
 from composite_config import (
-    PRICE_FILE, RETURN_COLUMN, OUTPUT_DIR, REBALANCE_PERIOD, COMPOSITE_REBALANCE_PERIODS,
+    PRICE_FILE, RETURN_COLUMN, OUTPUT_DIR, REBALANCE_PERIOD, REBALANCE_ANCHOR_DATE,
+    COMPOSITE_REBALANCE_PERIODS,
     N_WINDOWS, M_WINDOWS, GROUP_NUM, WEIGHT_METHOD, RISK_FREE_RATE,
     TRANSACTION_COST, get_selected_factor_files, get_factor_display_name,
     SELECTED_FACTOR_INDICES, build_factor_suffix,
@@ -66,7 +67,12 @@ def load_selected_factors(factor_files):
     return factor_dict
 
 
-def align_to_rebalance_periods(factor_dict, ret, rebalance_period):
+def align_to_rebalance_periods(
+    factor_dict,
+    ret,
+    rebalance_period,
+    rebalance_anchor_date=None,
+):
     """
     用第一个因子的日期生成调仓期，对所有因子和收益率对齐。
     rebalance_period: 调仓周期（交易日数）。
@@ -76,13 +82,23 @@ def align_to_rebalance_periods(factor_dict, ret, rebalance_period):
     """
     # 用第一个因子做调仓日生成
     first_factor = next(iter(factor_dict.values()))
-    manager = RebalancePeriodManager(first_factor, ret, rebalance_period)
+    manager = RebalancePeriodManager(
+        first_factor,
+        ret,
+        rebalance_period,
+        rebalance_anchor_date=rebalance_anchor_date,
+    )
     _, ret_periods = manager.align_factor_return_by_period()
     common_dates = ret_periods.index
 
     factor_periods_dict = {}
     for name, fdf in factor_dict.items():
-        mgr = RebalancePeriodManager(fdf, ret, rebalance_period)
+        mgr = RebalancePeriodManager(
+            fdf,
+            ret,
+            rebalance_period,
+            rebalance_anchor_date=rebalance_anchor_date,
+        )
         fp, _ = mgr.align_factor_return_by_period()
         # 统一对齐到 ret_periods 的日期，缺失日期以 NaN 填充
         fp = fp.reindex(common_dates)
@@ -177,7 +193,13 @@ def main():
     print(f"复合因子调仓周期: {periods}")
 
     tasks = [
-        (factor_dict, ret, factor_suffix, rebalance_period)
+        (
+            factor_dict,
+            ret,
+            factor_suffix,
+            rebalance_period,
+            REBALANCE_ANCHOR_DATE,
+        )
         for rebalance_period in periods
     ]
     ordered_parallel_map(
@@ -189,23 +211,33 @@ def main():
 
 
 def _run_one_rebalance_period_worker(task):
-    factor_dict, ret, factor_suffix, rebalance_period = task
+    factor_dict, ret, factor_suffix, rebalance_period, rebalance_anchor_date = task
     return _run_one_rebalance_period(
         factor_dict=factor_dict,
         ret=ret,
         factor_suffix=factor_suffix,
         rebalance_period=rebalance_period,
+        rebalance_anchor_date=rebalance_anchor_date,
     )
 
 
-def _run_one_rebalance_period(factor_dict, ret, factor_suffix: str, rebalance_period: int):
+def _run_one_rebalance_period(
+    factor_dict,
+    ret,
+    factor_suffix: str,
+    rebalance_period: int,
+    rebalance_anchor_date=None,
+):
     print("\n" + "=" * 64)
     print(f"生成 P{rebalance_period} 复合因子")
     print("=" * 64)
 
     # 2. 对齐到调仓期
     factor_periods_dict, ret_periods = align_to_rebalance_periods(
-        factor_dict, ret, rebalance_period
+        factor_dict,
+        ret,
+        rebalance_period,
+        rebalance_anchor_date=rebalance_anchor_date,
     )
     print(f"调仓期数量: {len(ret_periods)}")
 
@@ -214,7 +246,12 @@ def _run_one_rebalance_period(factor_dict, ret, factor_suffix: str, rebalance_pe
     #       因此最后一个调仓日 r_k 被排除（无 next_date）。但 r_k 的因子截面值已经可得，
     #       用前 N 期 IC 权重即可合成当期复合因子，确保复合因子时序与最新数据同步。
     _first_daily = next(iter(factor_dict.values()))
-    _mgr_last = RebalancePeriodManager(_first_daily, ret, rebalance_period)
+    _mgr_last = RebalancePeriodManager(
+        _first_daily,
+        ret,
+        rebalance_period,
+        rebalance_anchor_date=rebalance_anchor_date,
+    )
     _all_daily_rb = _mgr_last.get_rebalance_dates()
     if _all_daily_rb:
         _last_rb = pd.Timestamp(_all_daily_rb[-1])

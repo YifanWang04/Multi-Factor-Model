@@ -109,6 +109,10 @@ SELECTED_FACTOR_NAMES = [f"alpha{i:03d}" for i in SELECTED_FACTOR_INDICES]
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日。
 # REBALANCE_PERIOD 是兼容旧调用方的主周期；多周期研究使用 COMPOSITE_REBALANCE_PERIODS。
 REBALANCE_PERIOD = ACTIVE_PROFILE.rebalance_period
+# Profile data_download_start_date 只控制行情下载起点；复合因子调仓日
+# 从可用因子/收益数据的首日自然生成。
+DATA_DOWNLOAD_START_DATE = ACTIVE_PROFILE.data_download_start_date
+REBALANCE_ANCHOR_DATE = None
 COMPOSITE_REBALANCE_PERIODS = [5, 10, 20]
 
 # 一元/IC加权滚动窗口列表 N

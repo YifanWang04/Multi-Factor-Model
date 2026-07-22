@@ -16,12 +16,92 @@
 """
 
 import pandas as pd
+import pandas_market_calendars as mcal
+
+
+class RebalanceAnchorError(ValueError):
+    """Raised when a requested strategy anchor cannot be supported by the data."""
+
+
+def _normalized_dates(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    dates = pd.DatetimeIndex(pd.to_datetime(index, errors="coerce")).dropna()
+    if dates.tz is not None:
+        dates = dates.tz_localize(None)
+    return pd.DatetimeIndex(dates.normalize().unique()).sort_values()
+
+
+def _next_nyse_session(anchor_date: pd.Timestamp) -> pd.Timestamp:
+    nyse = mcal.get_calendar("NYSE")
+    schedule = nyse.schedule(
+        start_date=anchor_date.strftime("%Y-%m-%d"),
+        end_date=(anchor_date + pd.Timedelta(days=14)).strftime("%Y-%m-%d"),
+    )
+    if schedule.empty:
+        raise RebalanceAnchorError(
+            f"Cannot resolve an NYSE session on or after {anchor_date.date()}"
+        )
+    return pd.Timestamp(schedule.index[0]).tz_localize(None).normalize()
+
+
+def resolve_rebalance_anchor(
+    factor_index: pd.DatetimeIndex,
+    ret_index: pd.DatetimeIndex,
+    anchor_date: str | pd.Timestamp | None,
+) -> pd.Timestamp | None:
+    """Resolve an explicitly requested calendar anchor to the next NYSE session.
+
+    A configured anchor is strict: the resolved session must exist in both the
+    factor and return calendars. This permits weekend/holiday normalization but
+    prevents missing history from silently shifting the strategy phase.
+    """
+    if anchor_date is None:
+        return None
+
+    try:
+        requested = pd.Timestamp(anchor_date)
+    except (TypeError, ValueError) as exc:
+        raise RebalanceAnchorError(
+            f"Invalid rebalance anchor {anchor_date!r}; expected YYYY-MM-DD"
+        ) from exc
+    if pd.isna(requested):
+        raise RebalanceAnchorError("Rebalance anchor cannot be NaT")
+    if requested.tzinfo is not None:
+        requested = requested.tz_localize(None)
+    requested = requested.normalize()
+    effective = _next_nyse_session(requested)
+
+    factor_dates = _normalized_dates(factor_index)
+    return_dates = _normalized_dates(ret_index)
+    missing_from = []
+    if effective not in factor_dates:
+        missing_from.append("factor calendar")
+    if effective not in return_dates:
+        missing_from.append("return calendar")
+    if missing_from:
+        factor_range = (
+            f"{factor_dates.min().date()} ~ {factor_dates.max().date()}"
+            if len(factor_dates)
+            else "empty"
+        )
+        return_range = (
+            f"{return_dates.min().date()} ~ {return_dates.max().date()}"
+            if len(return_dates)
+            else "empty"
+        )
+        raise RebalanceAnchorError(
+            f"Requested rebalance anchor {requested.date()} resolves to NYSE session "
+            f"{effective.date()}, but it is missing from {', '.join(missing_from)}. "
+            f"Factor range: {factor_range}; return range: {return_range}. "
+            "Regenerate data/factors/composite output for this explicit calendar anchor."
+        )
+    return effective
 
 
 def get_rebalance_calendar(
     factor_index: pd.DatetimeIndex,
     ret_index: pd.DatetimeIndex,
     rebalance_period_days: int,
+    anchor_date: str | pd.Timestamp | None = None,
 ) -> list:
     """
     从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点。
@@ -42,10 +122,22 @@ def get_rebalance_calendar(
     list
         调仓日列表（均为交易日）
     """
-    dates = sorted(factor_index)
+    dates = list(_normalized_dates(factor_index))
+    ret_sorted = _normalized_dates(ret_index)
+
+    effective_anchor = resolve_rebalance_anchor(
+        factor_index,
+        ret_index,
+        anchor_date,
+    )
     if not dates:
         return []
-    ret_sorted = ret_index.sort_values()
+    if effective_anchor is not None:
+        dates = [date for date in dates if date >= effective_anchor]
+        if not dates:
+            raise RebalanceAnchorError(
+                f"No factor dates on or after effective anchor {effective_anchor.date()}"
+            )
 
     selected = [dates[0]]
     last_selected = dates[0]

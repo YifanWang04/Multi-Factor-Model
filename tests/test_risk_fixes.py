@@ -507,12 +507,17 @@ class RiskFixTests(unittest.TestCase):
         from qqq_config.strategy_profiles import get_active_profile
         import analysis.strategy.run_rebalance_day as rd
         import analysis.strategy.run_detailed_backtest_report as detailed
+        import analysis.strategy.rebalance.rebalance_app as rebalance_app
 
         profile = get_active_profile()
         self.assertEqual(rd.ACTIVE_STRATEGY_PROFILE, profile.name)
         self.assertEqual(rd.COMPOSITE_FACTOR_SHEET, profile.composite_sheet)
         self.assertEqual(rd.STRATEGY_PARAM, profile.strategy_param)
         self.assertEqual(rd.SELECTED_FACTOR_INDICES, list(profile.factor_indices))
+        self.assertEqual(
+            rebalance_app.STRATEGY_PARAMS["data_download_start_date"],
+            profile.data_download_start_date,
+        )
         self.assertEqual(detailed.COMPOSITE_FACTOR_SHEET, profile.composite_sheet)
         self.assertEqual(detailed.STRATEGY_PARAM, profile.strategy_param)
 
@@ -559,6 +564,10 @@ class RiskFixTests(unittest.TestCase):
         self.assertEqual(
             profiles.STRATEGY_PROFILES["Strategy12"].ticker_universe,
             "ORIGINAL_108_PLUS_NASDAQ_100",
+        )
+        self.assertEqual(
+            profiles.STRATEGY_PROFILES["Strategy12"].data_download_start_date,
+            "2020-01-01",
         )
 
     def test_data_config_tickers_use_config_unless_explicitly_overridden(self):

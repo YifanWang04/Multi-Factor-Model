@@ -7,7 +7,7 @@
 所有输出保存至带日期时间的独立文件夹：
   offset=0:  output/rebalance_day_YYYY-MM-DD_HHMMSS/
   offset!=0: output/rebalance_day_offset{N}d_YYYY-MM-DD_HHMMSS/
-offset 由本脚本中 DATA_START_OFFSET_DAYS 配置控制。
+  strategy profile 的 data_download_start_date 控制行情下载起点；调仓日从可用数据首日生成。
 
 职责分工（SRP 原则）：
   - run_rebalance_day.py  — 流程编排器（Pipeline 执行 + 各阶段串联）
@@ -77,6 +77,7 @@ import strategy_config as cfg
 from data.data_config import (
     COMPOSITE_FACTOR_OUTPUT_DIR,
     COMPOSITE_FACTOR_FILE as _COMPOSITE_FACTOR_FILE,
+    resolve_data_start_offset_days,
 )
 from data.price_snapshot import load_manifest as load_price_snapshot_manifest
 from strategy_utils import (
@@ -104,8 +105,8 @@ _PATHS = ProjectPaths.from_env()
 PROJECT_ROOT = str(_PATHS.root)
 OUTPUT_BASE = str(_PATHS.rebalance_runs_dir)
 
-# offset 配置：数据起始日提前的交易日数，0=不提前，正数=提前 N 个交易日
-DATA_START_OFFSET_DAYS = 0
+# 数据覆盖 offset 统一从 data_config 解析；strategy profile 的锚点独立控制调仓相位。
+DATA_START_OFFSET_DAYS = resolve_data_start_offset_days()
 
 
 def _price_filename() -> str:
@@ -130,6 +131,8 @@ STRATEGY_PARAMS = {
     "group_num": _parsed[1],
     "target_rank": _parsed[2],
     "rebalance_period": _parsed[3],
+    "data_download_start_date": ACTIVE_PROFILE.data_download_start_date,
+    "rebalance_anchor_date": None,
     "max_weight": cfg.MAX_WEIGHT,
     "preserve_price_scale": ACTIVE_PROFILE.preserve_price_scale,
     "price_scale_base_run_dir": ACTIVE_PROFILE.price_scale_base_run_dir,
@@ -151,6 +154,7 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
         "REBALANCE_OFFSET_DAYS": str(DATA_START_OFFSET_DAYS),
         "REBALANCE_TICKER_UNIVERSE": ACTIVE_TICKER_UNIVERSE,
         "REBALANCE_STRATEGY_PROFILE": ACTIVE_STRATEGY_PROFILE,
+        "REBALANCE_DATA_START_DATE": ACTIVE_PROFILE.data_download_start_date or "",
         "REBALANCE_PRESERVE_PRICE_SCALE": "1" if ACTIVE_PROFILE.preserve_price_scale else "0",
         "REBALANCE_PRICE_BASE_RUN_DIR": ACTIVE_PROFILE.price_scale_base_run_dir or "",
     }
@@ -182,6 +186,7 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
                 ticker_universe=ACTIVE_TICKER_UNIVERSE,
                 ticker_source=f"profile:{ACTIVE_STRATEGY_PROFILE}",
                 price_scale_base_run_dir=ACTIVE_PROFILE.price_scale_base_run_dir,
+                data_start_date=ACTIVE_PROFILE.data_download_start_date,
             )
 
         print("[Pipeline] 构建因子...")
@@ -214,6 +219,7 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
     env["REBALANCE_OFFSET_DAYS"] = str(DATA_START_OFFSET_DAYS)
     env["REBALANCE_TICKER_UNIVERSE"] = ACTIVE_TICKER_UNIVERSE
     env["REBALANCE_STRATEGY_PROFILE"] = ACTIVE_STRATEGY_PROFILE
+    env["REBALANCE_DATA_START_DATE"] = ACTIVE_PROFILE.data_download_start_date or ""
     env["REBALANCE_PRESERVE_PRICE_SCALE"] = "1" if ACTIVE_PROFILE.preserve_price_scale else "0"
     env["REBALANCE_PRICE_BASE_RUN_DIR"] = ACTIVE_PROFILE.price_scale_base_run_dir or ""
 
@@ -498,6 +504,7 @@ def main(
         rebalance_period=STRATEGY_PARAMS["rebalance_period"],
         weight_method=STRATEGY_PARAMS["weight_method"],
         config=cfg,
+        rebalance_anchor_date=None,
     )
 
     if "error" in result:
@@ -525,6 +532,7 @@ def main(
         factor_df.index,
         ret_df.index,
         STRATEGY_PARAMS["rebalance_period"],
+        rebalance_anchor_date=None,
     )
     last_factor_date = factor_df.index[-1]
 
@@ -600,6 +608,7 @@ def main(
     print(f"    分组数:   {STRATEGY_PARAMS['group_num']}")
     print(f"    目标组:   Top{STRATEGY_PARAMS['target_rank']}")
     print(f"    调仓周期: {STRATEGY_PARAMS['rebalance_period']} 交易日")
+    print(f"    数据下载起始日: {ACTIVE_PROFILE.data_download_start_date}")
     print(f"    数据起始日偏移: {DATA_START_OFFSET_DAYS} 交易日")
     print("调仓日判定:")
     print(f"  今日是否调仓日: {'是' if status['is_rebalance_today'] else '否'}")

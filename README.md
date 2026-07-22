@@ -247,6 +247,7 @@ The active profile in `qqq_config/strategy_profiles.py` owns the default live/de
 ```python
 exit_policy = "fixed_rebalance"  # or "dynamic_tp_sl"
 max_weight = 0.4
+data_download_start_date = "2023-01-01"
 preserve_price_scale = True
 price_scale_base_run_dir = r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0"
 tp_base = 0.08
@@ -291,6 +292,12 @@ The intended workflow is to generate the full schedule on rebalance day, use bro
 
 `analysis/strategy/rebalance_calendar.py` is the single source of truth for historical rebalance-date selection.
 
+Each strategy profile uses `data_download_start_date` as the exact yfinance
+download start date. It does not fix the first trade or the later P5/P10/P20
+calendar phase. Rebalance dates start from the first usable factor/return date
+after the pipeline has finished. Leaving the field as `None` falls back to
+`DATA_BASE_START_DATE` and the configured data offset.
+
 Timing conventions:
 
 - factor value date: rebalance day T, end of day
@@ -311,9 +318,9 @@ Important config files:
 | `qqq_core/run_context.py` | resolved profile/offset/run-dir context for one run |
 | `qqq_core/excel_io.py` | shared Excel sheet validation, price workbook loading, and atomic Excel writing |
 | `qqq_core/strategy_params.py` | shared factor suffix, composite workbook path, strategy-param parsing, and safe filename tags |
-| `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, selected factors, composite sheet, and live strategy parameter |
+| `qqq_config/strategy_profiles.py` | single source of truth for active strategy profile, selected factors, composite sheet, profile download start, and live strategy parameter |
 | `qqq_config/ticker_universes.py` | named ticker universes imported by strategy profiles and data configuration |
-| `data/data_config.py` | data start date, direct-pull ticker universe, offset-aware paths |
+| `data/data_config.py` | data coverage start date, direct-pull ticker universe, offset-aware paths |
 | `analysis/single_factor/config.py` | single-factor test settings |
 | `analysis/single_factor/multi_factor_config.py` | multi-factor test settings |
 | `analysis/multi_factor/composite_config.py` | selected factors and composite settings |
@@ -325,7 +332,7 @@ Config modules derive `PROJECT_ROOT` from `qqq_core.paths.ProjectPaths`; set `QQ
 
 ### Data Offset
 
-`DATA_START_OFFSET_DAYS` in `data/data_config.py` shifts the yfinance start date earlier by N trading days. This is used to test sensitivity to data-start alignment without overwriting default outputs.
+`DATA_START_OFFSET_DAYS` in `data/data_config.py` shifts the default yfinance data-coverage start earlier by N trading days and isolates offset artifact paths. During a rebalance-day run, a non-empty profile `data_download_start_date` takes precedence as the exact download start; the offset still controls artifact naming but does not move that profile date.
 
 Rules:
 
@@ -334,12 +341,13 @@ Rules:
 - Offset price files no longer fall back to the baseline price file. If `offset=N` is requested and `data/us_top100_daily_2023_present_offset{N}d.xlsx` is missing, data consumers fail fast so backtests cannot silently mix calendars.
 - Offset factor and composite directories no longer fall back to baseline directories. Generate matching offset factor/composite files before running offset research.
 - Offset start-date calculation uses the NYSE trading calendar, not generic weekdays.
+- A profile download start takes precedence over `DATA_BASE_START_DATE`; it is not passed into the rebalance calendar.
 - `run_rebalance_day.py` propagates the offset to subprocesses through `REBALANCE_OFFSET_DAYS`.
 - After changing the offset, rerun pull, factor build, factor processing, and composite factor generation.
 
 ### Factor Selection
 
-Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/multi_factor/composite_config.py` derive their default selected factors, composite sheet, and strategy parameter from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses. For direct composite-method research before a profile is finalized, set `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`.
+Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/multi_factor/composite_config.py` derive their default selected factors, composite sheet, strategy parameter, and data download start from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses. For direct composite-method research before a profile is finalized, set `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`.
 
 Each strategy profile selects one complete ticker universe through `ticker_universe`. `ORIGINAL_108` and `ORIGINAL_143` preserve the two original pools. `NASDAQ_100_LAST_6_YEARS` is the 162-ticker union of all Nasdaq-100 securities present from 2020-07-15 through the 2026-07-15 snapshot, including constituents that exited during the window. `ORIGINAL_108_PLUS_NASDAQ_100` is the duplicate-free 235-ticker union used by `Strategy12`; `Strategy1`, `Strategy11`, and `Strategy2` use `ORIGINAL_108`, while `Strategy3` and `Strategy4` use `ORIGINAL_143`.
 
@@ -387,9 +395,9 @@ Main steps:
 
 New rebalance-day runs are created under `output/rebalance_runs/YYYY-MM-DD_HHMMSS_<profile>_offsetN/`. Intermediate data remains in `data/`, `factor_raw/`, `factor_processed/`, and `composite_factor_reports/` inside the run directory; the final workbook is written to `reports/rebalance_day_report.xlsx`. Existing `output/rebalance_day_*` run directories can still be passed with `--run-dir`.
 
-For profiles with `preserve_price_scale=True`, the data pull step keeps the configured base run's price workbook as the canonical scale: historical rows through the base run are frozen, fresh rows after that cutoff are appended, and any split-like stable price ratio detected in the overlap is applied to the appended rows. This is meant to keep HON/SPGI-style yfinance restatements from changing past rebalance reports while still allowing new dates to be added. The pull step writes `data/price_snapshot_manifest.json` in the run directory with the base workbook and any ticker-level scale factors. The final Excel report includes `Price_Scale_Adjustments` plus `Price_Scale_Config_Base_Run_Dir`, `Price_Scale_Base_Run`, and `Price_Scale_Base_File` summary rows in `Rebalance_Config_Status`, so the configured base and the actual workbook used are visible without checking environment variables.
+For profiles with `preserve_price_scale=True`, the data pull step keeps the configured base run's price workbook as the canonical scale: historical rows through the base run are frozen, fresh rows after that cutoff are appended, and any split-like stable price ratio detected in the overlap is applied to the appended rows only when its absolute difference from the previous scale (`1.0`) is at least `0.01`. This is meant to keep HON/SPGI-style yfinance restatements from changing past rebalance reports while still allowing new dates to be added. The pull step writes `data/price_snapshot_manifest.json` in the run directory with the base workbook and any ticker-level scale factors. The final Excel report includes `Price_Scale_Adjustments` plus `Price_Scale_Config_Base_Run_Dir`, `Price_Scale_Base_Run`, and `Price_Scale_Base_File` summary rows in `Rebalance_Config_Status`, so the configured base and the actual workbook used are visible without checking environment variables.
 
-The report includes configuration, current operations, historical operations, return series, cumulative returns, period summaries, current holdings, mark-to-market fields, and next-rebalance information. For `dynamic_tp_sl` profiles it also includes `TP_SL_Schedule` and `TP_SL_Action_Checklist` for precomputed manual TP/SL monitoring. `Current_Operations_All` is no longer emitted; `All_Operations_All` filters out rows with `Weight < 0.01`.
+The report includes configuration, current operations, historical operations, return series, cumulative returns, period summaries, current holdings, mark-to-market fields, and next-rebalance information. `Rebalance_Config_Status` records `Requested_Data_Download_Start`, actual `Data_Coverage_Start`, and `Effective_Rebalance_Start`. Legacy anchor rows remain for workbook compatibility but are no longer populated from the profile download date. `Period_Summary_2` mirrors `Period_Summary` from `2026-03-27` onward and resets `Period_Cumulative_Return` at that date. `Performance_By_Year` reports calendar-year return, volatility, Sharpe, max drawdown, partial-year status, and the full-period CAGR if each year's returns were set to zero while preserving the original timeline. `Return_Attribution` contains ranked rebalance-period log-return contributions, ticker holding/weight/simple-contribution summaries with a trailing two-year contribution share, and an all-held-ticker exclusion stress table. The exclusion stress replaces one ticker's reconstructed daily contribution with cash, leaves other weights unchanged, and retains the original portfolio transaction cost. For `dynamic_tp_sl` profiles the report also includes `TP_SL_Schedule` and `TP_SL_Action_Checklist` for precomputed manual TP/SL monitoring. `Current_Operations_All` is no longer emitted; `All_Operations_All` filters out rows with `Weight < 0.01`.
 
 Discord messages include:
 

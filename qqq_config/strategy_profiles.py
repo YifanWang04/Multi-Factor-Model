@@ -9,6 +9,7 @@ composite-factor, and rebalance-day entry points. It intentionally lives under
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import os
 import re
 from typing import Mapping
@@ -31,6 +32,8 @@ class StrategyProfile:
     composite_sheet: str
     strategy_param: str
     ticker_universe: str
+    # Exact yfinance download start date for rebalance-day runs.
+    data_download_start_date: str | None = None
     description: str = ""
     max_weight: float = 0.4
     preserve_price_scale: bool = False
@@ -39,6 +42,17 @@ class StrategyProfile:
     tp_base: float = 0.08
     sl_base: float = 0.05
     tp_sl_probability: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.data_download_start_date is None:
+            return
+        try:
+            date.fromisoformat(self.data_download_start_date)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid data_download_start_date for profile {self.name!r}: "
+                f"{self.data_download_start_date!r}; expected YYYY-MM-DD"
+            ) from exc
 
     @property
     def ticker_symbols(self) -> tuple[str, ...]:
@@ -77,6 +91,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
         ticker_universe="ORIGINAL_108",
+        data_download_start_date="2023-01-01",
         max_weight=0.4,
         preserve_price_scale=True,
         price_scale_base_run_dir=None,
@@ -92,6 +107,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
         ticker_universe="ORIGINAL_108",
+        data_download_start_date="2023-01-01",
         max_weight=0.6,
         preserve_price_scale=True,
         price_scale_base_run_dir=r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0",
@@ -99,22 +115,24 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         # tp_base=0.8,
         # sl_base=0.65,
         # tp_sl_probability=1.0,
-        description="Strategy11 with dynamic TP/SL research profile.",
+        description="Strategy1 with 0.6 max_weight",
     ),
+    ## 从2020年回测近六年的数据，使用纳斯达克100+初始的108支股票
     "Strategy12": StrategyProfile(
         name="Strategy12",
         factor_indices=(95, 101, 62, 65, 32),
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
         ticker_universe="ORIGINAL_108_PLUS_NASDAQ_100",
+        data_download_start_date="2020-01-01",
         max_weight=0.6,
-        preserve_price_scale=True,
-        price_scale_base_run_dir=r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0",
+        preserve_price_scale=False,
+        price_scale_base_run_dir=None,
         exit_policy="fixed_rebalance",
         # tp_base=0.8,
         # sl_base=0.65,
         # tp_sl_probability=1.0,
-        description="Strategy12 with dynamic TP/SL research profile.",
+        description="Strategy11 with NASQAQ100 tickers added to the universe.",
     ),
     "Strategy13": StrategyProfile(
         name="Strategy13",
@@ -122,6 +140,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top1_P10d",
         ticker_universe="ORIGINAL_108_PLUS_ROBOTICS",
+        data_download_start_date="2023-01-01",
         max_weight=0.6,
         preserve_price_scale=True,
         price_scale_base_run_dir=r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0",
@@ -137,6 +156,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_10G_Top1_P20d",
         ticker_universe="ORIGINAL_108",
+        data_download_start_date="2023-01-01",
         max_weight=0.4,
         description="Strategy2 Legacy 2026-03/25 research profile.",
     ),
@@ -146,6 +166,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N20",
         strategy_param="max_return_5G_Top2_P20d",
         ticker_universe="ORIGINAL_143",
+        data_download_start_date="2023-01-01",
         max_weight=0.4,
         description="Strategy3 June 2026 strategy profile.",
     ),
@@ -155,21 +176,14 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         composite_sheet="ic_m3_N10",
         strategy_param="max_return_5G_Top2_P20d",
         ticker_universe="ORIGINAL_143",
+        data_download_start_date="2023-01-01",
         max_weight=0.4,
         description="Strategy4 June 2026 strategy profile.",
     ),
-    # "Strategy5": StrategyProfile(
-    #     name="Strategy5",
-    #     factor_indices=(95, 99, 27, 19, 46),
-    #     composite_sheet="ic_m3_N10",
-    #     strategy_param="max_return_5G_Top2_P20d",
-    #     ticker_universe="ORIGINAL_143",
-    #     description="Strategy5 June 2026 strategy profile.",
-    # ),
 }
 
 
-ACTIVE_STRATEGY_PROFILE = "Strategy13"
+ACTIVE_STRATEGY_PROFILE = "Strategy11"
 PROFILE_ENV_VAR = "QQQ_STRATEGY_PROFILE"
 
 

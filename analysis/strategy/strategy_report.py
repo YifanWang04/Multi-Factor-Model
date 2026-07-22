@@ -192,6 +192,18 @@ class StrategyReporter:
 
     def _build_metadata_df(self) -> pd.DataFrame:
         """构建报告口径元数据，避免不同配置生成的结果被误比较。"""
+        effective_start = next(
+            (
+                result.get("params", {}).get("effective_rebalance_start")
+                or result.get("params", {}).get("effective_rebalance_anchor")
+                for result in self.results.values()
+                if (
+                    result.get("params", {}).get("effective_rebalance_start")
+                    or result.get("params", {}).get("effective_rebalance_anchor")
+                )
+            ),
+            "",
+        )
         rows = [
             ("Generated_At", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             ("Price_File", getattr(self.config, "PRICE_FILE", "")),
@@ -202,6 +214,10 @@ class StrategyReporter:
             ("Selected_Factor_Names", ", ".join(getattr(self.config, "STRATEGY_SELECTED_FACTOR_NAMES", []))),
             ("Group_Nums", str(getattr(self.config, "GROUP_NUMS", ""))),
             ("Rebalance_Periods", str(getattr(self.config, "REBALANCE_PERIODS", ""))),
+            ("Requested_Data_Download_Start", str(getattr(self.config, "DATA_DOWNLOAD_START_DATE", ""))),
+            ("Effective_Rebalance_Start", str(effective_start)),
+            ("Requested_Rebalance_Anchor", str(getattr(self.config, "REBALANCE_ANCHOR_DATE", ""))),
+            ("Effective_Rebalance_Anchor", str(effective_start)),
             ("Target_Group_Ranks", str(getattr(self.config, "TARGET_GROUP_RANKS", ""))),
             ("Weight_Methods", str(getattr(self.config, "WEIGHT_METHODS", ""))),
             ("Max_Weight", str(getattr(self.config, "MAX_WEIGHT", ""))),

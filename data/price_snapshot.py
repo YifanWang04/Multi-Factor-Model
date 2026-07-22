@@ -39,7 +39,7 @@ PRICE_COLUMNS = (
 VOLUME_COLUMN = "Volume"
 
 MIN_RATIO_SAMPLES = 50
-PRICE_FACTOR_TOLERANCE = 1e-4
+MIN_PRICE_FACTOR_ABS_DIFFERENCE = 0.01
 STABLE_RATIO_REL_TOLERANCE = 5e-3
 
 
@@ -235,7 +235,10 @@ def detect_price_scale_adjustment(
         return None
 
     price_factor = float(all_ratios.median())
-    if not np.isfinite(price_factor) or abs(price_factor - 1.0) <= PRICE_FACTOR_TOLERANCE:
+    if (
+        not np.isfinite(price_factor)
+        or abs(price_factor - 1.0) < MIN_PRICE_FACTOR_ABS_DIFFERENCE
+    ):
         return None
 
     rel_dev = (all_ratios - price_factor).abs() / abs(price_factor)

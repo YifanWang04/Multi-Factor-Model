@@ -100,7 +100,16 @@ def _assert_composite_calendar_supports_strategy_grid(
     for period in sorted({int(x) for x in getattr(config, "REBALANCE_PERIODS", [])}):
         factor_df = factor_dfs_by_period[period]
         try:
-            _select_rebalance_dates(factor_df.index, ret_df.index, period)
+            _select_rebalance_dates(
+                factor_df.index,
+                ret_df.index,
+                period,
+                rebalance_anchor_date=getattr(
+                    config,
+                    "REBALANCE_ANCHOR_DATE",
+                    None,
+                ),
+            )
         except CompositeCalendarError as exc:
             source = getattr(config, "COMPOSITE_FACTOR_FILES_BY_PERIOD", {}).get(
                 period,

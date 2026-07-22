@@ -8,9 +8,21 @@ from unittest.mock import patch
 import pandas as pd
 
 from data import pull_yhfinance_Data as puller
+from data import data_config
 
 
 class PullYfinanceTests(unittest.TestCase):
+    def test_profile_download_start_overrides_default_base_and_offset(self):
+        with patch.dict(
+            os.environ,
+            {
+                "REBALANCE_DATA_START_DATE": "2020-01-01",
+                "REBALANCE_OFFSET_DAYS": "1000",
+            },
+            clear=False,
+        ):
+            self.assertEqual(data_config.yfinance_pull_start_date(), "2020-01-01")
+
     def test_empty_or_failed_symbol_is_skipped_with_gbk_safe_notice(self):
         good_frame = pd.DataFrame(
             {

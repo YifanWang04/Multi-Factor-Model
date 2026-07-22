@@ -29,6 +29,7 @@ import yfinance as yf
 from data.data_config import (
     YFINANCE_DOWNLOAD_AUTO_ADJUST,
     YFINANCE_DOWNLOAD_PROGRESS,
+    REBALANCE_DATA_START_DATE_ENV_VAR,
     _price_filename,
     _resolve_offset,
     resolve_ticker_universe_source,
@@ -228,10 +229,13 @@ def main(
     tickers: Sequence[str] | None = None,
     ticker_source: str | None = None,
     price_scale_base_run_dir: str | None = None,
+    data_start_date: str | None = None,
 ) -> str:
     """下载行情并写入 Excel，返回输出文件路径。"""
     offset = _resolve_offset()
-    start_date = yfinance_pull_start_date()
+    start_date = yfinance_pull_start_date(data_start_date)
+    if data_start_date or os.environ.get(REBALANCE_DATA_START_DATE_ENV_VAR):
+        print(f"Profile data download start: {start_date}")
     if offset > 0:
         print(f"DATA_START_OFFSET_DAYS={offset}，NYSE 起始日提前至 {start_date}")
 

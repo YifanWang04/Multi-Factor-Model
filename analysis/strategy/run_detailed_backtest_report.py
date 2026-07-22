@@ -70,14 +70,19 @@ from tp_sl_exit import (
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = r"D:\qqq"
-from data.data_config import PRICE_FILE, DATA_START_OFFSET_DAYS, STRATEGY_REPORTS_DIR
+from data.data_config import (
+    PRICE_FILE,
+    DATA_START_OFFSET_DAYS,
+    STRATEGY_REPORTS_DIR,
+    resolve_data_start_offset_days,
+)
 COMPOSITE_FACTOR_SHEET = cfg.COMPOSITE_FACTOR_SHEET
 
 # Period_Summary 中标注的股票权重展示阈值（仅标注 weight > 此值的标的）
 PERIOD_SUMMARY_DISPLAY_WEIGHT_THRESHOLD: float = 0.01
 
 def _get_data_offset():
-    return DATA_START_OFFSET_DAYS
+    return resolve_data_start_offset_days()
 OUTPUT_DIR = STRATEGY_REPORTS_DIR
 OUTPUT_EXCEL_NAME = "strategy_detailed_backtest_report.xlsx"
 
@@ -102,16 +107,18 @@ def run_detailed_backtest(
     rebalance_period: int,
     weight_method: str,
     config,
+    rebalance_anchor_date: str | pd.Timestamp | None = None,
 ) -> dict:
     """
     运行单策略详细回测，返回含调仓操作、日收益、累计收益等完整数据。
-    调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制。
+    调仓日历仅在调用方显式传入锚点时固定相位；None 从可用数据首日开始。
     """
     target_group = group_num - (target_rank - 1)
     rebalance_dates = _select_rebalance_dates(
         factor_df.index,
         ret_df.index,
         rebalance_period,
+        rebalance_anchor_date=rebalance_anchor_date,
     )
     if len(rebalance_dates) < 2:
         return {"error": "调仓日不足 2 个"}
@@ -438,6 +445,14 @@ def run_detailed_backtest(
             "weight_method": weight_method,
             "max_weight": max_weight,
             "data_start_offset_days": _get_data_offset(),
+            "requested_data_download_start": getattr(
+                config,
+                "DATA_DOWNLOAD_START_DATE",
+                None,
+            ),
+            "requested_rebalance_anchor": rebalance_anchor_date,
+            "effective_rebalance_anchor": str(pd.Timestamp(rebalance_dates[0]).date()),
+            "effective_rebalance_start": str(pd.Timestamp(rebalance_dates[0]).date()),
             "exit_policy": exit_policy,
             "tp_base": tp_base,
             "sl_base": sl_base,
@@ -489,6 +504,10 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["SL_Count", params.get("sl_count", "")],
             ["Forced_Close_Count", params.get("forced_close_count", "")],
             ["Data_Start_Offset_TradingDays", params.get("data_start_offset_days", _get_data_offset())],
+            ["Requested_Data_Download_Start", params.get("requested_data_download_start", "")],
+            ["Effective_Rebalance_Start", params.get("effective_rebalance_start", "")],
+            ["Requested_Rebalance_Anchor", params.get("requested_rebalance_anchor", "")],
+            ["Effective_Rebalance_Anchor", params.get("effective_rebalance_anchor", "")],
             ["Transaction_Cost_OneSide", f"{getattr(cfg, 'TRANSACTION_COST', 0.001):.3f}"],
             ["Timing_Convention", "Trade at T close, holding period (T, T_next]"],
             ["Return_Data_Range", f"{ret_df.index[0].date()} ~ {ret_df.index[-1].date()}" if len(ret_df) > 0 else "-"],
@@ -600,6 +619,7 @@ def main():
         rebalance_period=rebalance_days,
         weight_method=weight_method,
         config=cfg,
+        rebalance_anchor_date=cfg.REBALANCE_ANCHOR_DATE,
     )
 
     if "error" in result:
@@ -611,7 +631,7 @@ def main():
         base_name=OUTPUT_EXCEL_NAME,
         composite_sheet=COMPOSITE_FACTOR_SHEET,
         strategy_param=STRATEGY_PARAM,
-        data_start_offset_days=DATA_START_OFFSET_DAYS,
+        data_start_offset_days=_get_data_offset(),
     )
     output_path = os.path.join(OUTPUT_DIR, report_name)
     write_detailed_report(result, output_path)

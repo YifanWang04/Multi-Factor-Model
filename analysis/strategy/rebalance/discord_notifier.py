@@ -317,6 +317,8 @@ def send_discord_notification(
             f"**分组数：** {strategy_params.get('group_num', '')}　"
             f"**目标组：** Top{strategy_params.get('target_rank', '')}　"
             f"**调仓周期：** {strategy_params.get('rebalance_period', '')} 交易日　"
+            f"**数据下载起点：** {strategy_params.get('data_download_start_date', '')}　"
+            f"**首个调仓日：** {result.get('params', {}).get('effective_rebalance_start', result.get('params', {}).get('effective_rebalance_anchor', ''))}\n"
             f"**数据起始日偏移：** {data_start_offset_days} 交易日\n"
         )
 

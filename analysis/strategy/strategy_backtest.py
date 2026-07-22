@@ -36,7 +36,10 @@ if _HERE not in sys.path:
 # 从共享工具模块导入（保持 _build_groups 独立定义以兼容已有调用）
 from strategy_utils import _build_groups, _get_price_on_date
 from portfolio_optimizer import compute_weights
-from rebalance_calendar import get_rebalance_calendar as _get_rebalance_calendar
+from rebalance_calendar import (
+    RebalanceAnchorError,
+    get_rebalance_calendar as _get_rebalance_calendar,
+)
 from tp_sl_exit import (
     EXIT_DYNAMIC_TP_SL,
     EXIT_FIXED_REBALANCE,
@@ -82,12 +85,18 @@ def _select_rebalance_dates(
     factor_index: pd.DatetimeIndex,
     ret_index: pd.DatetimeIndex,
     rebalance_period_days: int,
+    rebalance_anchor_date: str | pd.Timestamp | None = None,
 ) -> list:
     """
     从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点。
     委托至 rebalance_calendar.get_rebalance_calendar 统一实现。
     """
-    selected = _get_rebalance_calendar(factor_index, ret_index, rebalance_period_days)
+    selected = _get_rebalance_calendar(
+        factor_index,
+        ret_index,
+        rebalance_period_days,
+        anchor_date=rebalance_anchor_date,
+    )
     _assert_calendar_supports_requested_period(
         selected,
         ret_index,
@@ -261,7 +270,7 @@ class StrategyBacktester:
                     **result.get("exit_stats", {}),
                 }
                 results[strategy_name] = result
-            except CompositeCalendarError:
+            except (CompositeCalendarError, RebalanceAnchorError):
                 raise
             except Exception as exc:
                 print(f"    [!] 跳过：{exc}")
@@ -307,6 +316,11 @@ class StrategyBacktester:
             factor_df.index,
             self.ret_df.index,
             rebalance_period,
+            rebalance_anchor_date=getattr(
+                self.config,
+                "REBALANCE_ANCHOR_DATE",
+                None,
+            ),
         )
         if len(rebalance_dates) < 2:
             return self._empty_result()
@@ -578,6 +592,8 @@ def _strategy_config_snapshot(config) -> SimpleNamespace:
         "RISK_FREE_RATE",
         "TRANSACTION_COST",
         "MAX_WEIGHT",
+        "DATA_DOWNLOAD_START_DATE",
+        "REBALANCE_ANCHOR_DATE",
     ]
     return SimpleNamespace(**{name: getattr(config, name, None) for name in fields})
 
@@ -656,10 +672,30 @@ def _run_strategy_combo_worker(task):
         )
         result["params"] = {
             **params,
+            "requested_data_download_start": getattr(
+                config,
+                "DATA_DOWNLOAD_START_DATE",
+                None,
+            ),
+            "requested_rebalance_anchor": getattr(
+                config,
+                "REBALANCE_ANCHOR_DATE",
+                None,
+            ),
+            "effective_rebalance_anchor": (
+                str(pd.Timestamp(result["rebalance_dates"][0]).date())
+                if result.get("rebalance_dates")
+                else None
+            ),
+            "effective_rebalance_start": (
+                str(pd.Timestamp(result["rebalance_dates"][0]).date())
+                if result.get("rebalance_dates")
+                else None
+            ),
             **result.get("exit_stats", {}),
         }
         return strategy_name, result
-    except CompositeCalendarError:
+    except (CompositeCalendarError, RebalanceAnchorError):
         raise
     except Exception as exc:
         print(f"    [!] skip {strategy_name}: {exc}", flush=True)

@@ -85,6 +85,9 @@ COMPOSITE_FACTOR_SHEET = (
     STRATEGY_RESEARCH_COMPOSITE_SHEET or ACTIVE_PROFILE.composite_sheet
 )
 STRATEGY_PARAM = ACTIVE_PROFILE.strategy_param
+# Profile data_download_start_date 只控制行情下载起点，不固定交易日历相位。
+DATA_DOWNLOAD_START_DATE = ACTIVE_PROFILE.data_download_start_date
+REBALANCE_ANCHOR_DATE = None
 
 # 切换策略时修改 qqq_config/strategy_profiles.py 的 ACTIVE_STRATEGY_PROFILE，
 # 或临时设置环境变量 QQQ_STRATEGY_PROFILE；不要在本文件硬编码因子列表。
@@ -161,7 +164,7 @@ GROUP_NUMS = [5, 10]
 
 # 调仓周期（交易日数）：相邻调仓日之间至少相隔 N 个交易日
 # 每个周期优先读取 matching 的 composite_factors_P{N}_*.xlsx。
-# 注：调仓日历由数据起始日（DATA_START_OFFSET_DAYS）控制，已移除 REBALANCE_DATE_OFFSET
+# 调仓日从可用复合因子/收益数据的首日自然生成。
 # REBALANCE_PERIODS = [10, 20]
 REBALANCE_PERIODS = [5, 10]
 

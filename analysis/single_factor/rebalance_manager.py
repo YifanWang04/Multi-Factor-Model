@@ -28,17 +28,19 @@ class RebalancePeriodManager:
     管理调仓周期，生成调仓日期
     """
 
-    def __init__(self, factor, ret, rebalance_period):
+    def __init__(self, factor, ret, rebalance_period, rebalance_anchor_date=None):
         """
         Parameters:
         -----------
         factor: DataFrame, 因子数据（日频）
         ret: DataFrame, 收益率数据（日频）
         rebalance_period: int, 调仓周期（交易日数），与 strategy_backtest 保持一致
+        rebalance_anchor_date: optional, 显式调仓日历锚点（profile 默认不再传入）
         """
         self.factor = factor
         self.ret = ret
         self.rebalance_period = rebalance_period
+        self.rebalance_anchor_date = rebalance_anchor_date
 
     def get_rebalance_dates(self):
         """
@@ -49,6 +51,7 @@ class RebalancePeriodManager:
             self.factor.index,
             self.ret.index,
             self.rebalance_period,
+            anchor_date=self.rebalance_anchor_date,
         )
 
     def align_factor_return_by_period(self):

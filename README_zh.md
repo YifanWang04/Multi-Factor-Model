@@ -246,6 +246,7 @@ qqq/
 ```python
 exit_policy = "fixed_rebalance"  # 或 "dynamic_tp_sl"
 max_weight = 0.4
+data_download_start_date = "2023-01-01"
 preserve_price_scale = True
 price_scale_base_run_dir = r"D:\qqq\output\rebalance_runs\2026-06-24_155408_strategy11_offset0"
 tp_base = 0.08
@@ -289,6 +290,11 @@ V1 实盘流程不要求每天运行 Python，也不会自动下单。active pro
 
 `analysis/strategy/rebalance_calendar.py` 是历史调仓日选择的唯一权威实现。
 
+strategy profile 使用 `data_download_start_date` 表示 yfinance 的精确下载起始日。
+它不固定首个交易日或后续 P5/P10/P20 日历相位；pipeline 完成后，调仓日从首个
+可用因子/收益日期自然生成。字段设为 `None` 时回退到 `DATA_BASE_START_DATE`
+与数据 offset 逻辑。
+
 时间约定：
 
 - 因子日期：调仓日 T，收盘后截面
@@ -309,9 +315,9 @@ V1 实盘流程不要求每天运行 Python，也不会自动下单。active pro
 | `qqq_core/run_context.py` | 一次运行的 profile、offset、run-dir 上下文 |
 | `qqq_core/excel_io.py` | Excel sheet 校验、价格 workbook 读取、因子 sheet 读取和原子写入 |
 | `qqq_core/strategy_params.py` | 因子后缀、复合因子文件名、策略参数解析和安全文件名标签 |
-| `qqq_config/strategy_profiles.py` | active strategy profile、选定因子、复合 sheet、实盘策略参数的唯一权威配置源 |
+| `qqq_config/strategy_profiles.py` | active strategy profile、选定因子、复合 sheet、profile 下载起点、实盘策略参数的唯一权威配置源 |
 | `qqq_config/ticker_universes.py` | strategy profile 与数据配置共用的命名股票池 |
-| `data/data_config.py` | 数据起始日、直接拉取默认股票池、offset 路径 |
+| `data/data_config.py` | 数据覆盖起始日、直接拉取默认股票池、offset 路径 |
 | `analysis/single_factor/config.py` | 单因子测试配置 |
 | `analysis/single_factor/multi_factor_config.py` | 多因子测试配置 |
 | `analysis/multi_factor/composite_config.py` | 已选因子和复合设置 |
@@ -323,7 +329,7 @@ V1 实盘流程不要求每天运行 Python，也不会自动下单。active pro
 
 ### 数据 Offset
 
-`data/data_config.py` 中的 `DATA_START_OFFSET_DAYS` 会将 yfinance 起始日提前 N 个交易日。它用于测试数据起点对结果的敏感性，同时避免覆盖默认输出。
+`data/data_config.py` 中的 `DATA_START_OFFSET_DAYS` 会将默认 yfinance 数据覆盖起点提前 N 个交易日，并隔离 offset 产物。调仓日运行时，只要 profile 的 `data_download_start_date` 非空，就以它作为精确下载起点；offset 仍控制产物命名，但不再移动这个 profile 日期。
 
 规则：
 
@@ -332,12 +338,13 @@ V1 实盘流程不要求每天运行 Python，也不会自动下单。active pro
 - offset 价格文件不再静默回退到基线价格文件。若请求 `offset=N` 但 `data/us_top100_daily_2023_present_offset{N}d.xlsx` 不存在，读取方会直接报错，避免不同交易日历被混用。
 - offset 因子目录和复合因子目录也不再回退到基线目录。运行 offset 研究前必须生成匹配的 offset 因子和复合因子文件。
 - offset 起始日回推使用 NYSE 交易日历，不再使用普通工作日。
+- profile 下载起点优先于 `DATA_BASE_START_DATE`，且不会再传入调仓日历。
 - `run_rebalance_day.py` 通过 `REBALANCE_OFFSET_DAYS` 将 offset 传给子进程。
 - 修改 offset 后，需要重新运行 pull、因子构建、因子处理和复合因子生成。
 
 ### 因子选择
 
-核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/multi_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet 和策略参数。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。在新 profile 尚未定稿、需要直接探索复合方法时，可在 `analysis/multi_factor/composite_config.py` 中设置 `COMPOSITE_RESEARCH_FACTOR_INDICES`。
+核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/multi_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet、策略参数和数据下载起点。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。在新 profile 尚未定稿、需要直接探索复合方法时，可在 `analysis/multi_factor/composite_config.py` 中设置 `COMPOSITE_RESEARCH_FACTOR_INDICES`。
 
 每个 strategy profile 通过 `ticker_universe` 选择一套完整股票池。`ORIGINAL_108` 和 `ORIGINAL_143` 分别保留原始的 108、143 只股票池；`NASDAQ_100_LAST_6_YEARS` 是 2020-07-15 至 2026-07-15 快照期间所有纳斯达克 100 成分证券的 162 个 ticker 去重合集，包含期间已退出的成分；`ORIGINAL_108_PLUS_NASDAQ_100` 是与原始 108 股票池合并后的 235 个 ticker 去重合集，由 `Strategy12` 使用。`Strategy1`、`Strategy11`、`Strategy2` 使用 `ORIGINAL_108`，`Strategy3`、`Strategy4` 使用 `ORIGINAL_143`。
 
@@ -380,9 +387,9 @@ sheet，并通过 `REBALANCE_SELECTED_FACTOR_INDICES` / `REBALANCE_SELECTED_COMP
 4. 生成 `rebalance_day_report.xlsx`
 5. 可选发送 Discord 通知
 
-如果 active profile 的 `preserve_price_scale=True`，拉数阶段会把 profile 配置的基准 run 价格 workbook 作为口径：基准 run 截止日及以前的历史行保持不变，只追加 cutoff 之后的新行；若重叠区间检测到稳定的拆股式价格比例，则把新追加行乘回旧价格口径，并按反向比例调整 Volume。每次运行会在 run 目录写出 `data/price_snapshot_manifest.json`，记录实际使用的基准 workbook 和每个 ticker 的比例；最终 Excel 会输出 `Price_Scale_Adjustments` sheet，并在 `Rebalance_Config_Status` 显示 `Price_Scale_Config_Base_Run_Dir`、`Price_Scale_Base_Run`、`Price_Scale_Base_File`，所以不看环境变量也能知道配置基准和实际使用文件。
+如果 active profile 的 `preserve_price_scale=True`，拉数阶段会把 profile 配置的基准 run 价格 workbook 作为口径：基准 run 截止日及以前的历史行保持不变，只追加 cutoff 之后的新行；若重叠区间检测到稳定的拆股式价格比例，且该比例与旧口径 `1.0` 的绝对差大于等于 `0.01`，才把新追加行乘回旧价格口径，并按反向比例调整 Volume。每次运行会在 run 目录写出 `data/price_snapshot_manifest.json`，记录实际使用的基准 workbook 和每个 ticker 的比例；最终 Excel 会输出 `Price_Scale_Adjustments` sheet，并在 `Rebalance_Config_Status` 显示 `Price_Scale_Config_Base_Run_Dir`、`Price_Scale_Base_Run`、`Price_Scale_Base_File`，所以不看环境变量也能知道配置基准和实际使用文件。
 
-报告包含配置、当前操作、历史操作、收益序列、累计收益、周期汇总、当前持仓、市值重估字段和下一调仓日信息。`dynamic_tp_sl` profile 还会输出 `TP_SL_Schedule` 和 `TP_SL_Action_Checklist`，用于提前设置人工/外部价格提醒。`Current_Operations_All` 不再输出；`All_Operations_All` 会过滤 `Weight < 0.01` 的行。
+报告包含配置、当前操作、历史操作、收益序列、累计收益、周期汇总、当前持仓、市值重估字段和下一调仓日信息。`Rebalance_Config_Status` 会记录 `Requested_Data_Download_Start`、实际 `Data_Coverage_Start` 和 `Effective_Rebalance_Start`。为兼容历史 workbook，旧锚点行仍保留，但 profile 下载日期不再写入调仓锚点。`Period_Summary_2` 与 `Period_Summary` 列结构一致，只保留 `2026-03-27` 起的数据，并从该日重新累计 `Period_Cumulative_Return`。`Performance_By_Year` 输出自然年收益、年化波动率、Sharpe、最大回撤、是否为不完整年份，以及把该年收益设为零但保留原时间长度后的全期 CAGR。`Return_Attribution` 分别输出按调仓周期排名的对数收益贡献、按股票汇总的持有次数/平均权重/简单收益贡献/最近两年贡献占比，以及所有历史持仓股票的单股剔除压力测试。单股剔除采用“原权重转为现金、其余股票权重不放大、保留原组合交易成本”的口径。`dynamic_tp_sl` profile 还会输出 `TP_SL_Schedule` 和 `TP_SL_Action_Checklist`，用于提前设置人工/外部价格提醒。`Current_Operations_All` 不再输出；`All_Operations_All` 会过滤 `Weight < 0.01` 的行。
 
 Discord 消息包含：
 

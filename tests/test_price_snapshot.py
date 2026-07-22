@@ -22,6 +22,73 @@ from qqq_core.paths import price_filename  # noqa: E402
 
 
 class PriceSnapshotTests(unittest.TestCase):
+    def test_appended_rows_are_not_adjusted_when_price_scale_difference_is_below_one_cent(self):
+        factor = 0.995
+        base = _price_frame("2026-06-15", periods=10, price_start=100.0, volume_start=1000.0)
+        fresh_overlap = base.copy()
+        for col in _PRICE_COLUMNS:
+            fresh_overlap[col] = fresh_overlap[col] / factor
+        fresh_new = _price_frame("2026-06-29", periods=1, price_start=120.0, volume_start=2000.0)
+        for col in _PRICE_COLUMNS:
+            fresh_new[col] = fresh_new[col] / factor
+        fresh = pd.concat([fresh_overlap, fresh_new], ignore_index=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base_run = Path(tmp) / "2026-06-24_155408_strategy11_offset0"
+            current_run = Path(tmp) / "2026-07-09_152712_strategy11_offset0"
+            (base_run / "data").mkdir(parents=True)
+            current_run.mkdir(parents=True)
+            with pd.ExcelWriter(base_run / "data" / price_filename(0)) as writer:
+                base.to_excel(writer, sheet_name="AAPL", index=False)
+
+            merged, result = apply_preserved_price_scale(
+                {"AAPL": fresh},
+                run_dir=current_run,
+                profile_name="Strategy11",
+                offset=0,
+                base_run_dir=base_run,
+            )
+
+        self.assertEqual(result.adjustments, [])
+        self.assertAlmostEqual(
+            float(merged["AAPL"].iloc[-1]["Close"]),
+            float(fresh_new.iloc[0]["Close"]),
+        )
+
+    def test_appended_rows_are_adjusted_when_price_scale_difference_equals_one_cent(self):
+        factor = 0.99
+        base = _price_frame("2026-06-15", periods=10, price_start=100.0, volume_start=1000.0)
+        fresh_overlap = base.copy()
+        for col in _PRICE_COLUMNS:
+            fresh_overlap[col] = fresh_overlap[col] / factor
+        fresh_new = _price_frame("2026-06-29", periods=1, price_start=120.0, volume_start=2000.0)
+        for col in _PRICE_COLUMNS:
+            fresh_new[col] = fresh_new[col] / factor
+        fresh = pd.concat([fresh_overlap, fresh_new], ignore_index=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base_run = Path(tmp) / "2026-06-24_155408_strategy11_offset0"
+            current_run = Path(tmp) / "2026-07-09_152712_strategy11_offset0"
+            (base_run / "data").mkdir(parents=True)
+            current_run.mkdir(parents=True)
+            with pd.ExcelWriter(base_run / "data" / price_filename(0)) as writer:
+                base.to_excel(writer, sheet_name="AAPL", index=False)
+
+            merged, result = apply_preserved_price_scale(
+                {"AAPL": fresh},
+                run_dir=current_run,
+                profile_name="Strategy11",
+                offset=0,
+                base_run_dir=base_run,
+            )
+
+        self.assertEqual(len(result.adjustments), 1)
+        self.assertAlmostEqual(result.adjustments[0].price_factor, factor)
+        self.assertAlmostEqual(
+            float(merged["AAPL"].iloc[-1]["Close"]),
+            float(fresh_new.iloc[0]["Close"] * factor),
+        )
+
     def test_appended_rows_are_scaled_back_to_previous_price_scale(self):
         factor = 0.9535
         base = _price_frame("2026-06-15", periods=10, price_start=100.0, volume_start=1000.0)
