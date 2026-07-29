@@ -148,7 +148,7 @@ STRATEGY_PROFILES: Mapping[str, StrategyProfile] = {
         # tp_base=0.8,
         # sl_base=0.65,
         # tp_sl_probability=1.0,
-        description="Strategy13 with dynamic TP/SL research profile.",
+        description="Strategy11 with ROBOTICS tickers added to the universe.",
     ),
     "Strategy2": StrategyProfile(
         name="Strategy2",
