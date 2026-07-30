@@ -42,6 +42,13 @@ The heavy research loops use `QQQ_MAX_WORKERS` for process-level parallelism and
 reuse workbook-derived DataFrames through a pickle cache under `output/cache/`.
 Set `QQQ_DISABLE_CACHE=1` to bypass the cache, or `QQQ_CACHE_DIR=<path>` to
 store it elsewhere.
+`build_factors.py` writes each factor workbook atomically and retries transient
+Windows Excel I/O errors up to three times. A persistent write failure stops the
+run and preserves the previous valid workbook.
+`data_process.py` applies the same atomic-write and retry policy to processed
+factor workbooks. In parallel runs it loads the reference trading dates once
+before dispatch, and any persistent factor failure makes the command fail
+instead of silently continuing with a stale output workbook.
 `run_strategy.py` keeps all parameter combinations in the statistics sheet, but
 limits the daily/cumulative return time-series sheets to the top
 `REPORT_TIMESERIES_TOP_N` strategies by Sharpe by default. Set that config value
@@ -67,7 +74,7 @@ Other useful entries:
 
 ```powershell
 python analysis/single_factor/run_single_factor_test.py
-python analysis/single_factor/run_all_factors_backtest.py
+python analysis/single_factor/run_batch_single_factor_tests.py
 python analysis/multi_factor/inspect_ols_weights.py
 python analysis/strategy/run_detailed_backtest_report.py
 python analysis/strategy/run_strategy_review.py
@@ -132,7 +139,7 @@ Temporary `_debug_*.py` and `_test_*.py` files are ad hoc diagnostics for recent
 | Build factors | `pipeline/build_factors.py` | OHLCV Excel | `factor_raw*/factor_alphaXXX_raw.xlsx` |
 | Process factors | `pipeline/data_process.py` | raw factors | `factor_processed*/factor_alphaXXX_processed.xlsx` |
 | Single factor test | `analysis/single_factor/run_single_factor_test.py` | one processed factor | PDF report |
-| Batch single factor | `analysis/single_factor/run_all_factors_backtest.py` | processed factor directory | multiple PDF reports |
+| Batch single-factor tests | `analysis/single_factor/run_batch_single_factor_tests.py` | processed factor directory | multiple PDF reports |
 | Multi-factor test | `analysis/single_factor/run_multi_factor_test.py` | selected factors and returns | Excel report |
 | Collinearity analysis | `analysis/single_factor/run_collinearity_analysis.py` | selected factors | Excel matrices and series |
 | Composite factors | `analysis/multi_factor/run_composite_factor.py` | processed factors | `composite_factors_fXX-...xlsx` and report |
@@ -183,6 +190,7 @@ Multi-factor testing summarizes selected factors in Excel:
 - long-short return and Sharpe
 - long excess return and Sharpe
 - cumulative IC, cumulative long return, and cumulative long excess return
+- factor statistics for the full sample and trailing 3M, 6M, 1Y, and 2Y windows
 
 ### Composite Factor Methods
 
@@ -304,7 +312,25 @@ Timing conventions:
 - trade execution: T close
 - return interval: `(T, T_next]`
 - trade price: adjusted close
-- period names such as `P10d` mean 10 trading days, not 10 calendar days
+- by default, period names such as `P10d` mean a strict 10-trading-day interval
+
+Profiles may optionally enable a fixed-week schedule with all three fields:
+
+```python
+rebalance_interval_weeks = 2
+rebalance_weekday = 3              # ISO weekday: Monday=1, Friday=5
+rebalance_week_anchor_date = "2026-06-24"
+```
+
+The fields must be set together and must satisfy
+`P{N}d == rebalance_interval_weeks * 5`; one profile accepts only one weekday.
+In the example, P10 rebalances every second Wednesday. If that Wednesday is an
+NYSE holiday, the rebalance moves to the preceding NYSE session, so a nominal
+P10 interval may contain 8 or 9 actual sessions. Period-return reports use
+`52 / rebalance_interval_weeks` for annualization in this mode; daily strategy
+metrics continue to use 252. `Strategy111` enables this mode with a two-week
+interval, Friday (`rebalance_weekday=5`), and a `2026-06-26` phase anchor.
+Other profiles retain strict trading-day behavior.
 
 Future rebalance-date extrapolation uses the NYSE calendar through `pandas_market_calendars`, so holidays such as Good Friday are handled correctly. Historical and future date selection use the same trading-day counting semantics.
 
@@ -353,7 +379,7 @@ Each strategy profile selects one complete ticker universe through `ticker_unive
 
 The six-year Nasdaq universe is a static research universe, not a point-in-time membership series. Using it unchanged across historical dates includes securities before their actual Nasdaq-100 entry date. It is suitable for broad data collection and candidate research, but membership-accurate backtests need date-effective constituent masks.
 
-Direct runs of `data/pull_yhfinance_Data.py` use `DATA_PULL_TICKER_UNIVERSE` in `data/data_config.py`, independent of `QQQ_STRATEGY_PROFILE`. Rebalance-day and other callers should pass the intended universe explicitly, either through `pull_yhfinance_Data.main(ticker_universe=...)` or the `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` environment variables. `run_rebalance_day.py` passes the active strategy profile's `ticker_universe` into the pipeline automatically. The pull script prints the resolved ticker universe, source, and ticker count at startup.
+Direct runs of `data/pull_yhfinance_Data.py` use `DATA_PULL_TICKER_UNIVERSE` in `data/data_config.py`, which defaults to the largest available universe, `ORIGINAL_108_PLUS_NASDAQ_100` (235 tickers), independent of `QQQ_STRATEGY_PROFILE`. Rebalance-day and other callers should pass the intended universe explicitly, either through `pull_yhfinance_Data.main(ticker_universe=...)` or the `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` environment variables. `run_rebalance_day.py` passes the active strategy profile's `ticker_universe` into the pipeline automatically. The pull script prints the resolved ticker universe, source, and ticker count at startup.
 
 Each strategy profile can set `preserve_price_scale=True` to protect live rebalance runs from yfinance corporate-action rewrites. Use `price_scale_base_run_dir` in the same profile to pin the canonical base run; leave it as `None` to auto-select the newest previous official run for the same profile and offset. `run_rebalance_day.py` passes these values into the data puller automatically.
 

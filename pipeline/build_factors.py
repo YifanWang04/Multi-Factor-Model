@@ -2,7 +2,7 @@
 因子构建流水线 (pipeline/build_factors.py)
 =====================================
 从 factor_library 读取所有因子配置，用 OHLCV 数据构建原始因子并保存到 factor_raw。
-不做回测；回测请使用 run_single_factor_test 或 run_all_factors_backtest。
+不做回测；回测请使用 run_single_factor_test 或 run_batch_single_factor_tests。
 
 详细说明：
 - 数据来源：从 data/us_top100_daily_2023_present.xlsx 读取 OHLCV 数据
@@ -17,6 +17,7 @@
 
 import os
 import sys
+import time
 
 import numpy as np
 import pandas as pd
@@ -34,7 +35,11 @@ from data.data_config import (
     should_use_price_sheet,
 )
 from qqq_core.data_cache import load_or_compute, print_cache_summary
+from qqq_core.excel_io import atomic_excel_writer
 from qqq_core.parallel import get_max_workers, ordered_parallel_map
+
+_FACTOR_WRITE_ATTEMPTS = 3
+_FACTOR_WRITE_RETRY_DELAY_SECONDS = 0.2
 
 _RUN_DIR = os.environ.get("REBALANCE_RUN_DIR")
 if _RUN_DIR:
@@ -205,6 +210,24 @@ def build_and_save_all_factors(data_dict):
     return built
 
 
+def _write_factor_excel(factor_df, raw_path):
+    for attempt in range(1, _FACTOR_WRITE_ATTEMPTS + 1):
+        try:
+            with atomic_excel_writer(raw_path, engine="xlsxwriter") as writer:
+                factor_df.to_excel(writer, sheet_name="factor")
+            return
+        except OSError as exc:
+            if attempt >= _FACTOR_WRITE_ATTEMPTS:
+                raise
+            delay = _FACTOR_WRITE_RETRY_DELAY_SECONDS * attempt
+            print(
+                f"  [retry] Excel write {attempt}/{_FACTOR_WRITE_ATTEMPTS} "
+                f"failed for {raw_path}: {exc}; retrying in {delay:.1f}s",
+                flush=True,
+            )
+            time.sleep(delay)
+
+
 def _build_factor_chunk_worker(task):
     factor_specs, data_dict, factor_raw_dir = task
     from factors.factor_library import FACTOR_CONFIGS
@@ -232,13 +255,14 @@ def _build_factor_chunk_worker(task):
 
             factor_df = factor_df.replace([np.inf, -np.inf], np.nan)
             factor_df.index.name = "Date"
-            factor_df.to_excel(raw_path, sheet_name="factor")
+            _write_factor_excel(factor_df, raw_path)
             built.append((name, raw_path))
             print(f"  {name} -> {raw_path}", flush=True)
         except Exception as e:
-            import traceback
             print(f"  [error] {name}: {e}", flush=True)
-            traceback.print_exc()
+            raise RuntimeError(
+                f"Failed to build or save {name} to {raw_path}: {e}"
+            ) from e
 
     return built
 

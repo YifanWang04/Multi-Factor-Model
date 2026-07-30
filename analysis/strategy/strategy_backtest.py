@@ -38,6 +38,7 @@ from strategy_utils import _build_groups, _get_price_on_date
 from portfolio_optimizer import compute_weights
 from rebalance_calendar import (
     RebalanceAnchorError,
+    RebalanceCalendarError,
     get_rebalance_calendar as _get_rebalance_calendar,
 )
 from tp_sl_exit import (
@@ -52,6 +53,18 @@ from qqq_core.parallel import get_max_workers, ordered_parallel_map
 
 class CompositeCalendarError(ValueError):
     """Raised when a composite factor calendar cannot support a strategy period."""
+
+
+def _fixed_week_value_for_period(config, rebalance_period: int, field: str):
+    """Return a fixed-week field only for the profile's configured P value."""
+
+    value = getattr(config, field, None)
+    if value is None:
+        return None
+    fixed_period = getattr(config, "FIXED_WEEK_REBALANCE_PERIOD", None)
+    if fixed_period is None:
+        fixed_period = rebalance_period
+    return value if int(fixed_period) == int(rebalance_period) else None
 
 
 _OPTIMIZER_WEIGHT_METHODS = {"min_variance", "mvo", "max_return"}
@@ -86,6 +99,9 @@ def _select_rebalance_dates(
     ret_index: pd.DatetimeIndex,
     rebalance_period_days: int,
     rebalance_anchor_date: str | pd.Timestamp | None = None,
+    rebalance_interval_weeks: int | None = None,
+    rebalance_weekday: int | None = None,
+    rebalance_week_anchor_date: str | pd.Timestamp | None = None,
 ) -> list:
     """
     从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点。
@@ -96,6 +112,9 @@ def _select_rebalance_dates(
         ret_index,
         rebalance_period_days,
         anchor_date=rebalance_anchor_date,
+        interval_weeks=rebalance_interval_weeks,
+        weekday=rebalance_weekday,
+        week_anchor_date=rebalance_week_anchor_date,
     )
     _assert_calendar_supports_requested_period(
         selected,
@@ -267,10 +286,23 @@ class StrategyBacktester:
                     "tp_base": tp_base,
                     "sl_base": sl_base,
                     "probability": probability,
+                    "rebalance_interval_weeks": _fixed_week_value_for_period(
+                        self.config, rebalance_period, "REBALANCE_INTERVAL_WEEKS"
+                    ),
+                    "rebalance_weekday": _fixed_week_value_for_period(
+                        self.config, rebalance_period, "REBALANCE_WEEKDAY"
+                    ),
+                    "rebalance_week_anchor_date": _fixed_week_value_for_period(
+                        self.config, rebalance_period, "REBALANCE_WEEK_ANCHOR_DATE"
+                    ),
                     **result.get("exit_stats", {}),
                 }
                 results[strategy_name] = result
-            except (CompositeCalendarError, RebalanceAnchorError):
+            except (
+                CompositeCalendarError,
+                RebalanceAnchorError,
+                RebalanceCalendarError,
+            ):
                 raise
             except Exception as exc:
                 print(f"    [!] 跳过：{exc}")
@@ -320,6 +352,21 @@ class StrategyBacktester:
                 self.config,
                 "REBALANCE_ANCHOR_DATE",
                 None,
+            ),
+            rebalance_interval_weeks=_fixed_week_value_for_period(
+                self.config,
+                rebalance_period,
+                "REBALANCE_INTERVAL_WEEKS",
+            ),
+            rebalance_weekday=_fixed_week_value_for_period(
+                self.config,
+                rebalance_period,
+                "REBALANCE_WEEKDAY",
+            ),
+            rebalance_week_anchor_date=_fixed_week_value_for_period(
+                self.config,
+                rebalance_period,
+                "REBALANCE_WEEK_ANCHOR_DATE",
             ),
         )
         if len(rebalance_dates) < 2:
@@ -594,6 +641,10 @@ def _strategy_config_snapshot(config) -> SimpleNamespace:
         "MAX_WEIGHT",
         "DATA_DOWNLOAD_START_DATE",
         "REBALANCE_ANCHOR_DATE",
+        "REBALANCE_INTERVAL_WEEKS",
+        "REBALANCE_WEEKDAY",
+        "REBALANCE_WEEK_ANCHOR_DATE",
+        "FIXED_WEEK_REBALANCE_PERIOD",
     ]
     return SimpleNamespace(**{name: getattr(config, name, None) for name in fields})
 
@@ -682,6 +733,21 @@ def _run_strategy_combo_worker(task):
                 "REBALANCE_ANCHOR_DATE",
                 None,
             ),
+            "rebalance_interval_weeks": _fixed_week_value_for_period(
+                config,
+                params["rebalance_period"],
+                "REBALANCE_INTERVAL_WEEKS",
+            ),
+            "rebalance_weekday": _fixed_week_value_for_period(
+                config,
+                params["rebalance_period"],
+                "REBALANCE_WEEKDAY",
+            ),
+            "rebalance_week_anchor_date": _fixed_week_value_for_period(
+                config,
+                params["rebalance_period"],
+                "REBALANCE_WEEK_ANCHOR_DATE",
+            ),
             "effective_rebalance_anchor": (
                 str(pd.Timestamp(result["rebalance_dates"][0]).date())
                 if result.get("rebalance_dates")
@@ -695,7 +761,7 @@ def _run_strategy_combo_worker(task):
             **result.get("exit_stats", {}),
         }
         return strategy_name, result
-    except (CompositeCalendarError, RebalanceAnchorError):
+    except (CompositeCalendarError, RebalanceAnchorError, RebalanceCalendarError):
         raise
     except Exception as exc:
         print(f"    [!] skip {strategy_name}: {exc}", flush=True)

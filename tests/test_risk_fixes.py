@@ -588,8 +588,12 @@ class RiskFixTests(unittest.TestCase):
 
             dc = importlib.reload(dc)
             self.assertEqual(dc.YFINANCE_TICKER_UNIVERSE, dc.DATA_PULL_TICKER_UNIVERSE)
-            self.assertEqual(dc.YFINANCE_TICKER_UNIVERSE, "ORIGINAL_108")
-            self.assertFalse(dc.should_use_price_sheet("AMAT"))
+            self.assertEqual(
+                dc.YFINANCE_TICKER_UNIVERSE,
+                "ORIGINAL_108_PLUS_NASDAQ_100",
+            )
+            self.assertEqual(len(dc.YFINANCE_TICKERS), 235)
+            self.assertFalse(dc.should_use_price_sheet("NOT_IN_UNIVERSE"))
 
             os.environ["REBALANCE_TICKER_UNIVERSE"] = "ORIGINAL_143"
             self.assertEqual(dc.resolve_ticker_universe_name(), "ORIGINAL_143")

@@ -23,6 +23,7 @@ import os
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from analysis.strategy.rebalance_calendar import calendar_mode
 
 try:
     import openpyxl
@@ -214,6 +215,23 @@ class StrategyReporter:
             ("Selected_Factor_Names", ", ".join(getattr(self.config, "STRATEGY_SELECTED_FACTOR_NAMES", []))),
             ("Group_Nums", str(getattr(self.config, "GROUP_NUMS", ""))),
             ("Rebalance_Periods", str(getattr(self.config, "REBALANCE_PERIODS", ""))),
+            (
+                "Rebalance_Calendar_Mode",
+                calendar_mode(
+                    getattr(self.config, "REBALANCE_INTERVAL_WEEKS", None),
+                    getattr(self.config, "REBALANCE_WEEKDAY", None),
+                    getattr(self.config, "REBALANCE_WEEK_ANCHOR_DATE", None),
+                ),
+            ),
+            ("Rebalance_Interval_Weeks", str(getattr(self.config, "REBALANCE_INTERVAL_WEEKS", ""))),
+            ("Rebalance_Weekday_ISO", str(getattr(self.config, "REBALANCE_WEEKDAY", ""))),
+            ("Rebalance_Week_Anchor_Date", str(getattr(self.config, "REBALANCE_WEEK_ANCHOR_DATE", ""))),
+            (
+                "Rebalance_Holiday_Policy",
+                "previous_nyse_session"
+                if getattr(self.config, "REBALANCE_INTERVAL_WEEKS", None) is not None
+                else "",
+            ),
             ("Requested_Data_Download_Start", str(getattr(self.config, "DATA_DOWNLOAD_START_DATE", ""))),
             ("Effective_Rebalance_Start", str(effective_start)),
             ("Requested_Rebalance_Anchor", str(getattr(self.config, "REBALANCE_ANCHOR_DATE", ""))),

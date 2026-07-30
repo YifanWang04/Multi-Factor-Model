@@ -34,7 +34,12 @@ for _p in [_HERE, _SF_DIR, _ROOT]:
 
 # ── 本地模块 ──────────────────────────────────────────────────────────────────
 import strategy_config as cfg
-from strategy_backtest import CompositeCalendarError, StrategyBacktester, _select_rebalance_dates
+from strategy_backtest import (
+    CompositeCalendarError,
+    StrategyBacktester,
+    _fixed_week_value_for_period,
+    _select_rebalance_dates,
+)
 from strategy_metrics import compute_all_metrics
 from strategy_report import StrategyReporter
 
@@ -108,6 +113,21 @@ def _assert_composite_calendar_supports_strategy_grid(
                     config,
                     "REBALANCE_ANCHOR_DATE",
                     None,
+                ),
+                rebalance_interval_weeks=_fixed_week_value_for_period(
+                    config,
+                    period,
+                    "REBALANCE_INTERVAL_WEEKS",
+                ),
+                rebalance_weekday=_fixed_week_value_for_period(
+                    config,
+                    period,
+                    "REBALANCE_WEEKDAY",
+                ),
+                rebalance_week_anchor_date=_fixed_week_value_for_period(
+                    config,
+                    period,
+                    "REBALANCE_WEEK_ANCHOR_DATE",
                 ),
             )
         except CompositeCalendarError as exc:

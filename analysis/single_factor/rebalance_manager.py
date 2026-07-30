@@ -28,7 +28,16 @@ class RebalancePeriodManager:
     管理调仓周期，生成调仓日期
     """
 
-    def __init__(self, factor, ret, rebalance_period, rebalance_anchor_date=None):
+    def __init__(
+        self,
+        factor,
+        ret,
+        rebalance_period,
+        rebalance_anchor_date=None,
+        rebalance_interval_weeks=None,
+        rebalance_weekday=None,
+        rebalance_week_anchor_date=None,
+    ):
         """
         Parameters:
         -----------
@@ -41,6 +50,9 @@ class RebalancePeriodManager:
         self.ret = ret
         self.rebalance_period = rebalance_period
         self.rebalance_anchor_date = rebalance_anchor_date
+        self.rebalance_interval_weeks = rebalance_interval_weeks
+        self.rebalance_weekday = rebalance_weekday
+        self.rebalance_week_anchor_date = rebalance_week_anchor_date
 
     def get_rebalance_dates(self):
         """
@@ -52,6 +64,9 @@ class RebalancePeriodManager:
             self.ret.index,
             self.rebalance_period,
             anchor_date=self.rebalance_anchor_date,
+            interval_weeks=self.rebalance_interval_weeks,
+            weekday=self.rebalance_weekday,
+            week_anchor_date=self.rebalance_week_anchor_date,
         )
 
     def align_factor_return_by_period(self):

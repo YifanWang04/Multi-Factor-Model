@@ -1,5 +1,5 @@
 """
-批量单因子回测入口 (run_all_factors_backtest.py)
+批量单因子测试入口 (run_batch_single_factor_tests.py)
 =====================================
 本模块扫描 factor_processed 目录下所有因子 Excel 文件（优先 *_processed.xlsx，否则 factor_*.xlsx），
 对每个因子调用 SingleFactorTesterOptimized 运行完整单因子测试并生成独立 PDF 报告。
@@ -9,7 +9,7 @@
 - 每个因子使用与 SingleFactorConfig 相同的 REBALANCE_PERIODS、GROUP_NUM、WEIGHT_METHOD、交易成本等，仅 FACTOR_FILE 与 FACTOR_NAME 按文件替换。
 - 支持环境变量 FACTOR_PROCESSED_DIR 覆盖因子目录；默认为项目下的 factor_processed。
 
-运行方式：在项目根目录执行 python -m analysis.single_factor.run_all_factors_backtest，或在 analysis/single_factor 下执行 python run_all_factors_backtest.py。结束时打印成功/失败汇总。
+运行方式：在项目根目录执行 python -m analysis.single_factor.run_batch_single_factor_tests，或在 analysis/single_factor 下执行 python run_batch_single_factor_tests.py。结束时打印成功/失败汇总。
 """
 
 import os

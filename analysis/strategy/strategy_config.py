@@ -70,8 +70,10 @@ ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
 # Reset them to None before live/rebalance-day runs.
 # STRATEGY_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19]          # Example: [95, 99, 27, 46, 19]
 # STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
-STRATEGY_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]          # Example: [95, 99, 27, 46, 19]
-STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N20"       # Example: "rank_ic_m3_N20"
+# STRATEGY_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]          # Example: [95, 99, 27, 46, 19]
+# STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N20"       # Example: "rank_ic_m3_N20"
+STRATEGY_RESEARCH_FACTOR_INDICES = [23, 60, 20, 10, 51]  #July 29, 2026
+STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m1"             #July 29, 2026
 
 def _coerce_factor_indices(value):
     if value is None:
@@ -88,6 +90,14 @@ STRATEGY_PARAM = ACTIVE_PROFILE.strategy_param
 # Profile data_download_start_date 只控制行情下载起点，不固定交易日历相位。
 DATA_DOWNLOAD_START_DATE = ACTIVE_PROFILE.data_download_start_date
 REBALANCE_ANCHOR_DATE = None
+REBALANCE_INTERVAL_WEEKS = ACTIVE_PROFILE.rebalance_interval_weeks
+REBALANCE_WEEKDAY = ACTIVE_PROFILE.rebalance_weekday
+REBALANCE_WEEK_ANCHOR_DATE = ACTIVE_PROFILE.rebalance_week_anchor_date
+FIXED_WEEK_REBALANCE_PERIOD = (
+    ACTIVE_PROFILE.rebalance_period
+    if ACTIVE_PROFILE.uses_fixed_week_rebalance
+    else None
+)
 
 # 切换策略时修改 qqq_config/strategy_profiles.py 的 ACTIVE_STRATEGY_PROFILE，
 # 或临时设置环境变量 QQQ_STRATEGY_PROFILE；不要在本文件硬编码因子列表。
@@ -166,7 +176,7 @@ GROUP_NUMS = [5, 10]
 # 每个周期优先读取 matching 的 composite_factors_P{N}_*.xlsx。
 # 调仓日从可用复合因子/收益数据的首日自然生成。
 # REBALANCE_PERIODS = [10, 20]
-REBALANCE_PERIODS = [5, 10]
+REBALANCE_PERIODS = [5, 10, 20]
 
 COMPOSITE_FACTOR_FILES_BY_PERIOD = {
     int(period): get_composite_factor_file(int(period))
@@ -174,8 +184,8 @@ COMPOSITE_FACTOR_FILES_BY_PERIOD = {
 }
 
 # 目标组排名（从高到低）：1=买最高分组，2=买第二高分组，3=买第三高分组
-# TARGET_GROUP_RANKS = [1, 2]
-TARGET_GROUP_RANKS = [1]
+TARGET_GROUP_RANKS = [1, 2]
+# TARGET_GROUP_RANKS = [1]
 
 # 资产配置方式
 #   equal         : 等权配置
@@ -183,16 +193,16 @@ TARGET_GROUP_RANKS = [1]
 #   mvo           : 马科维兹最优（最大化夏普比率；高风险高收益）
 #   max_return    : 最大化预期收益
 #   factor_score  : 因子值打分加权
-# WEIGHT_METHODS = ["equal", "min_variance", "mvo", "max_return", "factor_score"]
-WEIGHT_METHODS = ["max_return"]
+WEIGHT_METHODS = ["equal", "min_variance", "mvo", "max_return", "factor_score"]
+#WEIGHT_METHODS = ["max_return"]
 
 # Exit policy grid:
 # - fixed_rebalance keeps the historical behavior and does not use TP/SL grids.
 # - dynamic_tp_sl scans TP_BASE_GRID x SL_BASE_GRID using Adj Close exits.
 # EXIT_POLICY_GRID = ["fixed_rebalance"]
 EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
-TP_BASE_GRID = [0.75, 0.8, 0.85, 0.9]
-SL_BASE_GRID = [0.5, 0.65, 0.8, 0.95]
+TP_BASE_GRID = [0.7, 0.8, 0.9]
+SL_BASE_GRID = [0.5, 0.65, 0.8]
 TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability
 
 # Active-profile defaults used by detailed backtest and rebalance-day reports.
@@ -212,4 +222,5 @@ OPTIMIZATION_LOOKBACK = 252
 # MAX_WEIGHT 是详细回测/调仓日使用的 active profile 默认标量；run_strategy.py 如需研究扫描，
 # 使用 MAX_WEIGHT_GRID 展开网格，避免把 list 传入优化器。
 MAX_WEIGHT = ACTIVE_PROFILE.max_weight
-MAX_WEIGHT_GRID = [0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
+# MAX_WEIGHT_GRID = [0.4, 0.5, 0.6, 0.7, 0.8, 1.0]
+MAX_WEIGHT_GRID = [0.4, 0.6]

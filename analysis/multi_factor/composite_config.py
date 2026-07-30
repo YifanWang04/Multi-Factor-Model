@@ -32,8 +32,9 @@ MANUALLY_SELECTED_FACTOR_INDICES = list(ACTIVE_PROFILE.factor_indices)
 # Set to a list like [95, 99, 27, 46, 19], or leave as None to use the active profile.
 # The rebalance-day pipeline still takes precedence through REBALANCE_SELECTED_FACTOR_INDICES.
 # COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 99, 27, 46, 19] # test
-COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]
-# COMPOSITE_RESEARCH_FACTOR_INDICES = None #June 16, 2026
+# COMPOSITE_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]
+# OMPOSITE_RESEARCH_FACTOR_INDICES = None #June 16, 2026
+COMPOSITE_RESEARCH_FACTOR_INDICES = [23, 60, 20, 10, 51] #July 29, 2026
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,14 @@ REBALANCE_PERIOD = ACTIVE_PROFILE.rebalance_period
 # 从可用因子/收益数据的首日自然生成。
 DATA_DOWNLOAD_START_DATE = ACTIVE_PROFILE.data_download_start_date
 REBALANCE_ANCHOR_DATE = None
+REBALANCE_INTERVAL_WEEKS = ACTIVE_PROFILE.rebalance_interval_weeks
+REBALANCE_WEEKDAY = ACTIVE_PROFILE.rebalance_weekday
+REBALANCE_WEEK_ANCHOR_DATE = ACTIVE_PROFILE.rebalance_week_anchor_date
+FIXED_WEEK_REBALANCE_PERIOD = (
+    ACTIVE_PROFILE.rebalance_period
+    if ACTIVE_PROFILE.uses_fixed_week_rebalance
+    else None
+)
 COMPOSITE_REBALANCE_PERIODS = [5, 10, 20]
 
 # 一元/IC加权滚动窗口列表 N

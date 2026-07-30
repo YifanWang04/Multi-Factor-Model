@@ -14,6 +14,7 @@
 
 import pandas as pd
 import numpy as np
+from analysis.strategy.rebalance_calendar import periods_per_year_for_calendar
 import os
 from datetime import datetime
 from data.data_config import should_use_price_sheet
@@ -123,11 +124,27 @@ class SingleFactorTesterOptimized:
     
     def run_single_period(self, rebalance_period):
         """运行单个调仓周期的测试"""
-        periods_per_year = 252 / rebalance_period if rebalance_period > 0 else 252
+        periods_per_year = periods_per_year_for_calendar(
+            rebalance_period,
+            getattr(self.config, "REBALANCE_INTERVAL_WEEKS", None),
+            getattr(self.config, "REBALANCE_WEEKDAY", None),
+            getattr(self.config, "REBALANCE_WEEK_ANCHOR_DATE", None),
+        )
         
         # 1. 准备数据
         print("\nStep 2: 准备调仓期数据")
-        manager = RebalancePeriodManager(self.factor, self.ret, rebalance_period)
+        manager = RebalancePeriodManager(
+            self.factor,
+            self.ret,
+            rebalance_period,
+            rebalance_interval_weeks=getattr(
+                self.config, "REBALANCE_INTERVAL_WEEKS", None
+            ),
+            rebalance_weekday=getattr(self.config, "REBALANCE_WEEKDAY", None),
+            rebalance_week_anchor_date=getattr(
+                self.config, "REBALANCE_WEEK_ANCHOR_DATE", None
+            ),
+        )
         factor_periods, ret_periods = manager.align_factor_return_by_period()
         
         print(f"调仓期数: {len(factor_periods)}")

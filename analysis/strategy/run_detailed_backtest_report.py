@@ -51,9 +51,9 @@ from strategy_backtest import (
     StrategyBacktester,
     _select_rebalance_dates,
 )
+from rebalance_calendar import calendar_mode, get_next_rebalance_date
 from portfolio_optimizer import compute_weights
 import strategy_config as cfg
-from rebalance.rebalance_operations import _nth_nyse_trading_day
 from rebalance.rebalance_report import _describe_composite_method
 from qqq_core.performance_metrics import performance_summary
 from tp_sl_exit import (
@@ -108,6 +108,9 @@ def run_detailed_backtest(
     weight_method: str,
     config,
     rebalance_anchor_date: str | pd.Timestamp | None = None,
+    rebalance_interval_weeks: int | None = None,
+    rebalance_weekday: int | None = None,
+    rebalance_week_anchor_date: str | pd.Timestamp | None = None,
 ) -> dict:
     """
     运行单策略详细回测，返回含调仓操作、日收益、累计收益等完整数据。
@@ -119,6 +122,9 @@ def run_detailed_backtest(
         ret_df.index,
         rebalance_period,
         rebalance_anchor_date=rebalance_anchor_date,
+        rebalance_interval_weeks=rebalance_interval_weeks,
+        rebalance_weekday=rebalance_weekday,
+        rebalance_week_anchor_date=rebalance_week_anchor_date,
     )
     if len(rebalance_dates) < 2:
         return {"error": "调仓日不足 2 个"}
@@ -130,13 +136,14 @@ def run_detailed_backtest(
     #   3. 操作记录中 Next_Rebalance_Date 保持外推值，但 Sell_Price_Close 使用实际可用价格
     last_rb = pd.Timestamp(rebalance_dates[-1])
     price_end_date = ret_df.index.max()  # 价格数据截止日
-    _after = ret_df.index[ret_df.index > last_rb].sort_values()
-
-    if len(_after) >= rebalance_period:
-        next_rb_date = pd.Timestamp(_after[rebalance_period - 1])
-    else:
-        # 超出数据范围：用 NYSE 日历外推（正确处理 Good Friday 等非联邦节假日）
-        next_rb_date = _nth_nyse_trading_day(last_rb, rebalance_period)
+    next_rb_date = get_next_rebalance_date(
+        last_rb,
+        rebalance_period,
+        trading_dates=ret_df.index,
+        interval_weeks=rebalance_interval_weeks,
+        weekday=rebalance_weekday,
+        week_anchor_date=rebalance_week_anchor_date,
+    )
 
     # 如果 next_rb_date 晚于价格截止日，则使用价格截止日
     actual_sell_date = min(next_rb_date, price_end_date)
@@ -451,6 +458,9 @@ def run_detailed_backtest(
                 None,
             ),
             "requested_rebalance_anchor": rebalance_anchor_date,
+            "rebalance_interval_weeks": rebalance_interval_weeks,
+            "rebalance_weekday": rebalance_weekday,
+            "rebalance_week_anchor_date": rebalance_week_anchor_date,
             "effective_rebalance_anchor": str(pd.Timestamp(rebalance_dates[0]).date()),
             "effective_rebalance_start": str(pd.Timestamp(rebalance_dates[0]).date()),
             "exit_policy": exit_policy,
@@ -496,6 +506,23 @@ def write_detailed_report(result: dict, output_path: str) -> None:
             ["Group_Num", params.get("group_num", "")],
             ["Target_Rank", params.get("target_rank", "")],
             ["Rebalance_Period_TradingDays", params.get("rebalance_period", "")],
+            [
+                "Rebalance_Calendar_Mode",
+                calendar_mode(
+                    params.get("rebalance_interval_weeks"),
+                    params.get("rebalance_weekday"),
+                    params.get("rebalance_week_anchor_date"),
+                ),
+            ],
+            ["Rebalance_Interval_Weeks", params.get("rebalance_interval_weeks", "")],
+            ["Rebalance_Weekday_ISO", params.get("rebalance_weekday", "")],
+            ["Rebalance_Week_Anchor_Date", params.get("rebalance_week_anchor_date", "")],
+            [
+                "Rebalance_Holiday_Policy",
+                "previous_nyse_session"
+                if params.get("rebalance_interval_weeks") is not None
+                else "",
+            ],
             ["Exit_Policy", params.get("exit_policy", "")],
             ["TP_Base", params.get("tp_base", "")],
             ["SL_Base", params.get("sl_base", "")],
@@ -620,6 +647,9 @@ def main():
         weight_method=weight_method,
         config=cfg,
         rebalance_anchor_date=cfg.REBALANCE_ANCHOR_DATE,
+        rebalance_interval_weeks=cfg.REBALANCE_INTERVAL_WEEKS,
+        rebalance_weekday=cfg.REBALANCE_WEEKDAY,
+        rebalance_week_anchor_date=cfg.REBALANCE_WEEK_ANCHOR_DATE,
     )
 
     if "error" in result:

@@ -35,13 +35,15 @@ if _PARENT not in sys.path:
 from strategy_utils import _get_price_on_date
 from strategy_backtest import _build_groups, _select_rebalance_dates
 from portfolio_optimizer import compute_weights
+from rebalance_calendar import (
+    get_future_rebalance_dates,
+    get_next_rebalance_date,
+)
 
 
 # ---------------------------------------------------------------------------
 # 全局常量（消除魔法数字）
 # ---------------------------------------------------------------------------
-
-import pandas_market_calendars as _pmc
 
 _WEIGHT_FILTER_THRESHOLD: float = 0.0001
 
@@ -53,41 +55,10 @@ LIVE_PRICE_RETRY_DELAY_BASE: float = 0.5
 LIVE_PRICE_RETRY_DELAY_MULT: float = 2.0
 LIVE_PRICE_TIMEOUT: float = 10.0
 
-# NYSE 日历缓存（首次导入后缓存在进程内）
-_NYSE_CAL = None
-
-
-def _get_nyse_calendar():
-    """获取 NYSE 交易日历（懒加载+进程内缓存）。"""
-    global _NYSE_CAL
-    if _NYSE_CAL is None:
-        _NYSE_CAL = _pmc.get_calendar("NYSE")
-    return _NYSE_CAL
-
-
 def _nth_nyse_trading_day(start_date: pd.Timestamp, n: int) -> pd.Timestamp:
-    """
-    返回 start_date 之后第 n 个 NYSE 交易日。
+    """Compatibility wrapper for the shared strict-trading-day calendar."""
 
-    - n=1 → 下一个交易日（不计 start_date 本身）
-    - n=20 → start_date 之后第 20 个 NYSE 交易日
-    - NYSE 休市日（Good Friday、感恩节次日等）均被正确排除
-    - 语义与 rebalance_calendar.py 保持一致：计数严格大于 start_date，
-      即 T + n 的含义为（相邻调仓日之间有 n-1 个交易日）
-    """
-    cal = _get_nyse_calendar()
-    start_ts = pd.Timestamp(start_date).normalize()
-    end_ts = start_ts + pd.Timedelta(days=400)
-    valid_days = cal.valid_days(start_ts, end_ts)
-    # valid_days 默认返回 tz-aware（UTC），统一转换为 naive 以便与 start_ts 比较
-    td_list = [d.tz_localize(None) if d.tzinfo is not None else d for d in valid_days]
-    for i, d in enumerate(td_list):
-        if d > start_ts:
-            # td_list[i] 是第一个交易日（严格 > start_ts）
-            # td_list[i + n - 1] 是第 n 个交易日
-            return pd.Timestamp(td_list[i + n - 1])
-    # 理论上不应走到此处（一年范围内必有 252+ 交易日）
-    raise ValueError(f"无法在一年内找到第 {n} 个 NYSE 交易日（起始日：{start_ts.date()}）")
+    return get_next_rebalance_date(start_date, n)
 
 
 # ---------------------------------------------------------------------------
@@ -100,20 +71,22 @@ def get_rebalance_day_status(
     as_of_date: pd.Timestamp,
     last_factor_date: pd.Timestamp,
     trading_dates: Optional[list] = None,
+    rebalance_interval_weeks: int | None = None,
+    rebalance_weekday: int | None = None,
+    rebalance_week_anchor_date: str | pd.Timestamp | None = None,
 ) -> dict:
-    """
-    判定调仓日状态。
+    """Return current/future status from the shared rebalance calendar."""
 
-    核心原则：
-    - `is_rebalance_today`：仅取决于调仓日历，与因子数据是否可用无关。
-      4/27 在调仓日历上 → is_rebalance_today=True（即使盘中因子数据尚未生成）。
-    - `has_factor_data`：因子数据是否已生成（pipeline 是否已跑完今日数据）。
-      若 False，说明今日是调仓日但因子尚未生成，不应显示买卖操作。
-
-    trading_dates：用于外推未来调仓日（保持与回测日历一致）。
-    """
-    rebalance_dates = sorted(rebalance_dates)
-    if not rebalance_dates:
+    historical = sorted(
+        {
+            pd.Timestamp(value).tz_localize(None).normalize()
+            if pd.Timestamp(value).tzinfo is not None
+            else pd.Timestamp(value).normalize()
+            for value in rebalance_dates
+            if pd.notna(value)
+        }
+    )
+    if not historical:
         return {
             "is_rebalance_today": False,
             "has_factor_data": False,
@@ -123,58 +96,33 @@ def get_rebalance_day_status(
             "all_rebalance_dates": [],
         }
 
-    sorted_td = sorted(trading_dates) if trading_dates else []
-    # anchor：最后一个有因子数据的历史调仓日，外推从这里开始
-    anchor = rebalance_dates[-1]
-
-    # ── 构建外推调仓日列表 ──
-    extrapolated = []
-    current_date = anchor
-    for _ in range(REBALANCE_EXTRAPOLATE_MAX_PERIODS):
-        if sorted_td:
-            try:
-                # 找严格大于 current_date 的第一个交易日
-                idx = next(i for i, x in enumerate(sorted_td) if x > current_date)
-            except StopIteration:
-                idx = len(sorted_td)
-            # idx 是 current_date 之后第 1 个交易日；第 N 个交易日为 idx + N - 1。
-            # 与 _nth_nyse_trading_day(start_date, n) 和 rebalance_calendar 的 (T, T_next] 计数语义一致。
-            next_idx = idx + rebalance_period - 1
-            if next_idx < len(sorted_td):
-                current_date = sorted_td[next_idx]
-            else:
-                current_date = _nth_nyse_trading_day(current_date, rebalance_period)
-        else:
-            current_date = _nth_nyse_trading_day(current_date, rebalance_period)
-        extrapolated.append(current_date)
-        # 用 as_of_date 判断"未来"：≤ as_of_date 为已确认，> as_of_date 为未来
-        future_so_far = [x for x in extrapolated if x > as_of_date]
-        if len(future_so_far) >= REBALANCE_EXTRAPOLATE_FUTURE_MIN:
-            break
-
-    all_dates = sorted(set(rebalance_dates) | set(extrapolated))
-
-    # ── 调仓日判定（与因子数据无关）──
-    is_rebalance_today = as_of_date.normalize() in {d.normalize() for d in all_dates}
-
-    # ── 因子数据是否可用 ──
-    # 盘中 pipeline 未跑完 → last_factor_date < as_of_date → 无今日因子数据
-    has_factor_data = as_of_date <= last_factor_date
-
-    past_all = [x for x in all_dates if x <= as_of_date]
-    future_all = [x for x in all_dates if x > as_of_date]
-    current_rebalance_date = past_all[-1] if past_all else None
-    next_rebalance_date = future_all[0] if future_all else None
-
-    future_rebalance_dates = future_all[:REBALANCE_EXTRAPOLATE_FUTURE_MIN]
+    as_of = pd.Timestamp(as_of_date).normalize()
+    future = get_future_rebalance_dates(
+        historical[-1],
+        rebalance_period,
+        REBALANCE_EXTRAPOLATE_MAX_PERIODS,
+        trading_dates=trading_dates,
+        interval_weeks=rebalance_interval_weeks,
+        weekday=rebalance_weekday,
+        week_anchor_date=rebalance_week_anchor_date,
+    )
+    combined = sorted(set(historical) | set(future))
+    future_after_as_of = [value for value in combined if value > as_of]
+    past_through_as_of = [value for value in combined if value <= as_of]
 
     return {
-        "is_rebalance_today": is_rebalance_today,
-        "has_factor_data": has_factor_data,
-        "current_rebalance_date": current_rebalance_date,
-        "next_rebalance_date": next_rebalance_date,
-        "future_rebalance_dates": future_rebalance_dates,
-        "all_rebalance_dates": rebalance_dates,
+        "is_rebalance_today": as_of in set(combined),
+        "has_factor_data": as_of <= pd.Timestamp(last_factor_date).normalize(),
+        "current_rebalance_date": (
+            past_through_as_of[-1] if past_through_as_of else None
+        ),
+        "next_rebalance_date": (
+            future_after_as_of[0] if future_after_as_of else None
+        ),
+        "future_rebalance_dates": future_after_as_of[
+            :REBALANCE_EXTRAPOLATE_FUTURE_MIN
+        ],
+        "all_rebalance_dates": historical,
     }
 
 

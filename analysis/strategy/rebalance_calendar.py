@@ -1,19 +1,19 @@
+"""Unified historical and future rebalance-calendar generation.
+
+The default mode keeps the legacy P{N}d behavior: select factor dates whose
+distance from the previous rebalance is at least N return-calendar sessions.
+
+An optional fixed-week mode is enabled only when ``interval_weeks``,
+``weekday`` and ``week_anchor_date`` are all supplied. Its scheduled dates are
+N calendar weeks apart on one ISO weekday (Monday=1, Friday=5). If the
+scheduled weekday is an NYSE holiday, execution moves to the preceding NYSE
+session. The P value remains nominal and must equal ``interval_weeks * 5``.
 """
-调仓日历模块 (rebalance_calendar.py)
-===================================
-权威实现：从因子日期序列中按交易日间隔选取调仓日，供全项目统一使用。
 
-职责（SRP）：仅负责调仓日历生成，不涉及因子计算、权重分配或回测逻辑。
+from __future__ import annotations
 
-使用方式：
-  from rebalance_calendar import get_rebalance_calendar
-  dates = get_rebalance_calendar(factor_index, ret_index, rebalance_period_days)
-
-被以下模块使用：
-  - strategy_backtest._select_rebalance_dates  → 本模块导入
-  - rebalance_manager.RebalancePeriodManager.get_rebalance_dates → 本模块导入
-  - run_rebalance_day._select_rebalance_dates → 从 strategy_backtest 间接使用
-"""
+import math
+from collections.abc import Iterable
 
 import pandas as pd
 import pandas_market_calendars as mcal
@@ -23,7 +23,35 @@ class RebalanceAnchorError(ValueError):
     """Raised when a requested strategy anchor cannot be supported by the data."""
 
 
-def _normalized_dates(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+class RebalanceCalendarError(ValueError):
+    """Raised when a fixed-week calendar is invalid or unsupported by the data."""
+
+
+_NYSE = None
+
+
+def _nyse_calendar():
+    global _NYSE
+    if _NYSE is None:
+        _NYSE = mcal.get_calendar("NYSE")
+    return _NYSE
+
+
+def _normalized_timestamp(value, *, field_name: str) -> pd.Timestamp:
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError) as exc:
+        raise RebalanceCalendarError(
+            f"Invalid {field_name} {value!r}; expected YYYY-MM-DD"
+        ) from exc
+    if pd.isna(timestamp):
+        raise RebalanceCalendarError(f"{field_name} cannot be NaT")
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_localize(None)
+    return timestamp.normalize()
+
+
+def _normalized_dates(index: Iterable) -> pd.DatetimeIndex:
     dates = pd.DatetimeIndex(pd.to_datetime(index, errors="coerce")).dropna()
     if dates.tz is not None:
         dates = dates.tz_localize(None)
@@ -31,8 +59,7 @@ def _normalized_dates(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
 
 
 def _next_nyse_session(anchor_date: pd.Timestamp) -> pd.Timestamp:
-    nyse = mcal.get_calendar("NYSE")
-    schedule = nyse.schedule(
+    schedule = _nyse_calendar().schedule(
         start_date=anchor_date.strftime("%Y-%m-%d"),
         end_date=(anchor_date + pd.Timedelta(days=14)).strftime("%Y-%m-%d"),
     )
@@ -43,17 +70,145 @@ def _next_nyse_session(anchor_date: pd.Timestamp) -> pd.Timestamp:
     return pd.Timestamp(schedule.index[0]).tz_localize(None).normalize()
 
 
+def _previous_nyse_session(scheduled_date: pd.Timestamp) -> pd.Timestamp:
+    schedule = _nyse_calendar().schedule(
+        start_date=(scheduled_date - pd.Timedelta(days=14)).strftime("%Y-%m-%d"),
+        end_date=scheduled_date.strftime("%Y-%m-%d"),
+    )
+    if schedule.empty:
+        raise RebalanceCalendarError(
+            f"Cannot resolve an NYSE session on or before {scheduled_date.date()}"
+        )
+    return pd.Timestamp(schedule.index[-1]).tz_localize(None).normalize()
+
+
+def _nth_nyse_session_after(start_date: pd.Timestamp, n: int) -> pd.Timestamp:
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+        raise RebalanceCalendarError(
+            f"rebalance_period_days must be a positive integer, got {n!r}"
+        )
+    start = pd.Timestamp(start_date).normalize()
+    horizon_days = max(30, int(math.ceil(n / 252 * 366)) + 30)
+    for _ in range(4):
+        valid_days = _nyse_calendar().valid_days(
+            start,
+            start + pd.Timedelta(days=horizon_days),
+        )
+        sessions = _normalized_dates(valid_days)
+        sessions = sessions[sessions > start]
+        if len(sessions) >= n:
+            return pd.Timestamp(sessions[n - 1])
+        horizon_days *= 2
+    raise RebalanceCalendarError(
+        f"Cannot find the {n}th NYSE session after {start.date()}"
+    )
+
+
+def validate_fixed_week_schedule(
+    rebalance_period_days: int,
+    interval_weeks: int | None,
+    weekday: int | None,
+    week_anchor_date: str | pd.Timestamp | None,
+) -> tuple[int, int, pd.Timestamp] | None:
+    """Validate fixed-week fields and return normalized values, or ``None``."""
+
+    if (
+        not isinstance(rebalance_period_days, int)
+        or isinstance(rebalance_period_days, bool)
+        or rebalance_period_days <= 0
+    ):
+        raise RebalanceCalendarError(
+            "rebalance_period_days must be a positive integer, "
+            f"got {rebalance_period_days!r}"
+        )
+
+    values = (interval_weeks, weekday, week_anchor_date)
+    configured_count = sum(value is not None for value in values)
+    if configured_count == 0:
+        return None
+    if configured_count != len(values):
+        raise RebalanceCalendarError(
+            "interval_weeks, weekday, and week_anchor_date must be set together"
+        )
+    if (
+        not isinstance(interval_weeks, int)
+        or isinstance(interval_weeks, bool)
+        or interval_weeks <= 0
+    ):
+        raise RebalanceCalendarError(
+            f"interval_weeks must be a positive integer, got {interval_weeks!r}"
+        )
+    if (
+        not isinstance(weekday, int)
+        or isinstance(weekday, bool)
+        or not 1 <= weekday <= 5
+    ):
+        raise RebalanceCalendarError(
+            f"weekday must be one integer from 1 to 5, got {weekday!r}"
+        )
+    anchor = _normalized_timestamp(
+        week_anchor_date,
+        field_name="week_anchor_date",
+    )
+    if anchor.isoweekday() != weekday:
+        raise RebalanceCalendarError(
+            f"week_anchor_date {anchor.date()} is weekday "
+            f"{anchor.isoweekday()}, not configured weekday {weekday}"
+        )
+    expected_period = interval_weeks * 5
+    if rebalance_period_days != expected_period:
+        raise RebalanceCalendarError(
+            f"P{rebalance_period_days}d does not match fixed interval "
+            f"{interval_weeks} weeks (expected P{expected_period}d)"
+        )
+    return interval_weeks, weekday, anchor
+
+
+def calendar_mode(
+    interval_weeks: int | None,
+    weekday: int | None,
+    week_anchor_date: str | pd.Timestamp | None,
+) -> str:
+    return (
+        "fixed_weekday"
+        if all(
+            value is not None
+            for value in (interval_weeks, weekday, week_anchor_date)
+        )
+        else "trading_day_interval"
+    )
+
+
+def periods_per_year_for_calendar(
+    rebalance_period_days: int,
+    interval_weeks: int | None = None,
+    weekday: int | None = None,
+    week_anchor_date: str | pd.Timestamp | None = None,
+) -> float:
+    """Return period-return annualization frequency for the active calendar."""
+
+    fixed = validate_fixed_week_schedule(
+        rebalance_period_days,
+        interval_weeks,
+        weekday,
+        week_anchor_date,
+    )
+    if fixed is not None:
+        return 52.0 / fixed[0]
+    return 252.0 / rebalance_period_days
+
+
 def resolve_rebalance_anchor(
     factor_index: pd.DatetimeIndex,
     ret_index: pd.DatetimeIndex,
     anchor_date: str | pd.Timestamp | None,
 ) -> pd.Timestamp | None:
-    """Resolve an explicitly requested calendar anchor to the next NYSE session.
+    """Resolve a legacy start cutoff to the next NYSE session.
 
-    A configured anchor is strict: the resolved session must exist in both the
-    factor and return calendars. This permits weekend/holiday normalization but
-    prevents missing history from silently shifting the strategy phase.
+    This anchor restricts the first usable historical date. It is independent
+    from ``week_anchor_date``, which only fixes the phase of a weekly schedule.
     """
+
     if anchor_date is None:
         return None
 
@@ -97,56 +252,174 @@ def resolve_rebalance_anchor(
     return effective
 
 
+def _fixed_week_dates_between(
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    *,
+    interval_weeks: int,
+    week_anchor: pd.Timestamp,
+) -> list[pd.Timestamp]:
+    step_days = interval_weeks * 7
+    start_delta = int((start_date - week_anchor).days)
+    end_delta = int((end_date - week_anchor).days)
+    first_k = math.floor(start_delta / step_days) - 1
+    last_k = math.ceil(end_delta / step_days) + 1
+
+    actual_dates: set[pd.Timestamp] = set()
+    for k in range(first_k, last_k + 1):
+        scheduled = week_anchor + pd.Timedelta(days=k * step_days)
+        actual = _previous_nyse_session(scheduled)
+        if start_date <= actual <= end_date:
+            actual_dates.add(actual)
+    return sorted(actual_dates)
+
+
 def get_rebalance_calendar(
     factor_index: pd.DatetimeIndex,
     ret_index: pd.DatetimeIndex,
     rebalance_period_days: int,
     anchor_date: str | pd.Timestamp | None = None,
-) -> list:
-    """
-    从因子日期序列中，选取交易日间隔 ≥ rebalance_period_days 的节点。
+    *,
+    interval_weeks: int | None = None,
+    weekday: int | None = None,
+    week_anchor_date: str | pd.Timestamp | None = None,
+) -> list[pd.Timestamp]:
+    """Return historical rebalance dates for the selected calendar mode."""
 
-    即相邻调仓日之间至少相隔 rebalance_period_days 个交易日（按 ret_index 计数）。
-
-    Parameters
-    ----------
-    factor_index : pd.DatetimeIndex
-        因子数据的日期索引（可为非日频，如每 10 交易日一次）
-    ret_index : pd.DatetimeIndex
-        日频收益率/交易日的日期索引，用于正确计数交易日间隔
-    rebalance_period_days : int
-        调仓周期（交易日数），相邻调仓日之间至少相隔该交易日数
-
-    Returns
-    -------
-    list
-        调仓日列表（均为交易日）
-    """
-    dates = list(_normalized_dates(factor_index))
+    factor_dates = _normalized_dates(factor_index)
     ret_sorted = _normalized_dates(ret_index)
+    if not len(factor_dates) or not len(ret_sorted):
+        return []
 
     effective_anchor = resolve_rebalance_anchor(
-        factor_index,
-        ret_index,
+        factor_dates,
+        ret_sorted,
         anchor_date,
     )
-    if not dates:
-        return []
-    if effective_anchor is not None:
-        dates = [date for date in dates if date >= effective_anchor]
-        if not dates:
-            raise RebalanceAnchorError(
-                f"No factor dates on or after effective anchor {effective_anchor.date()}"
+    fixed = validate_fixed_week_schedule(
+        rebalance_period_days,
+        interval_weeks,
+        weekday,
+        week_anchor_date,
+    )
+
+    if fixed is None:
+        dates = list(factor_dates)
+        if effective_anchor is not None:
+            dates = [date for date in dates if date >= effective_anchor]
+            if not dates:
+                raise RebalanceAnchorError(
+                    "No factor dates on or after effective anchor "
+                    f"{effective_anchor.date()}"
+                )
+
+        selected = [dates[0]]
+        last_selected = dates[0]
+        for current in dates[1:]:
+            n_trading_days = int(
+                ((ret_sorted > last_selected) & (ret_sorted <= current)).sum()
             )
+            if n_trading_days >= rebalance_period_days:
+                selected.append(current)
+                last_selected = current
+        return selected
 
-    selected = [dates[0]]
-    last_selected = dates[0]
-    for d in dates[1:]:
-        # 闭区间 (last_selected, d] = 不含 last_selected，含 d 本身
-        # d 本身是交易日（∈ factor_index 且 ∈ ret_index），故计数含 d
-        n_trading_days = ((ret_sorted > last_selected) & (ret_sorted <= d)).sum()
-        if n_trading_days >= rebalance_period_days:
-            selected.append(d)
-            last_selected = d
+    interval_weeks, _, week_anchor = fixed
+    common_start = max(factor_dates.min(), ret_sorted.min())
+    common_end = min(factor_dates.max(), ret_sorted.max())
+    if effective_anchor is not None:
+        common_start = max(common_start, effective_anchor)
+    if common_start > common_end:
+        return []
 
+    selected = _fixed_week_dates_between(
+        common_start,
+        common_end,
+        interval_weeks=interval_weeks,
+        week_anchor=week_anchor,
+    )
+    for actual in selected:
+        missing_from = []
+        if actual not in factor_dates:
+            missing_from.append("factor calendar")
+        if actual not in ret_sorted:
+            missing_from.append("return calendar")
+        if missing_from:
+            raise RebalanceCalendarError(
+                f"Fixed-week rebalance session {actual.date()} is missing from "
+                f"{', '.join(missing_from)}. Regenerate aligned factor and return data "
+                "instead of shifting the calendar phase."
+            )
     return selected
+
+
+def get_next_rebalance_date(
+    after_date: str | pd.Timestamp,
+    rebalance_period_days: int,
+    *,
+    trading_dates: Iterable | None = None,
+    interval_weeks: int | None = None,
+    weekday: int | None = None,
+    week_anchor_date: str | pd.Timestamp | None = None,
+) -> pd.Timestamp:
+    """Return the first rebalance date strictly after ``after_date``."""
+
+    after = _normalized_timestamp(after_date, field_name="after_date")
+    fixed = validate_fixed_week_schedule(
+        rebalance_period_days,
+        interval_weeks,
+        weekday,
+        week_anchor_date,
+    )
+    if fixed is None:
+        available = _normalized_dates([] if trading_dates is None else trading_dates)
+        available = available[available > after]
+        if len(available) >= rebalance_period_days:
+            return pd.Timestamp(available[rebalance_period_days - 1])
+        return _nth_nyse_session_after(after, rebalance_period_days)
+
+    interval_weeks, _, week_anchor = fixed
+    step_days = interval_weeks * 7
+    k = math.floor(int((after - week_anchor).days) / step_days)
+    for candidate_k in range(k, k + 10000):
+        scheduled = week_anchor + pd.Timedelta(days=candidate_k * step_days)
+        actual = _previous_nyse_session(scheduled)
+        if actual > after:
+            return actual
+    raise RebalanceCalendarError(
+        f"Cannot find a fixed-week rebalance date after {after.date()}"
+    )
+
+
+def get_future_rebalance_dates(
+    after_date: str | pd.Timestamp,
+    rebalance_period_days: int,
+    count: int,
+    *,
+    trading_dates: Iterable | None = None,
+    interval_weeks: int | None = None,
+    weekday: int | None = None,
+    week_anchor_date: str | pd.Timestamp | None = None,
+) -> list[pd.Timestamp]:
+    """Return ``count`` future dates using the same historical calendar rule."""
+
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        raise RebalanceCalendarError(
+            f"count must be a non-negative integer, got {count!r}"
+        )
+    result: list[pd.Timestamp] = []
+    current = _normalized_timestamp(after_date, field_name="after_date")
+    normalized_trading_dates = _normalized_dates(
+        [] if trading_dates is None else trading_dates
+    )
+    for _ in range(count):
+        current = get_next_rebalance_date(
+            current,
+            rebalance_period_days,
+            trading_dates=normalized_trading_dates,
+            interval_weeks=interval_weeks,
+            weekday=weekday,
+            week_anchor_date=week_anchor_date,
+        )
+        result.append(current)
+    return result

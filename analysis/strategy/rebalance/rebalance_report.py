@@ -24,6 +24,7 @@ from qqq_core.performance_metrics import (
     worst_period_drawdown,
 )
 from data.price_snapshot import manifest_adjustments_frame
+from analysis.strategy.rebalance_calendar import calendar_mode
 
 # ── 路径注册（strategy_utils 位于同级目录）────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1004,6 +1005,23 @@ def write_rebalance_day_report(
         ["Next_Rebalance_Date", str(status["next_rebalance_date"].date()) if status["next_rebalance_date"] else "-"],
         ["Price_Convention", price_conv],
         ["Rebalance_Period_TradingDays", strategy_params.get("rebalance_period", rebalance_period)],
+        [
+            "Rebalance_Calendar_Mode",
+            calendar_mode(
+                strategy_params.get("rebalance_interval_weeks"),
+                strategy_params.get("rebalance_weekday"),
+                strategy_params.get("rebalance_week_anchor_date"),
+            ),
+        ],
+        ["Rebalance_Interval_Weeks", strategy_params.get("rebalance_interval_weeks", "")],
+        ["Rebalance_Weekday_ISO", strategy_params.get("rebalance_weekday", "")],
+        ["Rebalance_Week_Anchor_Date", strategy_params.get("rebalance_week_anchor_date", "")],
+        [
+            "Rebalance_Holiday_Policy",
+            "previous_nyse_session"
+            if strategy_params.get("rebalance_interval_weeks") is not None
+            else "",
+        ],
         ["Data_Coverage_Start", data_coverage_start],
         ["Requested_Data_Download_Start", requested_data_start],
         ["Effective_Rebalance_Start", effective_start],

@@ -8,6 +8,7 @@
   - Sheet (factor_test_statistics_3M) : 同上，测试数据为近期三个月
   - Sheet (factor_test_statistics_6M) : 同上，测试数据为近期半年
   - Sheet (factor_test_statistics_1Y) : 同上，测试数据为近期一年
+  - Sheet (factor_test_statistics_2Y) : 同上，测试数据为近期两年
       列：ic_mean, ic_ir, ic_t_value, rank_ic_mean, rank_ic_ir, rank_ic_t_value,
           group_rank_ic_mean, group_rank_ic_ir, group_rank_ic_t_value,
           long_annual_return, long_sharpe,
@@ -32,6 +33,7 @@ if _SCRIPT_DIR not in sys.path:
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from analysis.strategy.rebalance_calendar import periods_per_year_for_calendar
 from config import SingleFactorConfig
 from rebalance_manager import RebalancePeriodManager
 from ic import ICAnalyzerEnhanced
@@ -120,7 +122,7 @@ def load_factor_cached(factor_file, sheet_name=0):
 def filter_factor_ret_by_lookback(factor, ret, lookback_months):
     """
     按近 N 个月过滤因子与收益率数据。
-    lookback_months: int, 如 3/6/12 表示近期三个月/半年/一年
+    lookback_months: int, 如 3/6/12/24 表示近期三个月/半年/一年/两年
     Returns: (factor_filtered, ret_filtered)，若数据不足则返回空 DataFrame。
     """
     if factor.empty or ret.empty:
@@ -193,12 +195,28 @@ def run_one_factor_one_period(factor, ret, rebalance_period, config):
     ls_returns, group_returns, ret_periods 等。
     若因子与收益日期无重叠或调仓期为 0，返回全 NaN/空序列，避免缺行。
     """
-    manager = RebalancePeriodManager(factor, ret, rebalance_period)
+    manager = RebalancePeriodManager(
+        factor,
+        ret,
+        rebalance_period,
+        rebalance_interval_weeks=getattr(
+            config, "REBALANCE_INTERVAL_WEEKS", None
+        ),
+        rebalance_weekday=getattr(config, "REBALANCE_WEEKDAY", None),
+        rebalance_week_anchor_date=getattr(
+            config, "REBALANCE_WEEK_ANCHOR_DATE", None
+        ),
+    )
     factor_periods, ret_periods = manager.align_factor_return_by_period()
 
     if len(factor_periods) == 0:
         return _empty_factor_record(config)
-    periods_per_year = 252 / rebalance_period if rebalance_period > 0 else 252
+    periods_per_year = periods_per_year_for_calendar(
+        rebalance_period,
+        getattr(config, "REBALANCE_INTERVAL_WEEKS", None),
+        getattr(config, "REBALANCE_WEEKDAY", None),
+        getattr(config, "REBALANCE_WEEK_ANCHOR_DATE", None),
+    )
 
     ic_analyzer = ICAnalyzerEnhanced(factor_periods, ret_periods)
     ic_df = ic_analyzer.calculate_ic()
@@ -318,13 +336,21 @@ def _run_factor_period_bundle(task):
     name, factor, ret, rebalance_period, config = task
     rec = run_one_factor_one_period(factor, ret, rebalance_period, config)
     records_by_window = []
-    for lb_months in (3, 6, 12):
+    for lb_months in (3, 6, 12, 24):
         f_filt, r_filt = filter_factor_ret_by_lookback(factor, ret, lb_months)
         records_by_window.append(
             run_one_factor_one_period(f_filt, r_filt, rebalance_period, config)
         )
     is_empty = len(rec.get("ic_df", [])) == 0 and len(rec.get("ret_periods", [])) == 0
-    return name, rec, records_by_window[0], records_by_window[1], records_by_window[2], is_empty
+    return (
+        name,
+        rec,
+        records_by_window[0],
+        records_by_window[1],
+        records_by_window[2],
+        records_by_window[3],
+        is_empty,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -409,21 +435,23 @@ def build_long_cumret_df(records, factor_names):
 
 def write_excel_with_format(
     out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
-    sheet1_3M_df=None, sheet1_6M_df=None, sheet1_1Y_df=None,
+    sheet1_3M_df=None, sheet1_6M_df=None, sheet1_1Y_df=None, sheet1_2Y_df=None,
 ):
     """
-    写入 Excel：Sheet1 色阶，Sheet2/3/4 数据+折线图；可选：近期 3M/6M/1Y 的 factor_test_statistics。
+    写入 Excel：Sheet1 色阶，Sheet2/3/4 数据+折线图；可选：近期 3M/6M/1Y/2Y 的 factor_test_statistics。
 
     Parameters
     ----------
     sheet3_df : 多头累计超额收益率（多头 - 市场基准）→ Sheet3 factor_LE_cum_ret
     sheet4_df : 多头累计收益率                         → Sheet4 factor_L_cum_ret
-    sheet1_3M_df / sheet1_6M_df / sheet1_1Y_df : 近期三个月/半年/一年的因子统计表（格式同 factor_test_statistics）
+    sheet1_3M_df / sheet1_6M_df / sheet1_1Y_df / sheet1_2Y_df :
+        近期三个月/半年/一年/两年的因子统计表（格式同 factor_test_statistics）
     """
     SHEET1_NAME = "factor_test_statistics"
     SHEET1_3M_NAME = "factor_test_statistics_3M"
     SHEET1_6M_NAME = "factor_test_statistics_6M"
     SHEET1_1Y_NAME = "factor_test_statistics_1Y"
+    SHEET1_2Y_NAME = "factor_test_statistics_2Y"
     SHEET2_NAME = "factor_cum_ic"
     SHEET3_NAME = "factor_LE_cum_ret"
     SHEET4_NAME = "factor_L_cum_ret"
@@ -442,6 +470,8 @@ def write_excel_with_format(
                 sheet1_6M_df.to_excel(writer, sheet_name=SHEET1_6M_NAME)
             if sheet1_1Y_df is not None:
                 sheet1_1Y_df.to_excel(writer, sheet_name=SHEET1_1Y_NAME)
+            if sheet1_2Y_df is not None:
+                sheet1_2Y_df.to_excel(writer, sheet_name=SHEET1_2Y_NAME)
             sheet2_df.to_excel(writer, sheet_name=SHEET2_NAME)
             sheet3_df.to_excel(writer, sheet_name=SHEET3_NAME)
             sheet4_df.to_excel(writer, sheet_name=SHEET4_NAME)
@@ -528,7 +558,7 @@ def write_excel_with_format(
                 ),
             )
 
-    # 近期 3M / 6M / 1Y 的 factor_test_statistics（格式与 Sheet1 一致，含色阶）
+    # 近期 3M / 6M / 1Y / 2Y 的 factor_test_statistics（格式与 Sheet1 一致，含色阶）
     def _write_statistics_sheet(ws, df, sheet_title):
         """将统计表写入 worksheet，并应用与 factor_test_statistics 相同的色阶。"""
         ws.title = sheet_title
@@ -570,6 +600,7 @@ def write_excel_with_format(
         (sheet1_3M_df, SHEET1_3M_NAME),
         (sheet1_6M_df, SHEET1_6M_NAME),
         (sheet1_1Y_df, SHEET1_1Y_NAME),
+        (sheet1_2Y_df, SHEET1_2Y_NAME),
     ]:
         if lb_df is not None:
             ws_lb = wb.create_sheet(lb_name)
@@ -741,7 +772,7 @@ def run_multi_factor_test(
         raise ValueError(
             "未找到任何有效因子，请检查因子 Excel 是否含多 sheet 且每 sheet 有至少 2 行有效数据"
         )
-    records_3M, records_6M, records_1Y = [], [], []
+    records_3M, records_6M, records_1Y, records_2Y = [], [], [], []
     tasks = [
         (name, factor, ret, rebalance_period, config)
         for name, factor in factor_list
@@ -751,7 +782,7 @@ def run_multi_factor_test(
         tasks,
         label=f"multi_factor_P{rebalance_period}",
     )
-    for name, rec, rec_3m, rec_6m, rec_1y, is_empty in factor_results:
+    for name, rec, rec_3m, rec_6m, rec_1y, rec_2y, is_empty in factor_results:
         if is_empty:
             print(f"    警告: {name} 与收益日期无重叠或调仓期无效，报告中该因子为空。")
         factor_names.append(name)
@@ -759,6 +790,7 @@ def run_multi_factor_test(
         records_3M.append(rec_3m)
         records_6M.append(rec_6m)
         records_1Y.append(rec_1y)
+        records_2Y.append(rec_2y)
 
     for i, (name, factor) in enumerate([]):
         print(f"[{i+1}/{len(factor_list)}] 因子: {name}")
@@ -768,8 +800,13 @@ def run_multi_factor_test(
         factor_names.append(name)
         records.append(rec)
 
-        # 不同时效性：近期三个月、半年、一年
-        for lb_months, rec_list in [(3, records_3M), (6, records_6M), (12, records_1Y)]:
+        # 不同时效性：近期三个月、半年、一年、两年
+        for lb_months, rec_list in [
+            (3, records_3M),
+            (6, records_6M),
+            (12, records_1Y),
+            (24, records_2Y),
+        ]:
             f_filt, r_filt = filter_factor_ret_by_lookback(factor, ret, lb_months)
             rec_lb = run_one_factor_one_period(f_filt, r_filt, rebalance_period, config)
             rec_list.append(rec_lb)
@@ -786,6 +823,9 @@ def run_multi_factor_test(
     sheet1_1Y_df = build_sheet1_df(records_1Y, factor_names).sort_values(
         by="long_annual_return", ascending=False
     )
+    sheet1_2Y_df = build_sheet1_df(records_2Y, factor_names).sort_values(
+        by="long_annual_return", ascending=False
+    )
     sheet2_df = build_sheet2_df(records, factor_names)
     sheet3_df = build_long_excess_df(records, factor_names)   # Sheet3: 多头累计超额
     sheet4_df = build_long_cumret_df(records, factor_names)   # Sheet4: 多头累计收益率
@@ -793,7 +833,8 @@ def run_multi_factor_test(
     out_path = os.path.join(output_dir, output_name)
     write_excel_with_format(
         out_path, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
-        sheet1_3M_df=sheet1_3M_df, sheet1_6M_df=sheet1_6M_df, sheet1_1Y_df=sheet1_1Y_df,
+        sheet1_3M_df=sheet1_3M_df, sheet1_6M_df=sheet1_6M_df,
+        sheet1_1Y_df=sheet1_1Y_df, sheet1_2Y_df=sheet1_2Y_df,
     )
     print_cache_summary()
     print(f"报表已写入: {out_path}")

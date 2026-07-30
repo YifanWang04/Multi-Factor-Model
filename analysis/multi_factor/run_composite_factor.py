@@ -30,6 +30,8 @@ for p in [_DIR, os.path.join(_ROOT, "analysis", "single_factor"), _ROOT]:
 
 from composite_config import (
     PRICE_FILE, RETURN_COLUMN, OUTPUT_DIR, REBALANCE_PERIOD, REBALANCE_ANCHOR_DATE,
+    REBALANCE_INTERVAL_WEEKS, REBALANCE_WEEKDAY, REBALANCE_WEEK_ANCHOR_DATE,
+    FIXED_WEEK_REBALANCE_PERIOD,
     COMPOSITE_REBALANCE_PERIODS,
     N_WINDOWS, M_WINDOWS, GROUP_NUM, WEIGHT_METHOD, RISK_FREE_RATE,
     TRANSACTION_COST, get_selected_factor_files, get_factor_display_name,
@@ -45,6 +47,7 @@ from run_multi_factor_test import (
 )
 from qqq_core.data_cache import print_cache_summary
 from qqq_core.parallel import ordered_parallel_map
+from analysis.strategy.rebalance_calendar import periods_per_year_for_calendar
 
 try:
     import openpyxl
@@ -72,6 +75,9 @@ def align_to_rebalance_periods(
     ret,
     rebalance_period,
     rebalance_anchor_date=None,
+    rebalance_interval_weeks=None,
+    rebalance_weekday=None,
+    rebalance_week_anchor_date=None,
 ):
     """
     用第一个因子的日期生成调仓期，对所有因子和收益率对齐。
@@ -87,6 +93,9 @@ def align_to_rebalance_periods(
         ret,
         rebalance_period,
         rebalance_anchor_date=rebalance_anchor_date,
+        rebalance_interval_weeks=rebalance_interval_weeks,
+        rebalance_weekday=rebalance_weekday,
+        rebalance_week_anchor_date=rebalance_week_anchor_date,
     )
     _, ret_periods = manager.align_factor_return_by_period()
     common_dates = ret_periods.index
@@ -98,6 +107,9 @@ def align_to_rebalance_periods(
             ret,
             rebalance_period,
             rebalance_anchor_date=rebalance_anchor_date,
+            rebalance_interval_weeks=rebalance_interval_weeks,
+            rebalance_weekday=rebalance_weekday,
+            rebalance_week_anchor_date=rebalance_week_anchor_date,
         )
         fp, _ = mgr.align_factor_return_by_period()
         # 统一对齐到 ret_periods 的日期，缺失日期以 NaN 填充
@@ -199,6 +211,21 @@ def main():
             factor_suffix,
             rebalance_period,
             REBALANCE_ANCHOR_DATE,
+            (
+                REBALANCE_INTERVAL_WEEKS
+                if FIXED_WEEK_REBALANCE_PERIOD == rebalance_period
+                else None
+            ),
+            (
+                REBALANCE_WEEKDAY
+                if FIXED_WEEK_REBALANCE_PERIOD == rebalance_period
+                else None
+            ),
+            (
+                REBALANCE_WEEK_ANCHOR_DATE
+                if FIXED_WEEK_REBALANCE_PERIOD == rebalance_period
+                else None
+            ),
         )
         for rebalance_period in periods
     ]
@@ -211,13 +238,25 @@ def main():
 
 
 def _run_one_rebalance_period_worker(task):
-    factor_dict, ret, factor_suffix, rebalance_period, rebalance_anchor_date = task
+    (
+        factor_dict,
+        ret,
+        factor_suffix,
+        rebalance_period,
+        rebalance_anchor_date,
+        rebalance_interval_weeks,
+        rebalance_weekday,
+        rebalance_week_anchor_date,
+    ) = task
     return _run_one_rebalance_period(
         factor_dict=factor_dict,
         ret=ret,
         factor_suffix=factor_suffix,
         rebalance_period=rebalance_period,
         rebalance_anchor_date=rebalance_anchor_date,
+        rebalance_interval_weeks=rebalance_interval_weeks,
+        rebalance_weekday=rebalance_weekday,
+        rebalance_week_anchor_date=rebalance_week_anchor_date,
     )
 
 
@@ -227,6 +266,9 @@ def _run_one_rebalance_period(
     factor_suffix: str,
     rebalance_period: int,
     rebalance_anchor_date=None,
+    rebalance_interval_weeks=None,
+    rebalance_weekday=None,
+    rebalance_week_anchor_date=None,
 ):
     print("\n" + "=" * 64)
     print(f"生成 P{rebalance_period} 复合因子")
@@ -238,6 +280,9 @@ def _run_one_rebalance_period(
         ret,
         rebalance_period,
         rebalance_anchor_date=rebalance_anchor_date,
+        rebalance_interval_weeks=rebalance_interval_weeks,
+        rebalance_weekday=rebalance_weekday,
+        rebalance_week_anchor_date=rebalance_week_anchor_date,
     )
     print(f"调仓期数量: {len(ret_periods)}")
 
@@ -251,6 +296,9 @@ def _run_one_rebalance_period(
         ret,
         rebalance_period,
         rebalance_anchor_date=rebalance_anchor_date,
+        rebalance_interval_weeks=rebalance_interval_weeks,
+        rebalance_weekday=rebalance_weekday,
+        rebalance_week_anchor_date=rebalance_week_anchor_date,
     )
     _all_daily_rb = _mgr_last.get_rebalance_dates()
     if _all_daily_rb:
@@ -306,7 +354,7 @@ def _run_one_rebalance_period(
 
     factor_names = []
     records = []
-    records_3M, records_6M, records_1Y = [], [], []
+    records_3M, records_6M, records_1Y, records_2Y = [], [], [], []
     total = len(composite_dict)
     tasks = [
         (i, total, name, comp_df, ret_periods, config, rebalance_period)
@@ -317,12 +365,13 @@ def _run_one_rebalance_period(
         tasks,
         label=f"composite_backtests_P{rebalance_period}",
     )
-    for name, rec, rec_3m, rec_6m, rec_1y in backtest_results:
+    for name, rec, rec_3m, rec_6m, rec_1y, rec_2y in backtest_results:
         factor_names.append(name)
         records.append(rec)
         records_3M.append(rec_3m)
         records_6M.append(rec_6m)
         records_1Y.append(rec_1y)
+        records_2Y.append(rec_2y)
 
     for i, (name, comp_df) in enumerate([]):
         print(f"[{i+1}/{total}] 回测复合因子: {name}")
@@ -334,8 +383,13 @@ def _run_one_rebalance_period(
         factor_names.append(name)
         records.append(rec)
 
-        # 近期 3M / 6M / 1Y 的 factor_test_statistics
-        for lb_months, rec_list in [(3, records_3M), (6, records_6M), (12, records_1Y)]:
+        # 近期 3M / 6M / 1Y / 2Y 的 factor_test_statistics
+        for lb_months, rec_list in [
+            (3, records_3M),
+            (6, records_6M),
+            (12, records_1Y),
+            (24, records_2Y),
+        ]:
             comp_filt, ret_filt = filter_factor_ret_by_lookback(comp_df, ret_periods, lb_months)
             rec_lb = _run_composite_backtest(comp_filt, ret_filt, config, rebalance_period)
             rec_list.append(rec_lb)
@@ -348,6 +402,7 @@ def _run_one_rebalance_period(
     sheet1_3M_df = _sort_by_return(build_sheet1_df(records_3M, factor_names))
     sheet1_6M_df = _sort_by_return(build_sheet1_df(records_6M, factor_names))
     sheet1_1Y_df = _sort_by_return(build_sheet1_df(records_1Y, factor_names))
+    sheet1_2Y_df = _sort_by_return(build_sheet1_df(records_2Y, factor_names))
     sheet2_df = build_sheet2_df(records, factor_names)
     sheet3_df = build_long_excess_df(records, factor_names)
     sheet4_df = build_long_cumret_df(records, factor_names)
@@ -357,7 +412,8 @@ def _run_one_rebalance_period(
     )
     write_excel_with_format(
         out2, sheet1_df, sheet2_df, sheet3_df, sheet4_df,
-        sheet1_3M_df=sheet1_3M_df, sheet1_6M_df=sheet1_6M_df, sheet1_1Y_df=sheet1_1Y_df,
+        sheet1_3M_df=sheet1_3M_df, sheet1_6M_df=sheet1_6M_df,
+        sheet1_1Y_df=sheet1_1Y_df, sheet1_2Y_df=sheet1_2Y_df,
     )
     print(f"回测报表已写入: {out2}")
 
@@ -387,7 +443,27 @@ def _run_composite_backtest(comp_df, ret_periods, config, rebalance_period: int)
 
     if len(fp) == 0:
         return _empty_factor_record(config)
-    periods_per_year = 252 / rebalance_period if rebalance_period > 0 else 252
+    periods_per_year = periods_per_year_for_calendar(
+        rebalance_period,
+        (
+            getattr(config, "REBALANCE_INTERVAL_WEEKS", None)
+            if getattr(config, "FIXED_WEEK_REBALANCE_PERIOD", None)
+            == rebalance_period
+            else None
+        ),
+        (
+            getattr(config, "REBALANCE_WEEKDAY", None)
+            if getattr(config, "FIXED_WEEK_REBALANCE_PERIOD", None)
+            == rebalance_period
+            else None
+        ),
+        (
+            getattr(config, "REBALANCE_WEEK_ANCHOR_DATE", None)
+            if getattr(config, "FIXED_WEEK_REBALANCE_PERIOD", None)
+            == rebalance_period
+            else None
+        ),
+    )
 
     ic_analyzer = ICAnalyzerEnhanced(fp, rp)
     ic_df = ic_analyzer.calculate_ic()
@@ -468,17 +544,24 @@ def _run_composite_backtest(comp_df, ret_periods, config, rebalance_period: int)
 
 
 def _run_composite_backtest_bundle(task):
-    """Worker payload for one composite sheet across full/3M/6M/1Y windows."""
+    """Worker payload for one composite sheet across full/3M/6M/1Y/2Y windows."""
     i, total, name, comp_df, ret_periods, config, rebalance_period = task
     print(f"[{i}/{total}] 回测复合因子: {name}", flush=True)
     rec = _run_composite_backtest(comp_df, ret_periods, config, rebalance_period)
     window_records = []
-    for lb_months in (3, 6, 12):
+    for lb_months in (3, 6, 12, 24):
         comp_filt, ret_filt = filter_factor_ret_by_lookback(comp_df, ret_periods, lb_months)
         window_records.append(
             _run_composite_backtest(comp_filt, ret_filt, config, rebalance_period)
         )
-    return name, rec, window_records[0], window_records[1], window_records[2]
+    return (
+        name,
+        rec,
+        window_records[0],
+        window_records[1],
+        window_records[2],
+        window_records[3],
+    )
 
 
 if __name__ == "__main__":

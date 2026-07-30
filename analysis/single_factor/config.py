@@ -1,7 +1,7 @@
 """
 单因子测试配置文件 (config.py)
 =====================================
-本模块定义单因子回测所需的全部配置项，供 run_single_factor_test、run_all_factors_backtest 等使用。
+本模块定义单因子回测所需的全部配置项，供 run_single_factor_test、run_batch_single_factor_tests 等使用。
 
 主要职责：
 - 路径：项目根目录、因子文件、价格文件、报告输出目录
@@ -34,7 +34,7 @@ class SingleFactorConfig:
     
     # 数据路径
     # 指定单因子测试时使用的因子文件（运行 run_single_factor_test.py 时生效）
-    # 批量测试（run_all_factors_backtest.py）会自动扫描 factor_processed 目录，忽略此项
+    # 批量测试（run_batch_single_factor_tests.py）会自动扫描 factor_processed 目录，忽略此项
     FACTOR_FILE = os.path.join(_FACTOR_PROCESSED_DIR, "factor_alpha001_processed.xlsx")
     # 单因子文件 sheet；多 sheet 因子可指定如 "N20"，默认 0 表示第一个 sheet
     FACTOR_SHEET = 0
@@ -48,6 +48,10 @@ class SingleFactorConfig:
     REBALANCE_PERIODS = [1, 5, 10]  # 可以修改为你需要的周期
     
     # 分层数量（固定为10）
+    REBALANCE_INTERVAL_WEEKS = None
+    REBALANCE_WEEKDAY = None
+    REBALANCE_WEEK_ANCHOR_DATE = None
+
     GROUP_NUM = 10
     
     # 层内资产配置方式

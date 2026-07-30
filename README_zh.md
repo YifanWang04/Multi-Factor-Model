@@ -41,6 +41,11 @@ python analysis/single_factor/run_multi_factor_test.py
 耗时较重的研究循环会读取 `QQQ_MAX_WORKERS` 做进程级并行，并将 Excel 派生的
 DataFrame 缓存在 `output/cache/`。如需禁用缓存，设置 `QQQ_DISABLE_CACHE=1`；
 如需改缓存目录，设置 `QQQ_CACHE_DIR=<path>`。
+`build_factors.py` 会原子写入每个因子工作簿，并对 Windows 下的瞬态 Excel I/O
+错误最多重试三次；持续写入失败会终止本次运行，同时保留上一次有效工作簿。
+`data_process.py` 对处理后因子工作簿采用相同的原子写入与重试策略；并行运行时
+只在派发前读取一次参考交易日期。若某个因子持续失败，命令会明确失败退出，
+不会静默沿用旧的处理结果。
 `run_strategy.py` 的统计汇总 sheet 会保留全部参数组合，但日收益和累计收益
 时间序列 sheet 默认只导出 Sharpe 排名前 `REPORT_TIMESERIES_TOP_N` 的策略。
 如需导出全部策略时间序列，可把该配置设为 `None` 或 `0`。
@@ -65,7 +70,7 @@ python analysis/strategy/run_rebalance_day.py --run-dir <existing_run_dir>
 
 ```powershell
 python analysis/single_factor/run_single_factor_test.py
-python analysis/single_factor/run_all_factors_backtest.py
+python analysis/single_factor/run_batch_single_factor_tests.py
 python analysis/multi_factor/inspect_ols_weights.py
 python analysis/strategy/run_detailed_backtest_report.py
 python analysis/strategy/run_strategy_review.py
@@ -131,7 +136,7 @@ qqq/
 | 因子构建 | `pipeline/build_factors.py` | OHLCV Excel | `factor_raw*/factor_alphaXXX_raw.xlsx` |
 | 因子处理 | `pipeline/data_process.py` | 原始因子 | `factor_processed*/factor_alphaXXX_processed.xlsx` |
 | 单因子测试 | `analysis/single_factor/run_single_factor_test.py` | 单个处理后因子 | PDF 报告 |
-| 批量单因子 | `analysis/single_factor/run_all_factors_backtest.py` | 处理后因子目录 | 多个 PDF 报告 |
+| 批量单因子测试 | `analysis/single_factor/run_batch_single_factor_tests.py` | 处理后因子目录 | 多个 PDF 报告 |
 | 多因子测试 | `analysis/single_factor/run_multi_factor_test.py` | 已选因子和收益 | Excel 报告 |
 | 共线性分析 | `analysis/single_factor/run_collinearity_analysis.py` | 已选因子 | Excel 矩阵和序列 |
 | 复合因子 | `analysis/multi_factor/run_composite_factor.py` | 处理后因子 | `composite_factors_fXX-...xlsx` 和报告 |
@@ -182,6 +187,7 @@ qqq/
 - 多空收益和夏普
 - 纯多超额收益和夏普
 - 累计 IC、纯多累计收益、纯多累计超额收益
+- 全样本及近 3 个月、6 个月、1 年、2 年窗口的因子统计
 
 ### 复合因子方法
 
@@ -301,7 +307,23 @@ strategy profile 使用 `data_download_start_date` 表示 yfinance 的精确下�
 - 交易执行：T 收盘
 - 收益区间：`(T, T_next]`
 - 交易价格：复权收盘价
-- `P10d` 等周期表示 10 个交易日，不是 10 个自然日
+- 默认情况下，`P10d` 等周期表示严格间隔 10 个交易日，不是 10 个自然日
+
+profile 可以同时设置以下三个字段，显式启用固定星期调仓：
+
+```python
+rebalance_interval_weeks = 2
+rebalance_weekday = 3              # ISO 星期：周一=1，周五=5
+rebalance_week_anchor_date = "2026-06-24"
+```
+
+三个字段必须同时设置，并满足
+`P{N}d == rebalance_interval_weeks * 5`；一个 profile 只允许一个 weekday。
+以上示例表示 P10 每两周周三调仓。如果目标周三是 NYSE 休市日，则提前到最近一个
+NYSE 交易日，因此名义 P10 区间可能只有 8 或 9 个实际交易日。固定模式的调仓期
+收益按 `52 / rebalance_interval_weeks` 年化，策略日收益指标仍按 252 年化。
+`Strategy111` 已启用该模式：每两周、周五（`rebalance_weekday=5`）调仓，
+并以 `2026-06-26` 确定隔周相位。其他 profile 继续使用严格交易日模式。
 
 未来调仓日外推通过 `pandas_market_calendars` 使用 NYSE 日历，因此 Good Friday 等非联邦但美股休市日会被正确处理。历史和未来日期选择使用一致的交易日计数语义。
 
@@ -350,7 +372,7 @@ strategy profile 使用 `data_download_start_date` 表示 yfinance 的精确下�
 
 这份六年纳指股票池是静态研究全集，不是按日期生效的 point-in-time 成分表。若直接把它用于整个历史区间，会在部分股票正式加入纳斯达克 100 之前就将其纳入截面；它适合批量拉数和候选池研究，但严格复现历史成分的回测仍需按生效日期生成成分掩码。
 
-直接运行 `data/pull_yhfinance_Data.py` 时使用 `data/data_config.py` 中的 `DATA_PULL_TICKER_UNIVERSE`，不受 `QQQ_STRATEGY_PROFILE` 影响。调仓日或其他调用方需要显式传入股票池，可调用 `pull_yhfinance_Data.main(ticker_universe=...)`，或设置 `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` 环境变量。`run_rebalance_day.py` 会自动把 active strategy profile 的 `ticker_universe` 传给 pipeline。拉取脚本启动时会打印解析后的 ticker universe、来源和 ticker 数量。
+直接运行 `data/pull_yhfinance_Data.py` 时使用 `data/data_config.py` 中的 `DATA_PULL_TICKER_UNIVERSE`，默认选择现有最大股票池 `ORIGINAL_108_PLUS_NASDAQ_100`（235 个 ticker），不受 `QQQ_STRATEGY_PROFILE` 影响。调仓日或其他调用方需要显式传入股票池，可调用 `pull_yhfinance_Data.main(ticker_universe=...)`，或设置 `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` 环境变量。`run_rebalance_day.py` 会自动把 active strategy profile 的 `ticker_universe` 传给 pipeline。拉取脚本启动时会打印解析后的 ticker universe、来源和 ticker 数量。
 
 每个 strategy profile 可以单独设置 `preserve_price_scale=True`。同一个 profile 里的 `price_scale_base_run_dir` 用来固定价格口径基准 run；设为 `None` 时，会自动选择同 profile、同 offset 的上一份正式 run。`run_rebalance_day.py` 会自动把这些配置传给拉数脚本，日常不需要记环境变量。
 

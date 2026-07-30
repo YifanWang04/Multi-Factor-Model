@@ -133,6 +133,9 @@ STRATEGY_PARAMS = {
     "rebalance_period": _parsed[3],
     "data_download_start_date": ACTIVE_PROFILE.data_download_start_date,
     "rebalance_anchor_date": None,
+    "rebalance_interval_weeks": ACTIVE_PROFILE.rebalance_interval_weeks,
+    "rebalance_weekday": ACTIVE_PROFILE.rebalance_weekday,
+    "rebalance_week_anchor_date": ACTIVE_PROFILE.rebalance_week_anchor_date,
     "max_weight": cfg.MAX_WEIGHT,
     "preserve_price_scale": ACTIVE_PROFILE.preserve_price_scale,
     "price_scale_base_run_dir": ACTIVE_PROFILE.price_scale_base_run_dir,
@@ -504,7 +507,10 @@ def main(
         rebalance_period=STRATEGY_PARAMS["rebalance_period"],
         weight_method=STRATEGY_PARAMS["weight_method"],
         config=cfg,
-        rebalance_anchor_date=None,
+        rebalance_anchor_date=cfg.REBALANCE_ANCHOR_DATE,
+        rebalance_interval_weeks=cfg.REBALANCE_INTERVAL_WEEKS,
+        rebalance_weekday=cfg.REBALANCE_WEEKDAY,
+        rebalance_week_anchor_date=cfg.REBALANCE_WEEK_ANCHOR_DATE,
     )
 
     if "error" in result:
@@ -532,7 +538,10 @@ def main(
         factor_df.index,
         ret_df.index,
         STRATEGY_PARAMS["rebalance_period"],
-        rebalance_anchor_date=None,
+        rebalance_anchor_date=cfg.REBALANCE_ANCHOR_DATE,
+        rebalance_interval_weeks=cfg.REBALANCE_INTERVAL_WEEKS,
+        rebalance_weekday=cfg.REBALANCE_WEEKDAY,
+        rebalance_week_anchor_date=cfg.REBALANCE_WEEK_ANCHOR_DATE,
     )
     last_factor_date = factor_df.index[-1]
 
@@ -542,6 +551,9 @@ def main(
         as_of_date=as_of_date,
         last_factor_date=last_factor_date,
         trading_dates=ret_df.index.tolist(),
+        rebalance_interval_weeks=cfg.REBALANCE_INTERVAL_WEEKS,
+        rebalance_weekday=cfg.REBALANCE_WEEKDAY,
+        rebalance_week_anchor_date=cfg.REBALANCE_WEEK_ANCHOR_DATE,
     )
 
     current_rb_date = status.get("current_rebalance_date")

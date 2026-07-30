@@ -5,11 +5,15 @@ import pandas as pd
 
 from analysis.strategy.rebalance_calendar import (
     RebalanceAnchorError,
+    RebalanceCalendarError,
     get_rebalance_calendar,
+    get_future_rebalance_dates,
+    periods_per_year_for_calendar,
     resolve_rebalance_anchor,
 )
-from qqq_config.strategy_profiles import StrategyProfile
+from qqq_config.strategy_profiles import StrategyProfile, get_strategy_profile
 from analysis.strategy.strategy_report import StrategyReporter
+from analysis.strategy.strategy_backtest import _fixed_week_value_for_period
 
 
 class RebalanceAnchorTests(unittest.TestCase):
@@ -110,7 +114,7 @@ class RebalanceAnchorTests(unittest.TestCase):
 
 class StrategyProfileDataStartValidationTests(unittest.TestCase):
     @staticmethod
-    def _profile(anchor):
+    def _profile(anchor, **kwargs):
         return StrategyProfile(
             name="test",
             factor_indices=(1,),
@@ -118,6 +122,7 @@ class StrategyProfileDataStartValidationTests(unittest.TestCase):
             strategy_param="equal_5G_Top1_P10d",
             ticker_universe="ORIGINAL_108",
             data_download_start_date=anchor,
+            **kwargs,
         )
 
     def test_accepts_iso_data_download_start_date(self):
@@ -149,6 +154,185 @@ class StrategyProfileDataStartValidationTests(unittest.TestCase):
         self.assertEqual(metadata["Requested_Data_Download_Start"], "2023-01-01")
         self.assertEqual(metadata["Effective_Rebalance_Start"], "2023-01-03")
         self.assertEqual(metadata["Requested_Rebalance_Anchor"], "None")
+
+
+class FixedWeekRebalanceTests(unittest.TestCase):
+    @staticmethod
+    def _nyse_dates(start, end):
+        import pandas_market_calendars as mcal
+
+        dates = mcal.get_calendar("NYSE").valid_days(start, end)
+        return pd.DatetimeIndex(dates.tz_localize(None).normalize())
+
+    def test_default_mode_keeps_strict_trading_day_periods(self):
+        dates = self._nyse_dates("2026-01-02", "2026-04-30")
+        for period in (5, 10, 20):
+            selected = get_rebalance_calendar(dates, dates, period)
+            for previous, current in zip(selected[:-1], selected[1:]):
+                actual = int(((dates > previous) & (dates <= current)).sum())
+                self.assertEqual(actual, period)
+
+    def test_p10_fixed_wednesday_keeps_two_week_phase(self):
+        dates = self._nyse_dates("2026-06-01", "2026-08-01")
+        selected = get_rebalance_calendar(
+            dates,
+            dates,
+            10,
+            interval_weeks=2,
+            weekday=3,
+            week_anchor_date="2026-06-24",
+        )
+
+        self.assertEqual(
+            selected,
+            list(
+                pd.to_datetime(
+                    ["2026-06-10", "2026-06-24", "2026-07-08", "2026-07-22"]
+                )
+            ),
+        )
+
+    def test_data_start_change_does_not_change_fixed_week_phase(self):
+        expanded = self._nyse_dates("2026-05-01", "2026-08-01")
+        narrowed = expanded[expanded >= pd.Timestamp("2026-06-15")]
+        kwargs = {
+            "interval_weeks": 2,
+            "weekday": 3,
+            "week_anchor_date": "2026-06-24",
+        }
+
+        expanded_dates = get_rebalance_calendar(expanded, expanded, 10, **kwargs)
+        narrowed_dates = get_rebalance_calendar(narrowed, narrowed, 10, **kwargs)
+
+        self.assertEqual(
+            narrowed_dates,
+            [date for date in expanded_dates if date >= narrowed.min()],
+        )
+
+    def test_good_friday_moves_to_previous_nyse_session(self):
+        dates = self._nyse_dates("2026-03-01", "2026-05-01")
+        selected = get_rebalance_calendar(
+            dates,
+            dates,
+            10,
+            interval_weeks=2,
+            weekday=5,
+            week_anchor_date="2026-03-20",
+        )
+
+        self.assertIn(pd.Timestamp("2026-04-02"), selected)
+        self.assertNotIn(pd.Timestamp("2026-04-03"), selected)
+        previous = pd.Timestamp("2026-03-20")
+        adjusted = pd.Timestamp("2026-04-02")
+        actual_sessions = int(((dates > previous) & (dates <= adjusted)).sum())
+        self.assertEqual(actual_sessions, 9)
+
+    def test_future_dates_use_same_holiday_rule(self):
+        future = get_future_rebalance_dates(
+            "2026-03-20",
+            10,
+            2,
+            interval_weeks=2,
+            weekday=5,
+            week_anchor_date="2026-03-20",
+        )
+        self.assertEqual(
+            future,
+            list(pd.to_datetime(["2026-04-02", "2026-04-17"])),
+        )
+
+    def test_fixed_week_annualization_uses_calendar_frequency(self):
+        p10 = periods_per_year_for_calendar(10, 2, 3, "2026-06-24")
+        p20 = periods_per_year_for_calendar(20, 4, 3, "2026-06-24")
+        self.assertEqual(p10, 26.0)
+        self.assertEqual(p20, 13.0)
+        self.assertEqual(periods_per_year_for_calendar(10), 25.2)
+
+    def test_missing_fixed_session_fails_instead_of_shifting(self):
+        dates = self._nyse_dates("2026-06-01", "2026-07-31")
+        factor_dates = dates[dates != pd.Timestamp("2026-07-08")]
+        with self.assertRaisesRegex(
+            RebalanceCalendarError,
+            "missing from factor calendar",
+        ):
+            get_rebalance_calendar(
+                factor_dates,
+                dates,
+                10,
+                interval_weeks=2,
+                weekday=3,
+                week_anchor_date="2026-06-24",
+            )
+
+    def test_profile_accepts_complete_fixed_week_schedule(self):
+        profile = StrategyProfileDataStartValidationTests._profile(
+            "2023-01-01",
+            rebalance_interval_weeks=2,
+            rebalance_weekday=3,
+            rebalance_week_anchor_date="2026-06-24",
+        )
+        self.assertTrue(profile.uses_fixed_week_rebalance)
+
+    def test_strategy111_rebalances_every_second_friday(self):
+        profile = get_strategy_profile("Strategy111")
+
+        self.assertEqual(profile.rebalance_interval_weeks, 2)
+        self.assertEqual(profile.rebalance_weekday, 5)
+        self.assertEqual(profile.rebalance_week_anchor_date, "2026-06-26")
+        self.assertTrue(profile.uses_fixed_week_rebalance)
+
+    def test_profile_rejects_partial_or_multiple_weekdays(self):
+        with self.assertRaisesRegex(ValueError, "must set"):
+            StrategyProfileDataStartValidationTests._profile(
+                "2023-01-01",
+                rebalance_interval_weeks=2,
+            )
+        with self.assertRaisesRegex(ValueError, "one integer"):
+            StrategyProfileDataStartValidationTests._profile(
+                "2023-01-01",
+                rebalance_interval_weeks=2,
+                rebalance_weekday=(1, 3),
+                rebalance_week_anchor_date="2026-06-24",
+            )
+
+    def test_profile_rejects_period_and_anchor_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "implies P15d"):
+            StrategyProfileDataStartValidationTests._profile(
+                "2023-01-01",
+                rebalance_interval_weeks=3,
+                rebalance_weekday=3,
+                rebalance_week_anchor_date="2026-06-24",
+            )
+        with self.assertRaisesRegex(ValueError, "not configured weekday"):
+            StrategyProfileDataStartValidationTests._profile(
+                "2023-01-01",
+                rebalance_interval_weeks=2,
+                rebalance_weekday=2,
+                rebalance_week_anchor_date="2026-06-24",
+            )
+
+    def test_strategy_grid_uses_fixed_rule_only_for_profile_period(self):
+        config = SimpleNamespace(
+            FIXED_WEEK_REBALANCE_PERIOD=10,
+            REBALANCE_INTERVAL_WEEKS=2,
+            REBALANCE_WEEKDAY=3,
+            REBALANCE_WEEK_ANCHOR_DATE="2026-06-24",
+        )
+        self.assertIsNone(
+            _fixed_week_value_for_period(
+                config,
+                5,
+                "REBALANCE_INTERVAL_WEEKS",
+            )
+        )
+        self.assertEqual(
+            _fixed_week_value_for_period(
+                config,
+                10,
+                "REBALANCE_INTERVAL_WEEKS",
+            ),
+            2,
+        )
 
 
 if __name__ == "__main__":
