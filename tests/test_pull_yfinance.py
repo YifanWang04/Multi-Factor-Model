@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from data import pull_yhfinance_Data as puller
+from data import pull_yfinance_data as puller
 from data import data_config
 
 

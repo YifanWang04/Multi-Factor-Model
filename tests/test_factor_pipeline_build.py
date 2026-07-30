@@ -28,7 +28,7 @@ class BuildFactorsOutputTests(unittest.TestCase):
         }
 
     def test_failed_factor_write_preserves_previous_workbook_and_fails_run(self):
-        from pipeline import build_factors
+        from factor_pipeline import build_factors
 
         data_dict = self._sample_data_dict()
 
@@ -60,7 +60,7 @@ class BuildFactorsOutputTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), previous_contents)
 
     def test_transient_excel_write_error_is_retried(self):
-        from pipeline import build_factors
+        from factor_pipeline import build_factors
 
         real_to_excel = pd.DataFrame.to_excel
         call_count = 0

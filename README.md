@@ -18,12 +18,12 @@ cd D:\qqq
 Typical research pipeline:
 
 ```powershell
-python data/pull_yhfinance_Data.py
-python pipeline/build_factors.py
-python pipeline/data_process.py
+python data/pull_yfinance_data.py
+python factor_pipeline/build_factors.py
+python factor_pipeline/process_factors.py
 python analysis/single_factor/run_multi_factor_test.py
 python analysis/single_factor/run_collinearity_analysis.py
-python analysis/multi_factor/run_composite_factor.py
+python analysis/composite_factor/run_composite_factor.py
 python analysis/strategy/run_strategy.py
 ```
 
@@ -31,10 +31,10 @@ Performance mode:
 
 ```powershell
 $env:QQQ_MAX_WORKERS = "8"        # set to "1" to force serial execution
-python pipeline/build_factors.py
-python pipeline/data_process.py
+python factor_pipeline/build_factors.py
+python factor_pipeline/process_factors.py
 python analysis/strategy/run_strategy.py
-python analysis/multi_factor/run_composite_factor.py
+python analysis/composite_factor/run_composite_factor.py
 python analysis/single_factor/run_multi_factor_test.py
 ```
 
@@ -42,10 +42,10 @@ The heavy research loops use `QQQ_MAX_WORKERS` for process-level parallelism and
 reuse workbook-derived DataFrames through a pickle cache under `output/cache/`.
 Set `QQQ_DISABLE_CACHE=1` to bypass the cache, or `QQQ_CACHE_DIR=<path>` to
 store it elsewhere.
-`build_factors.py` writes each factor workbook atomically and retries transient
+`factor_pipeline/build_factors.py` writes each factor workbook atomically and retries transient
 Windows Excel I/O errors up to three times. A persistent write failure stops the
 run and preserves the previous valid workbook.
-`data_process.py` applies the same atomic-write and retry policy to processed
+`factor_pipeline/process_factors.py` applies the same atomic-write and retry policy to processed
 factor workbooks. In parallel runs it loads the reference trading dates once
 before dispatch, and any persistent factor failure makes the command fail
 instead of silently continuing with a stale output workbook.
@@ -65,7 +65,7 @@ python analysis/strategy/run_rebalance_day.py --run-dir <existing_run_dir>
 ```
 
 When `run_composite_factor.py` is run directly, it generates the periods listed
-in `analysis/multi_factor/composite_config.py::COMPOSITE_REBALANCE_PERIODS`.
+in `analysis/composite_factor/composite_config.py::COMPOSITE_REBALANCE_PERIODS`.
 When it is invoked by `run_rebalance_day.py`, the rebalance-day pipeline
 overrides that list with the active strategy period parsed from `STRATEGY_PARAM`
 so the live run only builds the matching P-period composite factor.
@@ -75,7 +75,7 @@ Other useful entries:
 ```powershell
 python analysis/single_factor/run_single_factor_test.py
 python analysis/single_factor/run_batch_single_factor_tests.py
-python analysis/multi_factor/inspect_ols_weights.py
+python analysis/composite_factor/inspect_ols_weights.py
 python analysis/strategy/run_detailed_backtest_report.py
 python analysis/strategy/run_strategy_review.py
 python analysis/strategy/test_discord_notification.py
@@ -104,13 +104,12 @@ The local virtual environment is expected at `.venv/`.
 ```text
 qqq/
 ├── qqq_core/                    # Shared path, run-context, and Excel I/O helpers
-├── data/                         # Data config and yfinance puller
-├── pipeline/                     # Raw factor build and processed factor pipeline
-├── factors/                      # WorldQuant 101-style alpha library
+├── data/                         # Market-data config, snapshot logic, and yfinance puller
+├── factor_pipeline/              # WorldQuant factor library, raw build, and processing
 ├── config/                       # Human-readable selected factor reference
 ├── analysis/
 │   ├── single_factor/            # IC, Rank_IC, grouping, single/multi-factor reports
-│   ├── multi_factor/             # Composite factor methods and OLS weight inspection
+│   ├── composite_factor/         # Composite factor methods and OLS weight inspection
 │   ├── strategy/                 # Strategy backtest, reports, review, rebalance day
 │   │   └── rebalance/            # Rebalance operations, Discord, report, market value
 │   └── walk_forward/             # Leak-aware rolling train/test validation
@@ -135,14 +134,14 @@ Temporary `_debug_*.py` and `_test_*.py` files are ad hoc diagnostics for recent
 
 | Stage | Script | Main Input | Main Output |
 | --- | --- | --- | --- |
-| Data pull | `data/pull_yhfinance_Data.py` | yfinance | `data/us_top100_daily_2023_present*.xlsx` |
-| Build factors | `pipeline/build_factors.py` | OHLCV Excel | `factor_raw*/factor_alphaXXX_raw.xlsx` |
-| Process factors | `pipeline/data_process.py` | raw factors | `factor_processed*/factor_alphaXXX_processed.xlsx` |
+| Data pull | `data/pull_yfinance_data.py` | yfinance | `data/us_top100_daily_2023_present*.xlsx` |
+| Build factors | `factor_pipeline/build_factors.py` | OHLCV Excel | `factor_raw*/factor_alphaXXX.xlsx` |
+| Process factors | `factor_pipeline/process_factors.py` | raw factors | `factor_processed*/factor_alphaXXX_processed.xlsx` |
 | Single factor test | `analysis/single_factor/run_single_factor_test.py` | one processed factor | PDF report |
 | Batch single-factor tests | `analysis/single_factor/run_batch_single_factor_tests.py` | processed factor directory | multiple PDF reports |
 | Multi-factor test | `analysis/single_factor/run_multi_factor_test.py` | selected factors and returns | Excel report |
 | Collinearity analysis | `analysis/single_factor/run_collinearity_analysis.py` | selected factors | Excel matrices and series |
-| Composite factors | `analysis/multi_factor/run_composite_factor.py` | processed factors | `composite_factors_fXX-...xlsx` and report |
+| Composite factors | `analysis/composite_factor/run_composite_factor.py` | processed factors | `composite_factors_fXX-...xlsx` and report |
 | Strategy backtest | `analysis/strategy/run_strategy.py` | composite factor | `strategy_backtest_report.xlsx` |
 | Detailed strategy report | `analysis/strategy/run_detailed_backtest_report.py` | composite factor and strategy params | operation/return detail workbook |
 | Strategy review | `analysis/strategy/run_strategy_review.py` | review config | timestamped `strategy_review.xlsx` |
@@ -155,7 +154,7 @@ Offset-aware paths use suffixes such as `factor_raw_offset7d/`, `factor_processe
 
 ### Factor Library
 
-`factors/factor_library.py` implements Alpha 1-101 style factors, excluding formulas that require industry neutralization. Inputs are wide DataFrames with dates as rows and tickers as columns.
+`factor_pipeline/factor_library.py` implements Alpha 1-101 style factors, excluding formulas that require industry neutralization. Inputs are wide DataFrames with dates as rows and tickers as columns.
 
 Common input keys:
 
@@ -172,7 +171,7 @@ Core helper operations include cross-sectional rank, lag/delay, delta, rolling s
 
 ### Factor Processing
 
-`pipeline/data_process.py` processes factors cross-sectionally by date:
+`factor_pipeline/process_factors.py` processes factors cross-sectionally by date:
 
 - winsorization, currently median MAD clipping by date
 - z-score standardization by date
@@ -194,7 +193,7 @@ Multi-factor testing summarizes selected factors in Excel:
 
 ### Composite Factor Methods
 
-`analysis/multi_factor/composite_factor.py` supports:
+`analysis/composite_factor/composite_factor.py` supports:
 
 | Family | Variants | Notes |
 | --- | --- | --- |
@@ -349,7 +348,7 @@ Important config files:
 | `data/data_config.py` | data coverage start date, direct-pull ticker universe, offset-aware paths |
 | `analysis/single_factor/config.py` | single-factor test settings |
 | `analysis/single_factor/multi_factor_config.py` | multi-factor test settings |
-| `analysis/multi_factor/composite_config.py` | selected factors and composite settings |
+| `analysis/composite_factor/composite_config.py` | selected factors and composite settings |
 | `analysis/strategy/strategy_config.py` | composite sheet, factor suffix, strategy grid |
 | `analysis/strategy/strategy_review_config.py` | self-contained strategy review settings |
 | `analysis/walk_forward/walk_forward_config.py` | walk-forward windows and grid |
@@ -373,20 +372,20 @@ Rules:
 
 ### Factor Selection
 
-Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/multi_factor/composite_config.py` derive their default selected factors, composite sheet, strategy parameter, and data download start from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses. For direct composite-method research before a profile is finalized, set `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`.
+Core strategy selection is centralized in `qqq_config/strategy_profiles.py`. `analysis/strategy/strategy_config.py` and `analysis/composite_factor/composite_config.py` derive their default selected factors, composite sheet, strategy parameter, and data download start from the active profile. Use `QQQ_STRATEGY_PROFILE=<profile_name>` for a temporary profile override; `REBALANCE_SELECTED_FACTOR_INDICES` remains a runtime override used by the rebalance pipeline subprocesses. For direct composite-method research before a profile is finalized, set `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/composite_factor/composite_config.py`.
 
 Each strategy profile selects one complete ticker universe through `ticker_universe`. `ORIGINAL_108` and `ORIGINAL_143` preserve the two original pools. `NASDAQ_100_LAST_6_YEARS` is the 162-ticker union of all Nasdaq-100 securities present from 2020-07-15 through the 2026-07-15 snapshot, including constituents that exited during the window. `ORIGINAL_108_PLUS_NASDAQ_100` is the duplicate-free 235-ticker union used by `Strategy12`; `Strategy1`, `Strategy11`, and `Strategy2` use `ORIGINAL_108`, while `Strategy3` and `Strategy4` use `ORIGINAL_143`.
 
 The six-year Nasdaq universe is a static research universe, not a point-in-time membership series. Using it unchanged across historical dates includes securities before their actual Nasdaq-100 entry date. It is suitable for broad data collection and candidate research, but membership-accurate backtests need date-effective constituent masks.
 
-Direct runs of `data/pull_yhfinance_Data.py` use `DATA_PULL_TICKER_UNIVERSE` in `data/data_config.py`, which defaults to the largest available universe, `ORIGINAL_108_PLUS_NASDAQ_100` (235 tickers), independent of `QQQ_STRATEGY_PROFILE`. Rebalance-day and other callers should pass the intended universe explicitly, either through `pull_yhfinance_Data.main(ticker_universe=...)` or the `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` environment variables. `run_rebalance_day.py` passes the active strategy profile's `ticker_universe` into the pipeline automatically. The pull script prints the resolved ticker universe, source, and ticker count at startup.
+Direct runs of `data/pull_yfinance_data.py` use `DATA_PULL_TICKER_UNIVERSE` in `data/data_config.py`, which defaults to the largest available universe, `ORIGINAL_108_PLUS_NASDAQ_100` (235 tickers), independent of `QQQ_STRATEGY_PROFILE`. Rebalance-day and other callers should pass the intended universe explicitly, either through `pull_yfinance_data.main(ticker_universe=...)` or the `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` environment variables. `run_rebalance_day.py` passes the active strategy profile's `ticker_universe` into the pipeline automatically. The pull script prints the resolved ticker universe, source, and ticker count at startup.
 
 Each strategy profile can set `preserve_price_scale=True` to protect live rebalance runs from yfinance corporate-action rewrites. Use `price_scale_base_run_dir` in the same profile to pin the canonical base run; leave it as `None` to auto-select the newest previous official run for the same profile and offset. `run_rebalance_day.py` passes these values into the data puller automatically.
 
 Composite factor selection is resolved in this order:
 
 1. `REBALANCE_SELECTED_FACTOR_INDICES`, set by the rebalance pipeline for a single run
-2. `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/multi_factor/composite_config.py`, for manual direct runs of `run_composite_factor.py`
+2. `COMPOSITE_RESEARCH_FACTOR_INDICES` in `analysis/composite_factor/composite_config.py`, for manual direct runs of `run_composite_factor.py`
 3. the active profile in `qqq_config/strategy_profiles.py`
 
 `run_rebalance_day.py` derives the factor indices and composite sheet directly
@@ -405,7 +404,7 @@ Single-factor tests read `SingleFactorConfig.FACTOR_SHEET`; use this when testin
 
 Composite factor loading only falls back to the standard path when the primary file is absent. If the primary file exists but is missing the requested sheet or is unreadable, the run fails fast.
 
-`analysis/multi_factor/composite_config.py` derives the primary `REBALANCE_PERIOD` from the active strategy profile's `strategy_param` (`P{N}d`). For multi-period research, set `COMPOSITE_REBALANCE_PERIODS`, for example `[5, 10]`; `run_composite_factor.py` writes period-specific workbooks such as `composite_factors_P5_fXX-...xlsx` and `composite_factors_P10_fXX-...xlsx`. `run_strategy.py` reads the matching workbook for each strategy period, so P5 and P10 strategies do not silently share one composite-factor calendar. The legacy `composite_factors_fXX-...xlsx` file is still written for the primary active-profile period used by detailed/rebalance-day flows.
+`analysis/composite_factor/composite_config.py` derives the primary `REBALANCE_PERIOD` from the active strategy profile's `strategy_param` (`P{N}d`). For multi-period research, set `COMPOSITE_REBALANCE_PERIODS`, for example `[5, 10]`; `run_composite_factor.py` writes period-specific workbooks such as `composite_factors_P5_fXX-...xlsx` and `composite_factors_P10_fXX-...xlsx`. `run_strategy.py` reads the matching workbook for each strategy period, so P5 and P10 strategies do not silently share one composite-factor calendar. The legacy `composite_factors_fXX-...xlsx` file is still written for the primary active-profile period used by detailed/rebalance-day flows.
 
 ## Rebalance-Day Reporting
 

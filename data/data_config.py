@@ -33,9 +33,9 @@ DATA_BASE_START_DATE = "2023-01-01"
 # 被解释为“行情下载起始日”，不再用于固定策略调仓相位。
 REBALANCE_DATA_START_DATE_ENV_VAR = "REBALANCE_DATA_START_DATE"
 
-# 直接运行 data/pull_yhfinance_Data.py 时使用的默认股票池。
+# 直接运行 data/pull_yfinance_data.py 时使用的默认股票池。
 # 调仓日或其他调用方需要指定股票池时，通过 REBALANCE_TICKER_UNIVERSE /
-# YFINANCE_TICKER_UNIVERSE 环境变量，或 pull_yhfinance_Data.main(ticker_universe=...)
+# YFINANCE_TICKER_UNIVERSE 环境变量，或 pull_yfinance_data.main(ticker_universe=...)
 # 显式传入。
 DATA_PULL_TICKER_UNIVERSE = "ORIGINAL_108_PLUS_NASDAQ_100"
 REBALANCE_TICKER_UNIVERSE_ENV_VAR = "REBALANCE_TICKER_UNIVERSE"
@@ -186,12 +186,12 @@ def require_price_file_exists(price_file: str | None = None) -> str:
         raise FileNotFoundError(
             f"DATA_START_OFFSET_DAYS/REBALANCE_OFFSET_DAYS={offset}，"
             f"但 offset 价格文件不存在: {path}。"
-            "请先运行 data/pull_yhfinance_Data.py 生成对应 offset 数据，"
+            "请先运行 data/pull_yfinance_data.py 生成对应 offset 数据，"
             "避免静默回退到基线价格文件造成回测口径混淆。"
         )
     raise FileNotFoundError(
         f"DATA_START_OFFSET_DAYS/REBALANCE_OFFSET_DAYS={_RESOLVED_OFFSET}，"
-        f"但价格文件不存在: {path}。请先运行 data/pull_yhfinance_Data.py。"
+            f"但价格文件不存在: {path}。请先运行 data/pull_yfinance_data.py。"
     )
 
 # 因子目录（按 offset 分子目录，不覆盖）

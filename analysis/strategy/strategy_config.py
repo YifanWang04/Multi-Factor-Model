@@ -72,8 +72,10 @@ ACTIVE_STRATEGY_PROFILE = ACTIVE_PROFILE.name
 # STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"         # Example: "rank_ic_m3_N20"
 # STRATEGY_RESEARCH_FACTOR_INDICES = [95, 101, 62, 65, 32]          # Example: [95, 99, 27, 46, 19]
 # STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N20"       # Example: "rank_ic_m3_N20"
-STRATEGY_RESEARCH_FACTOR_INDICES = [23, 60, 20, 10, 51]  #July 29, 2026
-STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m1"             #July 29, 2026
+# STRATEGY_RESEARCH_FACTOR_INDICES = [23, 60, 20, 10, 51]  #July 29, 2026
+# STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m1"             #July 29, 2026
+STRATEGY_RESEARCH_FACTOR_INDICES = [84, 101, 35, 1, 42]  #July 30, 2026
+STRATEGY_RESEARCH_COMPOSITE_SHEET = "ic_m3_N10"             #July 30, 2026
 
 def _coerce_factor_indices(value):
     if value is None:
@@ -199,8 +201,8 @@ WEIGHT_METHODS = ["equal", "min_variance", "mvo", "max_return", "factor_score"]
 # Exit policy grid:
 # - fixed_rebalance keeps the historical behavior and does not use TP/SL grids.
 # - dynamic_tp_sl scans TP_BASE_GRID x SL_BASE_GRID using Adj Close exits.
-# EXIT_POLICY_GRID = ["fixed_rebalance"]
-EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
+EXIT_POLICY_GRID = ["fixed_rebalance"]
+# EXIT_POLICY_GRID = ["fixed_rebalance", "dynamic_tp_sl"]
 TP_BASE_GRID = [0.7, 0.8, 0.9]
 SL_BASE_GRID = [0.5, 0.65, 0.8]
 TP_SL_PROBABILITY = ACTIVE_PROFILE.tp_sl_probability

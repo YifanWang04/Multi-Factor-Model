@@ -1,5 +1,5 @@
 """
-因子构建流水线 (pipeline/build_factors.py)
+因子构建流水线 (factor_pipeline/build_factors.py)
 =====================================
 从 factor_library 读取所有因子配置，用 OHLCV 数据构建原始因子并保存到 factor_raw。
 不做回测；回测请使用 run_single_factor_test 或 run_batch_single_factor_tests。
@@ -10,9 +10,9 @@
 - 衍生数据：returns = close.pct_change()；
   vwap ≈ (high+low+close)/3（典型价格，若无 High/Low 则退化为 close）。
 - 因子构建：FACTOR_CONFIGS 中每个因子通过 data_keys 指定所需数据，输出单 sheet（"factor"）的原始因子文件。
-- 数据处理：去极值与标准化由 pipeline/data_process.py 单独执行，输出到 factor_processed。
+- 数据处理：去极值与标准化由 factor_pipeline/process_factors.py 单独执行，输出到 factor_processed。
 
-命令行：python pipeline/build_factors.py。建议在项目根目录运行。
+命令行：python factor_pipeline/build_factors.py。建议在项目根目录运行。
 """
 
 import os
@@ -144,7 +144,7 @@ def build_and_save_all_factors(data_dict):
     每个因子输出一个单 sheet（"factor"）的 Excel 文件。
     若设置了 REBALANCE_SELECTED_FACTORS（逗号分隔因子名），仅构建指定因子。
     """
-    from factors.factor_library import FACTOR_CONFIGS
+    from factor_pipeline.factor_library import FACTOR_CONFIGS
 
     os.makedirs(FACTOR_RAW_DIR, exist_ok=True)
     built = []
@@ -230,7 +230,7 @@ def _write_factor_excel(factor_df, raw_path):
 
 def _build_factor_chunk_worker(task):
     factor_specs, data_dict, factor_raw_dir = task
-    from factors.factor_library import FACTOR_CONFIGS
+    from factor_pipeline.factor_library import FACTOR_CONFIGS
 
     os.makedirs(factor_raw_dir, exist_ok=True)
     built = []
@@ -288,7 +288,7 @@ def main():
     print("=" * 60)
     factor_list = build_and_save_all_factors(data_dict)
     print_cache_summary()
-    print(f"\n共成功构建 {len(factor_list)} 个因子（数据处理请运行 pipeline/data_process.py）")
+    print(f"\n共成功构建 {len(factor_list)} 个因子（数据处理请运行 factor_pipeline/process_factors.py）")
     print("\nFactor pipeline finished.")
 
 

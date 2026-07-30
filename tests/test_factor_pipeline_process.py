@@ -29,9 +29,9 @@ class DataProcessExcelWriteTests(unittest.TestCase):
         factor.to_excel(path, sheet_name="factor")
 
     def test_transient_excel_write_error_is_retried(self):
-        from pipeline import data_process
+        from factor_pipeline import process_factors
 
-        real_atomic_excel_writer = data_process.atomic_excel_writer
+        real_atomic_excel_writer = process_factors.atomic_excel_writer
         call_count = 0
 
         @contextmanager
@@ -49,11 +49,11 @@ class DataProcessExcelWriteTests(unittest.TestCase):
             self._write_input(input_path)
 
             with patch.object(
-                data_process,
+                process_factors,
                 "atomic_excel_writer",
                 new=fail_first_open,
             ):
-                data_process.process_factor_excel(input_path, output_path)
+                process_factors.process_factor_excel(input_path, output_path)
 
             self.assertEqual(call_count, 2)
             saved = pd.read_excel(
@@ -64,7 +64,7 @@ class DataProcessExcelWriteTests(unittest.TestCase):
             self.assertEqual(saved.shape, (5, 3))
 
     def test_persistent_write_error_preserves_previous_workbook(self):
-        from pipeline import data_process
+        from factor_pipeline import process_factors
 
         call_count = 0
 
@@ -83,12 +83,12 @@ class DataProcessExcelWriteTests(unittest.TestCase):
             output_path.write_bytes(previous_contents)
 
             with patch.object(
-                data_process,
+                process_factors,
                 "atomic_excel_writer",
                 new=always_fail_open,
             ):
                 with self.assertRaises(OSError):
-                    data_process.process_factor_excel(input_path, output_path)
+                    process_factors.process_factor_excel(input_path, output_path)
 
             self.assertEqual(call_count, 3)
             self.assertEqual(output_path.read_bytes(), previous_contents)

@@ -1,5 +1,5 @@
 """
-因子数据处理流水线 (pipeline/data_process.py)
+因子数据处理流水线 (factor_pipeline/process_factors.py)
 =====================================
 本模块对 factor_raw 目录下的因子 Excel 文件做横截面「去极值 + 标准化」，并写入 factor_processed 目录。
 
@@ -9,7 +9,7 @@
 - process_factor_df(df)：对数值列先 MAD 去极值再 Z-score，保留索引与列名。
 - process_factor_excel(input_excel, output_excel, reference_excel=None)：读入多 sheet 因子表，可选用 reference_excel 的日期列修复或对齐索引，再调用 process_factor_df 写回。
 
-直接运行本文件时：遍历 factor_raw 中 factor_*.xlsx，输出到 factor_processed 下同名_processed.xlsx，参考日期使用 data_config.PRICE_FILE。若某因子 Excel 的数值全为空/NaN/0，则删除该因子输入及对应输出文件，并在结束时 output 标记。
+直接运行本文件时：遍历 factor_raw 中 factor_*.xlsx，输出到 factor_processed 下同名_processed.xlsx，参考日期使用 data_config.PRICE_FILE。若某因子 Excel 的数值全为空/NaN/0，则跳过该因子并在结束时写出 manifest。
 """
 
 import os

@@ -165,9 +165,9 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
     os.environ.update(env_updates)
 
     try:
-        from pipeline.build_factors import run as run_build_factors
-        from pipeline.data_process import run as run_data_process
-        from analysis.multi_factor.run_composite_factor import main as run_composite
+        from factor_pipeline.build_factors import run as run_build_factors
+        from factor_pipeline.process_factors import run as run_process_factors
+        from analysis.composite_factor.run_composite_factor import main as run_composite
 
         data_dir = os.path.join(run_dir, "data")
         factor_raw_dir = os.path.join(run_dir, "factor_raw")
@@ -184,8 +184,8 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
             print(f"  [Pipeline] 已复制数据至: {dst}")
         else:
             print("[Pipeline] 拉取行情数据...")
-            from data import pull_yhfinance_Data
-            pull_yhfinance_Data.main(
+            from data import pull_yfinance_data
+            pull_yfinance_data.main(
                 ticker_universe=ACTIVE_TICKER_UNIVERSE,
                 ticker_source=f"profile:{ACTIVE_STRATEGY_PROFILE}",
                 price_scale_base_run_dir=ACTIVE_PROFILE.price_scale_base_run_dir,
@@ -196,7 +196,7 @@ def _run_pipeline_inline(run_dir: str, skip_pull: bool = False) -> None:
         run_build_factors()
 
         print("[Pipeline] 因子数据处理...")
-        run_data_process()
+        run_process_factors()
 
         print("[Pipeline] 因子复合...")
         run_composite()
@@ -241,11 +241,11 @@ def _run_pipeline_subprocess(run_dir: str, skip_pull: bool = False) -> None:
 
     steps = []
     if not skip_pull:
-        steps.append(("data/pull_yhfinance_Data.py", "拉取行情数据"))
+        steps.append(("data/pull_yfinance_data.py", "拉取行情数据"))
     steps.extend([
-        ("pipeline/build_factors.py", "构建因子"),
-        ("pipeline/data_process.py", "因子数据处理"),
-        ("analysis/multi_factor/run_composite_factor.py", "因子复合"),
+        ("factor_pipeline/build_factors.py", "构建因子"),
+        ("factor_pipeline/process_factors.py", "因子数据处理"),
+        ("analysis/composite_factor/run_composite_factor.py", "因子复合"),
     ])
 
     for i, (script, desc) in enumerate(steps, 1):

@@ -140,7 +140,7 @@ def _assert_composite_calendar_supports_strategy_grid(
                 f"当前 run_strategy 需要 P{period}d，但复合因子文件 {source} "
                 "的日期频率更粗。\n"
                 "不能从更粗周期的复合因子恢复更细周期信号；请先重新生成匹配频率的复合因子：\n"
-                "  python analysis/multi_factor/run_composite_factor.py\n"
+                "  python analysis/composite_factor/run_composite_factor.py\n"
                 "然后再运行：\n"
                 "  python analysis/strategy/run_strategy.py"
             ) from exc

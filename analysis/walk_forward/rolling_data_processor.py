@@ -6,7 +6,7 @@ Rolling Data Processor for Walk-Forward Validation
 
 核心功能：
 1. 读取原始因子数据，只保留 <= end_date 的数据
-2. 应用横截面去极值和标准化（与pipeline/data_process.py相同逻辑）
+2. 应用横截面去极值和标准化（与 factor_pipeline/process_factors.py 相同逻辑）
 3. 返回处理后的DataFrame，而不是写入Excel文件
 """
 
@@ -21,7 +21,7 @@ def mad_winsorize(df, n=3):
     """
     横截面（逐日）中位数 + MAD 去极值
 
-    与pipeline/data_process.py保持一致
+    与 factor_pipeline/process_factors.py 保持一致
     """
     def winsorize_row(row):
         median = row.median()
@@ -39,7 +39,7 @@ def zscore_standardize(df):
     """
     横截面（逐日）Z-score 标准化
 
-    与pipeline/data_process.py保持一致
+    与 factor_pipeline/process_factors.py 保持一致
     """
     def zscore_row(row):
         std = row.std()
@@ -53,7 +53,7 @@ def process_factor_df(df):
     """
     去极值 → 标准化
 
-    与pipeline/data_process.py保持一致
+    与 factor_pipeline/process_factors.py 保持一致
     """
     original_index = df.index
     df_numeric = df.select_dtypes(include=[np.number])

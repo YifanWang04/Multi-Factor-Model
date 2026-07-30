@@ -44,7 +44,7 @@ from run_detailed_backtest_report import run_detailed_backtest, parse_strategy_p
 from strategy_utils import load_price_data
 from analysis.single_factor.run_multi_factor_test import load_factor
 from analysis.single_factor.rebalance_manager import RebalancePeriodManager
-from analysis.multi_factor.composite_factor import compute_selected_composites
+from analysis.composite_factor.composite_factor import compute_selected_composites
 
 import strategy_config as cfg
 from data.data_config import PRICE_FILE, DATA_START_OFFSET_DAYS

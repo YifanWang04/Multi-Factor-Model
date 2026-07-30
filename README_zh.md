@@ -18,12 +18,12 @@ cd D:\qqq
 常规研究流程：
 
 ```powershell
-python data/pull_yhfinance_Data.py
-python pipeline/build_factors.py
-python pipeline/data_process.py
+python data/pull_yfinance_data.py
+python factor_pipeline/build_factors.py
+python factor_pipeline/process_factors.py
 python analysis/single_factor/run_multi_factor_test.py
 python analysis/single_factor/run_collinearity_analysis.py
-python analysis/multi_factor/run_composite_factor.py
+python analysis/composite_factor/run_composite_factor.py
 python analysis/strategy/run_strategy.py
 ```
 
@@ -31,19 +31,19 @@ python analysis/strategy/run_strategy.py
 
 ```powershell
 $env:QQQ_MAX_WORKERS = "8"        # 设为 "1" 可强制串行
-python pipeline/build_factors.py
-python pipeline/data_process.py
+python factor_pipeline/build_factors.py
+python factor_pipeline/process_factors.py
 python analysis/strategy/run_strategy.py
-python analysis/multi_factor/run_composite_factor.py
+python analysis/composite_factor/run_composite_factor.py
 python analysis/single_factor/run_multi_factor_test.py
 ```
 
 耗时较重的研究循环会读取 `QQQ_MAX_WORKERS` 做进程级并行，并将 Excel 派生的
 DataFrame 缓存在 `output/cache/`。如需禁用缓存，设置 `QQQ_DISABLE_CACHE=1`；
 如需改缓存目录，设置 `QQQ_CACHE_DIR=<path>`。
-`build_factors.py` 会原子写入每个因子工作簿，并对 Windows 下的瞬态 Excel I/O
+`factor_pipeline/build_factors.py` 会原子写入每个因子工作簿，并对 Windows 下的瞬态 Excel I/O
 错误最多重试三次；持续写入失败会终止本次运行，同时保留上一次有效工作簿。
-`data_process.py` 对处理后因子工作簿采用相同的原子写入与重试策略；并行运行时
+`factor_pipeline/process_factors.py` 对处理后因子工作簿采用相同的原子写入与重试策略；并行运行时
 只在派发前读取一次参考交易日期。若某个因子持续失败，命令会明确失败退出，
 不会静默沿用旧的处理结果。
 `run_strategy.py` 的统计汇总 sheet 会保留全部参数组合，但日收益和累计收益
@@ -61,7 +61,7 @@ python analysis/strategy/run_rebalance_day.py --run-dir <existing_run_dir>
 ```
 
 直接运行 `run_composite_factor.py` 时，会按
-`analysis/multi_factor/composite_config.py::COMPOSITE_REBALANCE_PERIODS`
+`analysis/composite_factor/composite_config.py::COMPOSITE_REBALANCE_PERIODS`
 生成研究用的多个调仓周期。由 `run_rebalance_day.py` 调用时，调仓日流程会用
 `STRATEGY_PARAM` 解析出的 active strategy 周期覆盖该列表，因此实盘流程只生成与
 策略匹配的 P 周期复合因子。
@@ -71,7 +71,7 @@ python analysis/strategy/run_rebalance_day.py --run-dir <existing_run_dir>
 ```powershell
 python analysis/single_factor/run_single_factor_test.py
 python analysis/single_factor/run_batch_single_factor_tests.py
-python analysis/multi_factor/inspect_ols_weights.py
+python analysis/composite_factor/inspect_ols_weights.py
 python analysis/strategy/run_detailed_backtest_report.py
 python analysis/strategy/run_strategy_review.py
 python analysis/strategy/test_discord_notification.py
@@ -101,13 +101,12 @@ python backfill_close.py
 qqq/
 ├── qqq_core/                    # 共享路径、运行上下文、Excel I/O、命名与参数解析
 ├── qqq_config/                  # 策略 profile、股票池和实盘配置权威来源
-├── data/                         # 数据配置和 yfinance 拉取脚本
-├── pipeline/                     # 原始因子构建和处理流水线
-├── factors/                      # WorldQuant 101 风格 Alpha 因子库
+├── data/                         # 行情配置、快照逻辑和 yfinance 拉取脚本
+├── factor_pipeline/              # WorldQuant 因子库、原始因子构建和处理
 ├── config/                       # 已选因子的人类可读参考
 ├── analysis/
 │   ├── single_factor/            # IC、Rank_IC、分组、单/多因子报告
-│   ├── multi_factor/             # 复合因子方法和 OLS 权重检查
+│   ├── composite_factor/         # 复合因子方法和 OLS 权重检查
 │   ├── strategy/                 # 策略回测、报告、复盘、调仓日
 │   │   └── rebalance/            # 调仓操作、Discord、报告、市值计算
 │   └── walk_forward/             # 防泄露滚动训练/测试验证
@@ -132,14 +131,14 @@ qqq/
 
 | 阶段 | 脚本 | 主要输入 | 主要输出 |
 | --- | --- | --- | --- |
-| 数据拉取 | `data/pull_yhfinance_Data.py` | yfinance | `data/us_top100_daily_2023_present*.xlsx` |
-| 因子构建 | `pipeline/build_factors.py` | OHLCV Excel | `factor_raw*/factor_alphaXXX_raw.xlsx` |
-| 因子处理 | `pipeline/data_process.py` | 原始因子 | `factor_processed*/factor_alphaXXX_processed.xlsx` |
+| 数据拉取 | `data/pull_yfinance_data.py` | yfinance | `data/us_top100_daily_2023_present*.xlsx` |
+| 因子构建 | `factor_pipeline/build_factors.py` | OHLCV Excel | `factor_raw*/factor_alphaXXX.xlsx` |
+| 因子处理 | `factor_pipeline/process_factors.py` | 原始因子 | `factor_processed*/factor_alphaXXX_processed.xlsx` |
 | 单因子测试 | `analysis/single_factor/run_single_factor_test.py` | 单个处理后因子 | PDF 报告 |
 | 批量单因子测试 | `analysis/single_factor/run_batch_single_factor_tests.py` | 处理后因子目录 | 多个 PDF 报告 |
 | 多因子测试 | `analysis/single_factor/run_multi_factor_test.py` | 已选因子和收益 | Excel 报告 |
 | 共线性分析 | `analysis/single_factor/run_collinearity_analysis.py` | 已选因子 | Excel 矩阵和序列 |
-| 复合因子 | `analysis/multi_factor/run_composite_factor.py` | 处理后因子 | `composite_factors_fXX-...xlsx` 和报告 |
+| 复合因子 | `analysis/composite_factor/run_composite_factor.py` | 处理后因子 | `composite_factors_fXX-...xlsx` 和报告 |
 | 策略回测 | `analysis/strategy/run_strategy.py` | 复合因子 | `strategy_backtest_report.xlsx` |
 | 详细策略报告 | `analysis/strategy/run_detailed_backtest_report.py` | 复合因子和策略参数 | 操作/收益明细工作簿 |
 | 策略复盘 | `analysis/strategy/run_strategy_review.py` | 复盘配置 | 带时间戳的 `strategy_review.xlsx` |
@@ -152,7 +151,7 @@ qqq/
 
 ### 因子库
 
-`factors/factor_library.py` 实现 Alpha 1-101 风格因子，排除了需要行业中性化的公式。输入为宽表 DataFrame，行是日期，列是股票代码。
+`factor_pipeline/factor_library.py` 实现 Alpha 1-101 风格因子，排除了需要行业中性化的公式。输入为宽表 DataFrame，行是日期，列是股票代码。
 
 常用输入键：
 
@@ -169,7 +168,7 @@ qqq/
 
 ### 因子处理
 
-`pipeline/data_process.py` 按日期进行截面处理：
+`factor_pipeline/process_factors.py` 按日期进行截面处理：
 
 - 去极值，目前按日期做中位数 MAD 截断
 - 按日期做 z-score 标准化
@@ -191,7 +190,7 @@ qqq/
 
 ### 复合因子方法
 
-`analysis/multi_factor/composite_factor.py` 支持：
+`analysis/composite_factor/composite_factor.py` 支持：
 
 | 方法族 | 变体 | 说明 |
 | --- | --- | --- |
@@ -342,7 +341,7 @@ NYSE 交易日，因此名义 P10 区间可能只有 8 或 9 个实际交易日�
 | `data/data_config.py` | 数据覆盖起始日、直接拉取默认股票池、offset 路径 |
 | `analysis/single_factor/config.py` | 单因子测试配置 |
 | `analysis/single_factor/multi_factor_config.py` | 多因子测试配置 |
-| `analysis/multi_factor/composite_config.py` | 已选因子和复合设置 |
+| `analysis/composite_factor/composite_config.py` | 已选因子和复合设置 |
 | `analysis/strategy/strategy_config.py` | 复合 sheet、因子后缀、策略网格 |
 | `analysis/strategy/strategy_review_config.py` | 自包含策略复盘配置 |
 | `analysis/walk_forward/walk_forward_config.py` | Walk-Forward 窗口和网格 |
@@ -366,20 +365,20 @@ NYSE 交易日，因此名义 P10 区间可能只有 8 或 9 个实际交易日�
 
 ### 因子选择
 
-核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/multi_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet、策略参数和数据下载起点。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。在新 profile 尚未定稿、需要直接探索复合方法时，可在 `analysis/multi_factor/composite_config.py` 中设置 `COMPOSITE_RESEARCH_FACTOR_INDICES`。
+核心策略选择集中在 `qqq_config/strategy_profiles.py`。`analysis/strategy/strategy_config.py` 和 `analysis/composite_factor/composite_config.py` 默认从 active profile 派生选定因子、复合 sheet、策略参数和数据下载起点。临时切换 profile 可设置 `QQQ_STRATEGY_PROFILE=<profile_name>`；`REBALANCE_SELECTED_FACTOR_INDICES` 仍保留为调仓日 pipeline 子进程的运行时覆盖。在新 profile 尚未定稿、需要直接探索复合方法时，可在 `analysis/composite_factor/composite_config.py` 中设置 `COMPOSITE_RESEARCH_FACTOR_INDICES`。
 
 每个 strategy profile 通过 `ticker_universe` 选择一套完整股票池。`ORIGINAL_108` 和 `ORIGINAL_143` 分别保留原始的 108、143 只股票池；`NASDAQ_100_LAST_6_YEARS` 是 2020-07-15 至 2026-07-15 快照期间所有纳斯达克 100 成分证券的 162 个 ticker 去重合集，包含期间已退出的成分；`ORIGINAL_108_PLUS_NASDAQ_100` 是与原始 108 股票池合并后的 235 个 ticker 去重合集，由 `Strategy12` 使用。`Strategy1`、`Strategy11`、`Strategy2` 使用 `ORIGINAL_108`，`Strategy3`、`Strategy4` 使用 `ORIGINAL_143`。
 
 这份六年纳指股票池是静态研究全集，不是按日期生效的 point-in-time 成分表。若直接把它用于整个历史区间，会在部分股票正式加入纳斯达克 100 之前就将其纳入截面；它适合批量拉数和候选池研究，但严格复现历史成分的回测仍需按生效日期生成成分掩码。
 
-直接运行 `data/pull_yhfinance_Data.py` 时使用 `data/data_config.py` 中的 `DATA_PULL_TICKER_UNIVERSE`，默认选择现有最大股票池 `ORIGINAL_108_PLUS_NASDAQ_100`（235 个 ticker），不受 `QQQ_STRATEGY_PROFILE` 影响。调仓日或其他调用方需要显式传入股票池，可调用 `pull_yhfinance_Data.main(ticker_universe=...)`，或设置 `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` 环境变量。`run_rebalance_day.py` 会自动把 active strategy profile 的 `ticker_universe` 传给 pipeline。拉取脚本启动时会打印解析后的 ticker universe、来源和 ticker 数量。
+直接运行 `data/pull_yfinance_data.py` 时使用 `data/data_config.py` 中的 `DATA_PULL_TICKER_UNIVERSE`，默认选择现有最大股票池 `ORIGINAL_108_PLUS_NASDAQ_100`（235 个 ticker），不受 `QQQ_STRATEGY_PROFILE` 影响。调仓日或其他调用方需要显式传入股票池，可调用 `pull_yfinance_data.main(ticker_universe=...)`，或设置 `REBALANCE_TICKER_UNIVERSE` / `YFINANCE_TICKER_UNIVERSE` 环境变量。`run_rebalance_day.py` 会自动把 active strategy profile 的 `ticker_universe` 传给 pipeline。拉取脚本启动时会打印解析后的 ticker universe、来源和 ticker 数量。
 
 每个 strategy profile 可以单独设置 `preserve_price_scale=True`。同一个 profile 里的 `price_scale_base_run_dir` 用来固定价格口径基准 run；设为 `None` 时，会自动选择同 profile、同 offset 的上一份正式 run。`run_rebalance_day.py` 会自动把这些配置传给拉数脚本，日常不需要记环境变量。
 
 复合因子选择按以下优先级解析：
 
 1. `REBALANCE_SELECTED_FACTOR_INDICES`，由调仓日 pipeline 为单次运行设置
-2. `analysis/multi_factor/composite_config.py` 中的 `COMPOSITE_RESEARCH_FACTOR_INDICES`，用于手动直接运行 `run_composite_factor.py`
+2. `analysis/composite_factor/composite_config.py` 中的 `COMPOSITE_RESEARCH_FACTOR_INDICES`，用于手动直接运行 `run_composite_factor.py`
 3. `qqq_config/strategy_profiles.py` 中的 active profile
 
 `run_rebalance_day.py` 会直接从 active strategy profile 派生因子编号和复合因子
@@ -395,7 +394,7 @@ sheet，并通过 `REBALANCE_SELECTED_FACTOR_INDICES` / `REBALANCE_SELECTED_COMP
 
 复合因子加载只有在主文件不存在时才回退到标准路径。若主文件存在但缺少目标 sheet 或无法读取，流程会直接失败，避免静默使用旧结果。
 
-`analysis/multi_factor/composite_config.py` 的主周期 `REBALANCE_PERIOD` 会从 active strategy profile 的 `strategy_param`（`P{N}d`）派生。多周期研究请设置 `COMPOSITE_REBALANCE_PERIODS`，例如 `[5, 10]`；`run_composite_factor.py` 会写出 `composite_factors_P5_fXX-...xlsx`、`composite_factors_P10_fXX-...xlsx` 等 period-specific 工作簿。`run_strategy.py` 会按策略周期读取匹配的复合因子文件，避免 P5/P10 策略静默共用同一个复合因子日历。兼容用的 `composite_factors_fXX-...xlsx` 仍会为 active profile 主周期写出，供详细回测和调仓日流程使用。
+`analysis/composite_factor/composite_config.py` 的主周期 `REBALANCE_PERIOD` 会从 active strategy profile 的 `strategy_param`（`P{N}d`）派生。多周期研究请设置 `COMPOSITE_REBALANCE_PERIODS`，例如 `[5, 10]`；`run_composite_factor.py` 会写出 `composite_factors_P5_fXX-...xlsx`、`composite_factors_P10_fXX-...xlsx` 等 period-specific 工作簿。`run_strategy.py` 会按策略周期读取匹配的复合因子文件，避免 P5/P10 策略静默共用同一个复合因子日历。兼容用的 `composite_factors_fXX-...xlsx` 仍会为 active profile 主周期写出，供详细回测和调仓日流程使用。
 
 ## 调仓日报告
 

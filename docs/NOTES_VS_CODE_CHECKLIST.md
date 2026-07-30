@@ -21,11 +21,11 @@
 
 | Notes 要求 | 代码实现 | 状态 |
 |------------|----------|------|
-| 输入：原始量价 Excel，观察期 N（如 2–60 天） | `build_factors.py` 读 `close_df`/`volume_df`，各因子有固定 N（如 N=20/60） | ✅ 符合 |
+| 输入：原始量价 Excel，观察期 N（如 2–60 天） | `factor_pipeline/build_factors.py` 读 `close_df`/`volume_df`，各因子有固定 N（如 N=20/60） | ✅ 符合 |
 | 输出：**每个因子一个 Excel，不同 sheet 对应不同观察期 N** | 已实现：FACTOR_CONFIGS/VOLUME_REQUIRED_FACTORS 支持 `n_param`+`n_list`，每个 N 写入 sheet 名 `N5`、`N10` 等；无 n_list 的因子仍为单 sheet | ✅ 符合 |
 | 量价因子：基于价格、涨跌幅、成交量、换手率 | 因子基于 close、pct_change、volume；**未使用换手率**（因数据层未提供） | ⚠️ 部分符合 |
 
-**建议**：若需「每因子多 N 多 sheet」，需在 `build_factors.py` / `factor_library` 中对每个因子循环多个 N，并写入同一 Excel 的多个 sheet（如 sheet 名 `N5`、`N20`、`N60`）。
+**建议**：若需「每因子多 N 多 sheet」，需在 `factor_pipeline/build_factors.py` / `factor_pipeline/factor_library.py` 中对每个因子循环多个 N，并写入同一 Excel 的多个 sheet（如 sheet 名 `N5`、`N20`、`N60`）。
 
 ---
 
@@ -33,7 +33,7 @@
 
 | Notes 要求 | 代码实现 | 状态 |
 |------------|----------|------|
-| 输入：构造好的因子 Excel | `data_process.py` 读 `factor_raw/*.xlsx` | ✅ 符合 |
+| 输入：构造好的因子 Excel | `factor_pipeline/process_factors.py` 读 `factor_raw/*.xlsx` | ✅ 符合 |
 | 处理：**截面** 去极值、标准化（中性化已划掉） | 按行（每行=一日截面）处理 | ✅ 符合 |
 | 去极值：**中位数 MAD**（median ± 3×1.4826×MAD） | `mad_winsorize(df, n=3)` 实现 | ✅ 符合 |
 | 标准化：z-score | `zscore_standardize` 实现 | ✅ 符合 |

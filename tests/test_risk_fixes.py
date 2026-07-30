@@ -37,7 +37,7 @@ class RiskFixTests(unittest.TestCase):
         self.assertEqual(status["next_rebalance_date"].normalize(), pd.Timestamp("2026-01-16"))
 
     def test_m1_uses_full_sample_and_m2_uses_past_only(self):
-        from analysis.multi_factor.composite_factor import _univariate_weighted
+        from analysis.composite_factor.composite_factor import _univariate_weighted
 
         dates = pd.to_datetime(["2026-01-02", "2026-01-16", "2026-01-30"])
         stocks = ["AAA", "BBB"]
@@ -75,7 +75,7 @@ class RiskFixTests(unittest.TestCase):
             importlib.reload(dc)
 
     def test_selected_factor_files_fail_when_missing(self):
-        import analysis.multi_factor.composite_config as cc
+        import analysis.composite_factor.composite_config as cc
 
         old_dir = cc.FACTOR_PROCESSED_DIR
         old_names = cc.SELECTED_FACTOR_NAMES
@@ -114,7 +114,7 @@ class RiskFixTests(unittest.TestCase):
         pd.testing.assert_series_equal(weights, expected)
 
     def test_factor_build_defaults_to_legacy_raw_ohlc(self):
-        from pipeline.build_factors import load_ohlcv_data
+        from factor_pipeline.build_factors import load_ohlcv_data
 
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "prices.xlsx")
@@ -151,7 +151,7 @@ class RiskFixTests(unittest.TestCase):
             fake_mcal.get_calendar = lambda name: None
             sys.modules["pandas_market_calendars"] = fake_mcal
 
-        from pipeline.data_process import mad_winsorize, process_factor_df
+        from factor_pipeline.process_factors import mad_winsorize, process_factor_df
 
         dates = pd.to_datetime(["2026-01-02", "2026-01-05"])
         raw = pd.DataFrame(
@@ -196,7 +196,7 @@ class RiskFixTests(unittest.TestCase):
     def test_strategy_and_composite_configs_share_active_profile(self):
         from qqq_config.strategy_profiles import get_active_profile
         import analysis.strategy.strategy_config as sc
-        import analysis.multi_factor.composite_config as cc
+        import analysis.composite_factor.composite_config as cc
 
         profile = get_active_profile()
         self.assertEqual(sc.ACTIVE_STRATEGY_PROFILE, profile.name)
@@ -400,7 +400,7 @@ class RiskFixTests(unittest.TestCase):
             self.assertIsInstance(result["params"]["max_weight"], float)
 
     def test_composite_factor_writer_replaces_existing_workbook(self):
-        from analysis.multi_factor.run_composite_factor import write_composite_factors_excel
+        from analysis.composite_factor.run_composite_factor import write_composite_factors_excel
 
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "composite.xlsx")
@@ -752,7 +752,7 @@ class RiskFixTests(unittest.TestCase):
                 load_composite_factor_with_fallback(primary, "ic_m3_N20", fallback)
 
     def test_offset_factor_processed_dir_does_not_fallback_to_base(self):
-        import analysis.multi_factor.composite_config as cc
+        import analysis.composite_factor.composite_config as cc
 
         old_dir = cc.FACTOR_PROCESSED_DIR
         old_names = cc.SELECTED_FACTOR_NAMES

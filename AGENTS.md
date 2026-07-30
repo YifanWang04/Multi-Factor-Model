@@ -19,11 +19,10 @@ yfinance data -> factor construction -> factor processing -> single/multi-factor
 
 核心目录：
 
-- `data/`: yfinance 数据拉取与数据路径配置。
-- `pipeline/`: 原始因子构建与因子处理流水线。
-- `factors/`: WorldQuant 101 风格 alpha 因子库。
+- `data/`: yfinance 行情拉取、快照逻辑与数据路径配置。
+- `factor_pipeline/`: WorldQuant 101 风格 alpha 因子库、原始因子构建与因子处理流水线。
 - `analysis/single_factor/`: IC、Rank_IC、分组、多空、多头、空头测试。
-- `analysis/multi_factor/`: 复合因子构建、不同复合方法报告、OLS 权重检查。
+- `analysis/composite_factor/`: 复合因子构建、不同复合方法报告、OLS 权重检查。
 - `analysis/strategy/`: 策略回测、详细报告、调仓日流程、策略复盘。
 - `analysis/strategy/rebalance/`: 调仓操作、Discord 通知、报告、市值重估。
 - `analysis/walk_forward/`: 防泄露 walk-forward 样本外验证。
@@ -41,12 +40,12 @@ yfinance data -> factor construction -> factor processing -> single/multi-factor
 常规研究流程：
 
 ```powershell
-python data/pull_yhfinance_Data.py
-python pipeline/build_factors.py
-python pipeline/data_process.py
+python data/pull_yfinance_data.py
+python factor_pipeline/build_factors.py
+python factor_pipeline/process_factors.py
 python analysis/single_factor/run_multi_factor_test.py
 python analysis/single_factor/run_collinearity_analysis.py
-python analysis/multi_factor/run_composite_factor.py
+python analysis/composite_factor/run_composite_factor.py
 python analysis/strategy/run_strategy.py
 ```
 
@@ -71,7 +70,7 @@ python analysis/walk_forward/run_walk_forward.py
 - `data/data_config.py` 是价格文件、offset 路径、因子目录和输出目录的核心入口。
 - `DATA_START_OFFSET_DAYS=0` 使用默认目录；非 0 时使用 `_offset{N}d` 后缀目录和文件。
 - `run_rebalance_day.py` 会通过 `REBALANCE_OFFSET_DAYS` 向子进程传播 offset。
-- `analysis/multi_factor/composite_config.py` 中因子选择优先级为：
+- `analysis/composite_factor/composite_config.py` 中因子选择优先级为：
   1. `REBALANCE_SELECTED_FACTOR_INDICES`
   2. `MANUALLY_SELECTED_FACTOR_INDICES`
 - `analysis/strategy/strategy_config.py` 中的 `STRATEGY_SELECTED_FACTOR_INDICES` 是策略侧配置。长期换因子时，要与 `composite_config.py` 同步。
@@ -104,10 +103,10 @@ python analysis/walk_forward/run_walk_forward.py
 
 改动后根据影响范围选择验证：
 
-- 数据/因子路径：运行 `python data/pull_yhfinance_Data.py`、`python pipeline/build_factors.py`、`python pipeline/data_process.py`。
+- 数据/因子路径：运行 `python data/pull_yfinance_data.py`、`python factor_pipeline/build_factors.py`、`python factor_pipeline/process_factors.py`。
 - 单因子或多因子指标：运行 `python analysis/single_factor/run_multi_factor_test.py` 和相关单因子脚本。
 - 共线性：运行 `python analysis/single_factor/run_collinearity_analysis.py`。
-- 复合因子：运行 `python analysis/multi_factor/run_composite_factor.py`。
+- 复合因子：运行 `python analysis/composite_factor/run_composite_factor.py`。
 - 策略回测：运行 `python analysis/strategy/run_strategy.py` 或 `python analysis/strategy/run_detailed_backtest_report.py`。
 - 调仓日：优先运行 `python analysis/strategy/run_rebalance_day.py --inline --no-discord` 做本地验证。
 - 过拟合/稳健性：运行 `python analysis/walk_forward/run_walk_forward.py`。

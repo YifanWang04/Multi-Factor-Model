@@ -1,5 +1,5 @@
 """
-Yahoo Finance 行情数据下载脚本 (data/pull_yhfinance_Data.py)
+Yahoo Finance 行情数据下载脚本 (data/pull_yfinance_data.py)
 ===========================================================
 通过 yfinance 下载指定股票列表的日频行情，写入单个 Excel 文件。
 

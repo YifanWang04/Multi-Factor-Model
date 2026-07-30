@@ -1,5 +1,5 @@
 """
-因子库 (factors/factor_library.py)
+因子库 (factor_pipeline/factor_library.py)
 =====================================
 本模块实现 WorldQuant 101 Alpha 中的因子（Alpha#1–101，除需行业中性化的 #48、#56、#58–59、#63、#67、#69–70、#76、#79–80、#82、#87、#89–91、#93、#97、#100），
 以及供 pipeline 使用的配置与元数据。

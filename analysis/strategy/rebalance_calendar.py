@@ -247,7 +247,7 @@ def resolve_rebalance_anchor(
             f"Requested rebalance anchor {requested.date()} resolves to NYSE session "
             f"{effective.date()}, but it is missing from {', '.join(missing_from)}. "
             f"Factor range: {factor_range}; return range: {return_range}. "
-            "Regenerate data/factors/composite output for this explicit calendar anchor."
+            "Regenerate price, factor, and composite outputs for this explicit calendar anchor."
         )
     return effective
 
